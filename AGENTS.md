@@ -1,0 +1,66 @@
+# commerce-platform
+
+Monorepo for a multi-store e-commerce platform. One backend serves any number of
+stores (today `anime`: anime-style stationery, and `home`: blankets), a single
+themed storefront, a future mobile app, and a platform of AI agents (Instagram
+publishing, WhatsApp sales, customer follow-up, bundle suggestions).
+
+It runs for one business today and will become a SaaS later. New features are
+enabled for our own stores first (feature flags) and rolled out to others after.
+
+Read GLOSSARY.md for the domain vocabulary, ROADMAP.md for phases and the
+Definition of Done, and docs/adr/ for the decisions already taken.
+
+## Stack
+- backend/: Python 3.12, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
+- web/storefront/: one Next.js + TypeScript app; the store and its theme are resolved by domain (later)
+- mobile/: React Native + Expo (later)
+- packages/api-client/: TypeScript client generated from the OpenAPI schema (later)
+- Deploy: backend on a VPS with Dokploy, storefront on Vercel
+- Tickets: GitHub Issues
+
+## Conventions
+- All code in English: variables, functions, classes, files, database names,
+  comments, error messages and commit messages.
+- Modular monolith. Each Django app in backend/apps/ is a module.
+- Modules with business rules (inventory, orders, payments, agents) follow clean
+  architecture:
+  - domain/: pure Python, no Django, DRF or infrastructure imports
+  - application/: one use case per file, dependencies injected as ports
+  - infrastructure/: Django ORM, repositories, external gateways
+  - interfaces/: DRF views and serializers, Celery tasks
+- CRUD-only modules (accounts, stores, catalog) use plain Django.
+- Modules talk to each other only through services or ports; never write another
+  module's models directly.
+- DRF is a thin layer: serializers validate shape, use cases enforce rules.
+  No ModelViewSet or ModelSerializer.save() in modules with business rules.
+- Authorization for important actions is enforced inside use cases through the
+  Authorizer port, not only in views.
+- Never delete products or orders; use is_active or status.
+
+## Stores (one business today, SaaS later)
+- Never hardcode store names; stores are data, created with the `create_store` command.
+- Every business table belongs to a Store, directly or through its parent.
+- Every store-scoped query filters by request.store (resolved from the X-Store header).
+- Every Celery task receives the store explicitly; never fall back to a default store.
+- Integration credentials are per store, never global environment variables.
+- New features ship behind a per-store feature flag.
+- Inventory is per store and always addressed by Location (StockItem = variant + location).
+
+## Commands
+- docker compose up -d                      # PostgreSQL and Redis
+- cd backend && source .venv/bin/activate
+- python manage.py runserver
+- pytest
+- ruff check . && ruff format .
+
+## Testing
+- Write the failing test first.
+- Use cases: unit tests with fake ports, no database, in backend/tests/unit/.
+- Endpoints: API tests end to end, in backend/tests/api/.
+- Store-scoped features need a test proving one store's data never appears in another.
+
+## Safety
+- Never read, print or commit .env files, secrets, tokens or credentials.
+- Never run git push, destructive git commands or database drops without asking.
+- Migrations are reviewed by a human before merging.
