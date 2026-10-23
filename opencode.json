@@ -5,7 +5,17 @@
     "read": {
       "*": "allow",
       "*.env": "deny",
-      "*.env.*": "deny"
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "edit": {
+      "*": "allow",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow",
+      "opencode.json": "ask",
+      "AGENTS.md": "ask",
+      "CLAUDE.md": "ask"
     }
   },
   "agent": {
