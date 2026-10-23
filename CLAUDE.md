@@ -1,3 +1,3 @@
-@AGENTS.md# commerce-platform
+# commerce-platform
 
 @AGENTS.md
