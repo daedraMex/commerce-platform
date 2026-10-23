@@ -72,3 +72,13 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Never read, print or commit .env files, secrets, tokens or credentials.
 - Never run git push, destructive git commands or database drops without asking.
 - Migrations are reviewed by a human before merging.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as GitHub issues in `daedraMex/commerce-platform`. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
