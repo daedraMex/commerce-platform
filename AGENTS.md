@@ -11,6 +11,14 @@ enabled for our own stores first (feature flags) and rolled out to others after.
 Read GLOSSARY.md for the domain vocabulary, ROADMAP.md for phases and the
 Definition of Done, and docs/adr/ for the decisions already taken.
 
+## Development workflow
+- This project uses the Matt Pocock skills workflow (skills in .agents/skills):
+  /grill-with-docs -> /to-spec -> /to-tickets -> /implement -> /code-review -> /retro.
+- Do not start Gentle-AI SDD or ODD flows here, and do not create their artifacts
+  (openspec/, odd/, feature documents). Specs and tickets come from /to-spec and
+  /to-tickets, tracked in GitHub Issues.
+- Decisions go to docs/adr/ and vocabulary to GLOSSARY.md, not only to agent memory.
+
 ## Stack
 - backend/: Python 3.12, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
 - web/storefront/: one Next.js + TypeScript app; the store and its theme are resolved by domain (later)
