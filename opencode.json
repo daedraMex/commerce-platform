@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "deepseek/REPLACE_WITH_FAST_MODEL",
+  "model": "deepseek/deepseek-flash",
   "permission": {
     "read": {
       "*": "allow",
@@ -10,14 +10,14 @@
   },
   "agent": {
     "plan": {
-      "model": "deepseek/REPLACE_WITH_REASONING_MODEL",
+      "model": "deepseek/deepseek-v4-pro",
       "permission": {
         "edit": "deny",
         "shell": "ask"
       }
     },
     "build": {
-      "model": "deepseek/REPLACE_WITH_FAST_MODEL",
+      "model": "deepseek/deepseek-flash",
       "permission": {
         "shell": {
           "*": "ask",
@@ -33,7 +33,7 @@
     "reviewer": {
       "description": "Reviews diffs against AGENTS.md, GLOSSARY.md, the spec and the clean architecture rules. Reports problems; never edits files.",
       "mode": "subagent",
-      "model": "deepseek/REPLACE_WITH_REASONING_MODEL",
+      "model": "deepseek/deepseek-v4-pro",
       "permission": {
         "edit": "deny"
       }
