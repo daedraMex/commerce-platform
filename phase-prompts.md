@@ -19,28 +19,57 @@ The project instructions live in `AGENTS.md` at the repo root. Every phase promp
 
 ## Phase 0 — Planning
 
-```
-We are starting commerce-platform, a multi-store e-commerce platform. Read AGENTS.md.
+Run this phase in Claude Code (critical phase).
 
-Run /wayfinder over the whole platform. The scope, in delivery order:
+```
+We are starting commerce-platform. Read AGENTS.md, ROADMAP.md and docs/agents/.
+
+Decisions ALREADY TAKEN (do not reopen them; record each one as an ADR in docs/adr/):
+1. One business today, SaaS later. Our own stores are the first rollout ring;
+   new features ship behind per-store feature flags. The SaaS isolation model is
+   decided later, with real usage data.
+2. Stores are data (created with a create_store command), N stores supported.
+   Every business table belongs to a Store.
+3. Inventory is per store, addressed by Location (StockItem = variant + location).
+   Transfers between stores are an outbound and an inbound movement.
+4. Python 3.12 and Django 5.2 LTS, Django REST Framework as a thin layer.
+5. Modular monolith; clean architecture only in modules with business rules
+   (inventory, orders, payments, agents).
+6. Development workflow: OpenCode with DeepSeek, Matt Pocock skills in the repo,
+   AGENTS.md as the single source of instructions; Claude Code plans critical
+   phases and reviews PRs. No Gentle-AI SDD/ODD flows in this repo.
+7. GitHub Issues as the tracker.
+8. One themed Next.js storefront resolved by domain (not one app per store).
+9. Ghosty Teams is a replaceable interface for @mentions; agent handles live in
+   our AgentDefinition model.
+10. Deploy: backend on a VPS with Dokploy, storefront on Vercel.
+
+Run /wayfinder over the whole platform. The scope, in delivery order (see ROADMAP.md):
+0. Planning
 1. Skeleton: monorepo, Docker for PostgreSQL and Redis, Django with a custom User.
-2. API foundation: DRF config, store resolution from X-Store, tests and CI.
+2. API foundation: DRF config, X-Store resolution, feature flags, tests and CI.
 3. Stores and store-scoped RBAC.
 4. Catalog: categories, products, variants with SKU, media.
-5. Inventory and orders with clean architecture.
+5. Inventory (locations) and orders with clean architecture.
 6. Payments (Mercado Pago with OXXO) and deployment with Dokploy.
-7. First storefront in Next.js for the home store.
-8. Second storefront and channels: TikTok Shop sync, catalog feeds, conversion events.
-9. Social media agents: scheduled generation, validation, approval and publishing.
-10. Observability and hardening.
-11. Mobile app with QR scanning and favorites.
+7. Themed storefront, first live with the home store.
+8. Second store and channels: TikTok Shop sync, catalog feeds, conversion events.
+9. Agent platform and Instagram publishing agent.
+10. WhatsApp sales agent with human handoff.
+11. Customer follow-up agent.
+12. Bundle suggestions.
+13. Observability and hardening.
+14. Mobile app with QR scanning and favorites.
 
-I want a map of the decisions still open, ordered by which phase they block.
+I want a map of the decisions still OPEN, ordered by which phase they block.
+Focus on phases 1 to 3; later phases only need their open questions listed.
+
 Then run /grill-with-docs on the architecture so the domain vocabulary ends up in
-GLOSSARY.md and the key decisions are recorded as ADRs.
+GLOSSARY.md and the decisions above are recorded as ADRs.
+Finally, run /to-spec and /to-tickets for Phase 1 only.
 ```
 
-**Done when:** `GLOSSARY.md` and the ADRs exist, and every phase has its open questions listed.
+**Done when:** `GLOSSARY.md` and the ADRs exist, the open questions are listed per phase, and Phase 1 has tickets in GitHub Issues.
 
 ---
 
