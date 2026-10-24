@@ -20,7 +20,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Decisions go to docs/adr/ and vocabulary to GLOSSARY.md, not only to agent memory.
 
 ## Stack
-- backend/: Python 3.12, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
+- backend/: Python 3.12 managed with uv, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
 - web/storefront/: one Next.js + TypeScript app; the store and its theme are resolved by domain (later)
 - mobile/: React Native + Expo (later)
 - packages/api-client/: TypeScript client generated from the OpenAPI schema (later)
@@ -45,10 +45,13 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Authorization for important actions is enforced inside use cases through the
   Authorizer port, not only in views.
 - Never delete products or orders; use is_active or status.
+- Every API error is an RFC 9457 problem details response with a stable `code`.
 
 ## Stores (one business today, SaaS later)
 - Never hardcode store names; stores are data, created with the `create_store` command.
 - Every business table belongs to a Store, directly or through its parent.
+- Endpoints are global by default; store-scoped endpoints opt in, and only they require
+  the X-Store header (missing or unknown store returns 400).
 - Every store-scoped query filters by request.store (resolved from the X-Store header).
 - Every Celery task receives the store explicitly; never fall back to a default store.
 - Integration credentials are per store, never global environment variables.
@@ -57,10 +60,10 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 
 ## Commands
 - docker compose up -d                      # PostgreSQL and Redis
-- cd backend && source .venv/bin/activate
-- python manage.py runserver
-- pytest
-- ruff check . && ruff format .
+- cd backend && uv sync                     # Python dependencies from uv.lock
+- uv run python manage.py runserver
+- uv run pytest
+- uv run ruff check . && uv run ruff format .
 
 ## Testing
 - Write the failing test first.
