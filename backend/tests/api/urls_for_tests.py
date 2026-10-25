@@ -41,6 +41,17 @@ class DomainNotFoundView(APIView):
         raise NotFoundError("Product not found.")
 
 
+class ProductNotFound(NotFoundError):
+    code = "product_not_found"
+
+
+class ProductNotFoundView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        raise ProductNotFound("Product not found.")
+
+
 class UnmappedDomainError(DomainError):
     code = "unmapped_domain_error"
 
@@ -114,6 +125,7 @@ urlpatterns = [
                 path("get-only/", GetOnlyView.as_view()),
                 path("domain-permission/", DomainPermissionView.as_view()),
                 path("domain-not-found/", DomainNotFoundView.as_view()),
+                path("product-not-found/", ProductNotFoundView.as_view()),
                 path("domain-unmapped/", UnmappedDomainView.as_view()),
                 path("exploding/", ExplodingView.as_view()),
                 path("throttled/", ThrottledView.as_view()),

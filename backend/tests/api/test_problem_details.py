@@ -28,6 +28,16 @@ def test_protected_endpoint_without_credentials_returns_401(client):
     assert response["WWW-Authenticate"].startswith("Bearer")
 
 
+def test_invalid_bearer_token_returns_401_token_invalid(client):
+    response = client.get(
+        "/api/v1/protected/",
+        HTTP_AUTHORIZATION="Bearer garbage",
+    )
+
+    assert_problem_details(response, status=401, code="token_invalid")
+    assert response["WWW-Authenticate"].startswith("Bearer")
+
+
 def test_method_not_allowed_returns_405_with_default_code(client):
     response = client.post("/api/v1/get-only/")
 
@@ -84,6 +94,13 @@ def test_domain_not_found_error_returns_404(client):
     response = client.get("/api/v1/domain-not-found/")
 
     body = assert_problem_details(response, status=404, code="not_found")
+    assert body["detail"] == "Product not found."
+
+
+def test_domain_not_found_subclass_keeps_its_code_and_status(client):
+    response = client.get("/api/v1/product-not-found/")
+
+    body = assert_problem_details(response, status=404, code="product_not_found")
     assert body["detail"] == "Product not found."
 
 

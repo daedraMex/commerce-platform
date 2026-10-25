@@ -32,12 +32,13 @@ CODE_BY_STATUS = {
 CODE_OVERRIDES = {
     "authentication_failed": "token_invalid",
     "invalid": "validation_error",
+    "token_not_valid": "token_invalid",
 }
 
 
 def problem_details_exception_handler(exc, context):
     if isinstance(exc, DomainError):
-        domain_status = DOMAIN_ERROR_STATUS.get(type(exc))
+        domain_status = _domain_error_status(exc)
         if domain_status is not None:
             return _problem_details(domain_status, code=exc.code, detail=exc.message)
 
@@ -67,6 +68,13 @@ def problem_details_exception_handler(exc, context):
         detail=_detail_from(response.data),
         headers=headers,
     )
+
+
+def _domain_error_status(exc):
+    for error_class in type(exc).__mro__:
+        if error_class in DOMAIN_ERROR_STATUS:
+            return DOMAIN_ERROR_STATUS[error_class]
+    return None
 
 
 def _code_for(exc, status_code):
