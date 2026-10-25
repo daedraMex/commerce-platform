@@ -8,8 +8,6 @@ from pathlib import Path
 
 import environ
 
-from config.schema import PROBLEM_DETAILS_COMPONENTS
-
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 env = environ.Env(
@@ -113,5 +111,4 @@ SPECTACULAR_SETTINGS = {
     "SERVE_PERMISSIONS": ["rest_framework.permissions.AllowAny"],
     "SERVE_AUTHENTICATION": [],
     "SERVE_INCLUDE_SCHEMA": False,
-    "APPEND_COMPONENTS": PROBLEM_DETAILS_COMPONENTS,
 }

@@ -24,13 +24,17 @@ def test_docs_are_public(client):
 
 
 def test_schema_declares_problem_details_component(schema):
-    component = schema["components"]["schemas"]["ProblemDetails"]
+    schemas = schema["components"]["schemas"]
+    component = schemas["ProblemDetails"]
     properties = component["properties"]
 
     assert set(component["required"]) == {"type", "title", "status", "detail", "code"}
-    assert set(properties) >= {"type", "title", "status", "detail", "code", "errors"}
+    assert set(properties) == {"type", "title", "status", "detail", "code", "errors"}
     assert properties["errors"]["type"] == "array"
-    assert set(properties["errors"]["items"]["required"]) == {"field", "code", "detail"}
+    assert properties["errors"]["items"] == {"$ref": "#/components/schemas/FieldError"}
+
+    field_error = schemas["FieldError"]
+    assert set(field_error["required"]) == {"field", "code", "detail"}
 
 
 def test_schema_documents_liveness_success_with_example(schema):
@@ -39,3 +43,31 @@ def test_schema_documents_liveness_success_with_example(schema):
     examples = response["content"]["application/json"]["examples"].values()
 
     assert any(example["value"] == {"status": "ok"} for example in examples)
+
+
+def test_schema_documents_liveness_internal_error_with_problem_details(schema):
+    operation = schema["paths"]["/api/v1/health/live/"]["get"]
+    media = operation["responses"]["500"]["content"]["application/problem+json"]
+
+    assert media["schema"] == {"$ref": "#/components/schemas/ProblemDetails"}
+    assert any(
+        example["value"]["code"] == "internal_error" for example in media["examples"].values()
+    )
+
+
+@pytest.fixture
+def test_view_schema(client, settings):
+    settings.ROOT_URLCONF = "tests.api.urls_for_tests"
+
+    response = client.get("/api/v1/schema/", HTTP_ACCEPT="application/json")
+
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_problem_response_helper_references_reusable_component(test_view_schema):
+    operation = test_view_schema["paths"]["/api/v1/problem-response/"]["get"]
+    media = operation["responses"]["404"]["content"]["application/problem+json"]
+
+    assert media["schema"] == {"$ref": "#/components/schemas/ProblemDetails"}
+    assert any(example["value"]["code"] == "not_found" for example in media["examples"].values())

@@ -1,6 +1,8 @@
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.http import Http404
 from django.urls import include, path
+from drf_spectacular.utils import extend_schema
+from drf_spectacular.views import SpectacularAPIView
 from rest_framework import serializers
 from rest_framework.exceptions import Throttled
 from rest_framework.generics import ListAPIView
@@ -13,6 +15,7 @@ from apps.shared.domain.exceptions import (
     NotFoundError,
     PermissionDeniedError,
 )
+from config.schema import problem_response
 
 
 class ProtectedView(APIView):
@@ -116,11 +119,23 @@ class ItemsView(ListAPIView):
         return [{"id": item_id} for item_id in range(150)]
 
 
+class ProblemResponseView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(responses=problem_response(404, "not_found", "Product not found."))
+    def get(self, request, *args, **kwargs):
+        return Response({"status": "ok"})
+
+
 urlpatterns = [
     path(
         "api/<str:version>/",
         include(
             [
+                path(
+                    "schema/",
+                    SpectacularAPIView.as_view(permission_classes=[AllowAny]),
+                ),
                 path("protected/", ProtectedView.as_view()),
                 path("get-only/", GetOnlyView.as_view()),
                 path("domain-permission/", DomainPermissionView.as_view()),
@@ -133,6 +148,7 @@ urlpatterns = [
                 path("django-not-found/", DjangoNotFoundView.as_view()),
                 path("validate/", ValidationView.as_view()),
                 path("items/", ItemsView.as_view()),
+                path("problem-response/", ProblemResponseView.as_view()),
             ]
         ),
     ),

@@ -9,6 +9,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from config.schema import problem_response
+
 
 class LivenessView(APIView):
     authentication_classes = []
@@ -29,7 +31,8 @@ class LivenessView(APIView):
                         response_only=True,
                     )
                 ],
-            )
+            ),
+            **problem_response(500, "internal_error", "An unexpected error occurred."),
         }
     )
     def get(self, request, *args, **kwargs):
