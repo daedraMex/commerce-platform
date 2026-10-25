@@ -1,0 +1,3 @@
+# Tests are split into unit, integration and api
+
+Backend tests live in three folders. `tests/unit/` holds use case tests with fake ports and no database. `tests/api/` holds end-to-end tests through the HTTP endpoints. `tests/integration/` holds tests that need the database or Django machinery but do not go through an endpoint, such as models, managers, admin and management commands. The original two-folder layout had no place for those tests, so they ended up in per-module folders (`tests/accounts/`), which hides whether a test touches the database. The folder states what a test depends on, so the unit suite can stay fast and database-free.
