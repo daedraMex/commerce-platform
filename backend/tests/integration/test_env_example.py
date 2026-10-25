@@ -1,38 +1,40 @@
 from pathlib import Path
-from urllib.parse import urlparse
 
+import environ
 import pytest
 
 ENV_EXAMPLE = Path(__file__).resolve().parents[2] / ".env.example"
 
-
-def read_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip("'\"")
-    return values
+VALID_ENV = {
+    "DATABASE_URL": "postgres://shop:shop@localhost:5432/shop",
+    "REDIS_URL": "redis://localhost:6379/0",
+}
 
 
-def validate_service_urls(path: Path) -> None:
-    env = read_env_file(path)
+@pytest.fixture
+def load_env(monkeypatch):
+    def load(path: Path) -> environ.Env:
+        monkeypatch.setattr(environ.Env, "ENVIRON", {})
+        environ.Env.read_env(path, overwrite=True)
+        return environ.Env()
 
-    database = urlparse(env["DATABASE_URL"])
-    if database.scheme not in {"postgres", "postgresql"}:
-        raise ValueError(f"DATABASE_URL must use postgres/postgresql, got {database.scheme!r}")
-    if not database.hostname or not database.path.strip("/"):
+    return load
+
+
+def validate_service_urls(env: environ.Env) -> None:
+    database = environ.Env.db_url_config(env("DATABASE_URL"))
+    if database["ENGINE"] != "django.db.backends.postgresql":
+        raise ValueError(f"DATABASE_URL must use postgres/postgresql, got {database['ENGINE']!r}")
+    if not database["NAME"] or not database["HOST"]:
         raise ValueError("DATABASE_URL must include a host and a database name")
 
-    redis = urlparse(env["REDIS_URL"])
+    redis = env.url("REDIS_URL")
     if redis.scheme != "redis":
         raise ValueError(f"REDIS_URL must use redis://, got {redis.scheme!r}")
 
 
-def test_env_example_uses_postgres_and_redis_urls():
-    validate_service_urls(ENV_EXAMPLE)
+def test_env_example_uses_postgres_and_redis_urls(load_env):
+    validate_service_urls(load_env(ENV_EXAMPLE))
 
 
 @pytest.mark.parametrize(
@@ -45,11 +47,12 @@ def test_env_example_uses_postgres_and_redis_urls():
         ("REDIS_URL", "http://localhost:6379/0"),
     ],
 )
-def test_env_example_checker_rejects_invalid_urls(tmp_path, variable, value):
-    env = read_env_file(ENV_EXAMPLE)
-    env[variable] = value
+def test_env_example_checker_rejects_invalid_urls(load_env, tmp_path, variable, value):
+    env_values = {**VALID_ENV, variable: value}
     broken = tmp_path / ".env.example"
-    broken.write_text("\n".join(f"{key}={val}" for key, val in env.items()), encoding="utf-8")
+    broken.write_text(
+        "\n".join(f"{key}={val}" for key, val in env_values.items()), encoding="utf-8"
+    )
 
     with pytest.raises(ValueError, match=f"{variable} must"):
-        validate_service_urls(broken)
+        validate_service_urls(load_env(broken))
