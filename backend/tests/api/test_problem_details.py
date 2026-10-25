@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 
 
@@ -23,6 +25,52 @@ def test_protected_endpoint_without_credentials_returns_401(client):
     response = client.get("/api/v1/protected/")
 
     assert_problem_details(response, status=401, code="not_authenticated")
+    assert response["WWW-Authenticate"].startswith("Bearer")
+
+
+def test_method_not_allowed_returns_405_with_default_code(client):
+    response = client.post("/api/v1/get-only/")
+
+    assert_problem_details(response, status=405, code="method_not_allowed")
+    assert "GET" in response["Allow"]
+
+
+def test_throttled_returns_429_with_retry_after(client):
+    response = client.get("/api/v1/throttled/")
+
+    assert_problem_details(response, status=429, code="throttled")
+    assert response["Retry-After"] == "7"
+
+
+def test_malformed_json_returns_400_parse_error_without_errors_list(client):
+    response = client.post(
+        "/api/v1/validate/",
+        data="{not json",
+        content_type="application/json",
+    )
+
+    body = assert_problem_details(response, status=400, code="parse_error")
+    assert "errors" not in body
+
+
+def test_unmapped_domain_error_returns_500_and_is_logged(client, caplog):
+    caplog.set_level(logging.ERROR)
+
+    response = client.get("/api/v1/domain-unmapped/")
+
+    body = assert_problem_details(response, status=500, code="internal_error")
+    assert "Sensitive unmapped detail." not in body["detail"]
+    assert any("Unmapped domain error" in record.getMessage() for record in caplog.records)
+
+
+def test_unhandled_exception_returns_500_and_is_logged(client, caplog):
+    caplog.set_level(logging.ERROR)
+
+    response = client.get("/api/v1/exploding/")
+
+    body = assert_problem_details(response, status=500, code="internal_error")
+    assert "Sensitive unexpected detail." not in body["detail"]
+    assert any("Unhandled API exception" in record.getMessage() for record in caplog.records)
 
 
 def test_domain_permission_error_returns_403(client):

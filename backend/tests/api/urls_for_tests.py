@@ -2,15 +2,27 @@ from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.http import Http404
 from django.urls import include, path
 from rest_framework import serializers
+from rest_framework.exceptions import Throttled
 from rest_framework.generics import ListAPIView
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.shared.domain.exceptions import NotFoundError, PermissionDeniedError
+from apps.shared.domain.exceptions import (
+    DomainError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 
 
 class ProtectedView(APIView):
+    def get(self, request, *args, **kwargs):
+        return Response({"status": "ok"})
+
+
+class GetOnlyView(APIView):
+    permission_classes = [AllowAny]
+
     def get(self, request, *args, **kwargs):
         return Response({"status": "ok"})
 
@@ -27,6 +39,31 @@ class DomainNotFoundView(APIView):
 
     def get(self, request, *args, **kwargs):
         raise NotFoundError("Product not found.")
+
+
+class UnmappedDomainError(DomainError):
+    code = "unmapped_domain_error"
+
+
+class UnmappedDomainView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        raise UnmappedDomainError("Sensitive unmapped detail.")
+
+
+class ExplodingView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        raise RuntimeError("Sensitive unexpected detail.")
+
+
+class ThrottledView(APIView):
+    permission_classes = [AllowAny]
+
+    def get(self, request, *args, **kwargs):
+        raise Throttled(wait=7)
 
 
 class DjangoPermissionView(APIView):
@@ -74,8 +111,12 @@ urlpatterns = [
         include(
             [
                 path("protected/", ProtectedView.as_view()),
+                path("get-only/", GetOnlyView.as_view()),
                 path("domain-permission/", DomainPermissionView.as_view()),
                 path("domain-not-found/", DomainNotFoundView.as_view()),
+                path("domain-unmapped/", UnmappedDomainView.as_view()),
+                path("exploding/", ExplodingView.as_view()),
+                path("throttled/", ThrottledView.as_view()),
                 path("django-permission/", DjangoPermissionView.as_view()),
                 path("django-not-found/", DjangoNotFoundView.as_view()),
                 path("validate/", ValidationView.as_view()),
