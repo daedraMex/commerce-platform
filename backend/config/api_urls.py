@@ -25,5 +25,6 @@ urlpatterns = [
         name="docs",
     ),
     path("health/", include("apps.health.urls")),
+    path("auth/", include("apps.accounts.urls")),
     re_path(r"^.*$", api_not_found),
 ]
