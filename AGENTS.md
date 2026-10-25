@@ -64,11 +64,16 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - uv run python manage.py runserver
 - uv run pytest
 - uv run ruff check . && uv run ruff format .
+- cd backend && uv run pre-commit install --config ../.pre-commit-config.yaml
+  # installs the ruff hooks that run on every commit
 
 ## Testing
 - Write the failing test first.
 - Use cases: unit tests with fake ports, no database, in backend/tests/unit/.
 - Endpoints: API tests end to end, in backend/tests/api/.
+- Models, managers, admin and management commands: integration tests that use the
+  database or Django machinery but do not go through an endpoint, in
+  backend/tests/integration/.
 - Store-scoped features need a test proving one store's data never appears in another.
 
 ## Safety

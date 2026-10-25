@@ -19,9 +19,7 @@ def test_user_is_identified_by_email():
 
 
 def test_user_logs_in_with_email_and_password():
-    get_user_model().objects.create_user(
-        email="ana@example.com", password="s3cret-pass"
-    )
+    get_user_model().objects.create_user(email="ana@example.com", password="s3cret-pass")
 
     user = authenticate(email="ana@example.com", password="s3cret-pass")
 
