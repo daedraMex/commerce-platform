@@ -26,7 +26,7 @@ _Avoid_: Beta group, cohort
 ### People and access
 
 **User**:
-A person's single login account on the platform, identified by an email that is unique across all stores.
+A person's single login account on the platform, identified by an email that is unique across all stores, ignoring case.
 _Avoid_: Account, login, profile
 
 **Customer**:

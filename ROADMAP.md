@@ -56,7 +56,8 @@ Una tarea que se cumple a medias **no** es `done`: se divide y lo pendiente vuel
 
 **Base de datos**
 - [ ] La migración se revisó a mano y se puede revertir.
-- [ ] Cambios de datos (roles, tiendas, permisos) van en migraciones de datos, no a mano.
+- [ ] Cambios de datos (roles, permisos) van en migraciones de datos, no a mano. Las tiendas se crean
+      con el comando `create_store`, nunca en una migración.
 
 **API**
 - [ ] El esquema OpenAPI está actualizado y `packages/api-client` regenerado si cambió la API.
@@ -128,19 +129,22 @@ Una tarea que se cumple a medias **no** es `done`: se divide y lo pendiente vuel
 ### Fase 1 — Esqueleto
 **Objetivo:** un proyecto que arranca igual en cualquier máquina.
 **Entregables:** monorepo con `.gitignore` y README; `docker-compose.yml` con PostgreSQL y Redis;
-Django con configuración por `.env`; modelo `User` propio con login por email.
+Django con configuración por `.env` y dependencias con `uv` (`pyproject.toml` y `uv.lock`);
+modelo `User` propio con login por email.
 **Criterio de salida:** entras a `/admin/` con tu email y existe el primer commit.
 
 ### Fase 2 — Base de la API
 **Objetivo:** la base sobre la que se construye todo endpoint.
-**Entregables:** DRF con JWT, `/api/v1/`, paginación y filtros; exception handler de dominio;
-OpenAPI en `/api/v1/docs/`; endpoint de salud; middleware de `X-Store`; pytest, ruff, pre-commit;
+**Entregables:** DRF con JWT, `/api/v1/`, paginación y filtros; exception handler de dominio con
+respuestas RFC 9457; OpenAPI en `/api/v1/docs/`; endpoint de salud; middleware de `X-Store`
+(endpoints globales por defecto, los de tienda lo declaran); pytest, ruff, pre-commit;
 GitHub Actions corriendo pruebas en cada PR.
 **Criterio de salida:** la documentación abre y el CI está en verde en un PR.
 
 ### Fase 3 — Tiendas y RBAC
 **Objetivo:** que cada persona solo pueda hacer lo que su rol le permite en cada tienda.
-**Entregables:** `Store` con `anime` y `home`; `Permission`, `Role`, `StoreMembership`;
+**Entregables:** `Store` y el comando `create_store` (con él se crean `anime` y `home`);
+`StoreFeatureFlag` por tienda; `Permission`, `Role`, `StoreMembership`;
 roles iniciales (`owner`, `store_admin`, `content_editor`, `warehouse`, `support`);
 permisos que usarán las fases siguientes; puerto `Authorizer` y su implementación; `IsStoreStaff`.
 **Criterio de salida:** un usuario con rol en una tienda no puede actuar en la otra, probado con tests.
@@ -167,15 +171,15 @@ credenciales separadas; respaldos a almacenamiento externo; logs y seguimiento d
 **Trámites que arrancan aquí:** revisión de la app de Meta (Instagram) y verificación de
 WhatsApp Business Platform.
 
-### Fase 7 — Tienda web de frazadas
+### Fase 7 — Storefront, primero con la tienda de frazadas
 **Objetivo:** vender en tu propio dominio.
-**Entregables:** `packages/api-client` generado; `web-home` en Next.js con catálogo, producto,
-carrito, checkout, confirmación e historial; SEO; despliegue en Vercel con previews.
+**Entregables:** `packages/api-client` generado; un solo `storefront` en Next.js con tema por tienda, resuelta por dominio, que
+sale en vivo con `home`: catálogo, producto, carrito, checkout, confirmación e historial; SEO; despliegue en Vercel con previews.
 **Criterio de salida:** alguien compra una frazada en tu dominio.
 
 ### Fase 8 — Tienda de anime y canales
 **Objetivo:** vender en todos los canales sin descuadrar el stock.
-**Entregables:** `web-anime`; sincronización de pedidos y stock con TikTok Shop; feeds de catálogo
+**Entregables:** `anime` en el mismo storefront (su dominio y su tema, sin app nueva); sincronización de pedidos y stock con TikTok Shop; feeds de catálogo
 para Meta y TikTok; eventos de conversión desde el servidor; UTM guardados en el pedido.
 **Criterio de salida:** una venta en TikTok Shop aparece como pedido y descuenta stock.
 
