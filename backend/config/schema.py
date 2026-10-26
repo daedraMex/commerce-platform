@@ -33,6 +33,8 @@ def problem_response(status, *examples):
     rendered = []
     descriptions = []
     for example in examples:
+        if not isinstance(example, tuple) or len(example) not in (2, 3):
+            raise TypeError("Each example must be a (code, detail[, errors]) tuple.")
         code, detail, *rest = example
         value = {
             "type": "about:blank",

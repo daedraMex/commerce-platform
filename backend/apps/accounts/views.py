@@ -1,4 +1,9 @@
-from drf_spectacular.utils import OpenApiExample, OpenApiResponse, extend_schema
+from drf_spectacular.utils import (
+    OpenApiExample,
+    OpenApiResponse,
+    extend_schema,
+    extend_schema_view,
+)
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.accounts.serializers import (
@@ -25,27 +30,19 @@ ACCESS_TOKEN_EXAMPLE = OpenApiExample(
     response_only=True,
 )
 
-MISSING_PASSWORD_EXAMPLE = [
-    {
-        "field": "password",
-        "code": "required",
-        "detail": "This field is required.",
-    }
-]
 
-MISSING_REFRESH_EXAMPLE = [
-    {
-        "field": "refresh",
-        "code": "required",
-        "detail": "This field is required.",
-    }
-]
+def _missing_field_errors(field):
+    return [
+        {
+            "field": field,
+            "code": "required",
+            "detail": "This field is required.",
+        }
+    ]
 
 
-class EmailTokenObtainPairView(TokenObtainPairView):
-    serializer_class = EmailTokenObtainPairSerializer
-
-    @extend_schema(
+@extend_schema_view(
+    post=extend_schema(
         request=TokenObtainRequestSerializer,
         responses={
             200: OpenApiResponse(
@@ -55,7 +52,11 @@ class EmailTokenObtainPairView(TokenObtainPairView):
             ),
             **problem_response(
                 400,
-                ("validation_error", "Validation failed.", MISSING_PASSWORD_EXAMPLE),
+                (
+                    "validation_error",
+                    "Validation failed.",
+                    _missing_field_errors("password"),
+                ),
             ),
             **problem_response(
                 401,
@@ -63,12 +64,13 @@ class EmailTokenObtainPairView(TokenObtainPairView):
             ),
         },
     )
-    def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
+)
+class EmailTokenObtainPairView(TokenObtainPairView):
+    serializer_class = EmailTokenObtainPairSerializer
 
 
-class EmailTokenRefreshView(TokenRefreshView):
-    @extend_schema(
+@extend_schema_view(
+    post=extend_schema(
         request=TokenRefreshRequestSerializer,
         responses={
             200: OpenApiResponse(
@@ -78,13 +80,18 @@ class EmailTokenRefreshView(TokenRefreshView):
             ),
             **problem_response(
                 400,
-                ("validation_error", "Validation failed.", MISSING_REFRESH_EXAMPLE),
+                (
+                    "validation_error",
+                    "Validation failed.",
+                    _missing_field_errors("refresh"),
+                ),
             ),
             **problem_response(
                 401,
-                ("token_invalid", "Given token not valid for any token type."),
+                ("token_invalid", "Token is invalid"),
             ),
         },
     )
-    def post(self, request, *args, **kwargs):
-        return super().post(request, *args, **kwargs)
+)
+class EmailTokenRefreshView(TokenRefreshView):
+    pass

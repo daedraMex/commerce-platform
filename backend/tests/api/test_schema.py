@@ -103,6 +103,21 @@ def test_schema_documents_token_obtain_with_an_example_per_status(schema):
     )
 
 
+def test_refresh_401_example_matches_the_invalid_token_response(client, schema):
+    response = client.post(
+        "/api/v1/auth/token/refresh/",
+        {"refresh": "not-a-token"},
+        content_type="application/json",
+    )
+    detail = response.json()["detail"]
+
+    media = schema["paths"]["/api/v1/auth/token/refresh/"]["post"]["responses"]["401"]["content"][
+        "application/problem+json"
+    ]
+
+    assert any(example["value"]["detail"] == detail for example in media["examples"].values())
+
+
 def test_schema_documents_token_refresh_with_an_example_per_status(schema):
     operation = schema["paths"]["/api/v1/auth/token/refresh/"]["post"]
 

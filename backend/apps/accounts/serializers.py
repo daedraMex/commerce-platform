@@ -19,7 +19,7 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
 
 
 class TokenObtainRequestSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    email = serializers.CharField(help_text="Email address, matched ignoring case.")
     password = serializers.CharField(write_only=True)
 
 

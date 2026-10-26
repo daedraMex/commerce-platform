@@ -4,6 +4,8 @@ import pytest
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.tokens import AccessToken, RefreshToken
 
+from tests.api.helpers import assert_problem_details
+
 pytestmark = pytest.mark.django_db
 
 OBTAIN_URL = "/api/v1/auth/token/"
@@ -144,16 +146,3 @@ def test_protected_endpoint_without_credentials_returns_not_authenticated(client
     response = client.get("/api/v1/protected/")
 
     assert_problem_details(response, status=401, code="not_authenticated")
-
-
-def assert_problem_details(response, *, status, code):
-    assert response.status_code == status
-    assert response["Content-Type"] == "application/problem+json"
-
-    body = response.json()
-    assert body["type"] == "about:blank"
-    assert body["title"]
-    assert body["status"] == status
-    assert body["detail"]
-    assert body["code"] == code
-    return body
