@@ -1,0 +1,73 @@
+import pytest
+
+
+@pytest.fixture
+def schema(client):
+    response = client.get("/api/v1/schema/", HTTP_ACCEPT="application/json")
+
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_schema_is_public(client):
+    response = client.get("/api/v1/schema/", HTTP_ACCEPT="application/json")
+
+    assert response.status_code == 200
+
+
+def test_docs_are_public(client):
+    response = client.get("/api/v1/docs/")
+
+    assert response.status_code == 200
+    assert b"swagger" in response.content.lower()
+    assert b"/api/v1/schema/" in response.content
+
+
+def test_schema_declares_problem_details_component(schema):
+    schemas = schema["components"]["schemas"]
+    component = schemas["ProblemDetails"]
+    properties = component["properties"]
+
+    assert set(component["required"]) == {"type", "title", "status", "detail", "code"}
+    assert set(properties) == {"type", "title", "status", "detail", "code", "errors"}
+    assert properties["errors"]["type"] == "array"
+    assert properties["errors"]["items"] == {"$ref": "#/components/schemas/FieldError"}
+
+    field_error = schemas["FieldError"]
+    assert set(field_error["required"]) == {"field", "code", "detail"}
+
+
+def test_schema_documents_liveness_success_with_example(schema):
+    operation = schema["paths"]["/api/v1/health/live/"]["get"]
+    response = operation["responses"]["200"]
+    examples = response["content"]["application/json"]["examples"].values()
+
+    assert any(example["value"] == {"status": "ok"} for example in examples)
+
+
+def test_schema_documents_liveness_internal_error_with_problem_details(schema):
+    operation = schema["paths"]["/api/v1/health/live/"]["get"]
+    media = operation["responses"]["500"]["content"]["application/problem+json"]
+
+    assert media["schema"] == {"$ref": "#/components/schemas/ProblemDetails"}
+    assert any(
+        example["value"]["code"] == "internal_error" for example in media["examples"].values()
+    )
+
+
+@pytest.fixture
+def test_view_schema(client, settings):
+    settings.ROOT_URLCONF = "tests.api.urls_for_tests"
+
+    response = client.get("/api/v1/schema/", HTTP_ACCEPT="application/json")
+
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_problem_response_helper_references_reusable_component(test_view_schema):
+    operation = test_view_schema["paths"]["/api/v1/problem-response/"]["get"]
+    media = operation["responses"]["404"]["content"]["application/problem+json"]
+
+    assert media["schema"] == {"$ref": "#/components/schemas/ProblemDetails"}
+    assert any(example["value"]["code"] == "not_found" for example in media["examples"].values())
