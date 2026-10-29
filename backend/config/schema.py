@@ -23,26 +23,43 @@ class ProblemDetailsSerializer(serializers.Serializer):
     errors = FieldErrorSerializer(many=True, required=False)
 
 
-def problem_response(status, code, detail):
-    """Build an ``extend_schema`` responses entry for one problem details error."""
+def problem_response(status, *examples):
+    """Build an ``extend_schema`` responses entry for problem details errors.
+
+    Each example is a ``(code, detail)`` pair, or ``(code, detail, errors)`` to
+    show the validation ``errors`` list. Several examples may share one status,
+    so a 401 can document both ``not_authenticated`` and ``token_invalid``.
+    """
+    rendered = []
+    descriptions = []
+    for example in examples:
+        if not isinstance(example, tuple) or len(example) not in (2, 3):
+            raise TypeError("Each example must be a (code, detail[, errors]) tuple.")
+        code, detail, *rest = example
+        value = {
+            "type": "about:blank",
+            "title": _title_for(status),
+            "status": status,
+            "detail": detail,
+            "code": code,
+        }
+        if rest:
+            value["errors"] = rest[0]
+        rendered.append(
+            OpenApiExample(
+                code,
+                value=value,
+                response_only=True,
+                media_type=PROBLEM_MEDIA_TYPE,
+            )
+        )
+        descriptions.append(detail)
+
     return {
         (status, PROBLEM_MEDIA_TYPE): OpenApiResponse(
             response=ProblemDetailsSerializer,
-            description=detail,
-            examples=[
-                OpenApiExample(
-                    code,
-                    value={
-                        "type": "about:blank",
-                        "title": _title_for(status),
-                        "status": status,
-                        "detail": detail,
-                        "code": code,
-                    },
-                    response_only=True,
-                    media_type=PROBLEM_MEDIA_TYPE,
-                )
-            ],
+            description=" ".join(descriptions),
+            examples=rendered,
         )
     }
 

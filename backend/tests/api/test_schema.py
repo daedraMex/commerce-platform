@@ -71,3 +71,66 @@ def test_problem_response_helper_references_reusable_component(test_view_schema)
 
     assert media["schema"] == {"$ref": "#/components/schemas/ProblemDetails"}
     assert any(example["value"]["code"] == "not_found" for example in media["examples"].values())
+
+
+def test_problem_response_helper_documents_several_codes_for_one_status(test_view_schema):
+    operation = test_view_schema["paths"]["/api/v1/multi-problem-response/"]["get"]
+    media = operation["responses"]["401"]["content"]["application/problem+json"]
+
+    codes = {example["value"]["code"] for example in media["examples"].values()}
+    assert codes == {"not_authenticated", "token_invalid"}
+
+
+def test_schema_documents_token_obtain_with_an_example_per_status(schema):
+    operation = schema["paths"]["/api/v1/auth/token/"]["post"]
+
+    success = operation["responses"]["200"]["content"]["application/json"]
+    assert any(
+        "access" in example["value"] and "refresh" in example["value"]
+        for example in success["examples"].values()
+    )
+
+    validation = operation["responses"]["400"]["content"]["application/problem+json"]
+    assert any(
+        example["value"]["code"] == "validation_error" and example["value"]["errors"]
+        for example in validation["examples"].values()
+    )
+
+    unauthorized = operation["responses"]["401"]["content"]["application/problem+json"]
+    assert any(
+        example["value"]["code"] == "invalid_credentials"
+        for example in unauthorized["examples"].values()
+    )
+
+
+def test_refresh_401_example_matches_the_invalid_token_response(client, schema):
+    response = client.post(
+        "/api/v1/auth/token/refresh/",
+        {"refresh": "not-a-token"},
+        content_type="application/json",
+    )
+    detail = response.json()["detail"]
+
+    media = schema["paths"]["/api/v1/auth/token/refresh/"]["post"]["responses"]["401"]["content"][
+        "application/problem+json"
+    ]
+
+    assert any(example["value"]["detail"] == detail for example in media["examples"].values())
+
+
+def test_schema_documents_token_refresh_with_an_example_per_status(schema):
+    operation = schema["paths"]["/api/v1/auth/token/refresh/"]["post"]
+
+    success = operation["responses"]["200"]["content"]["application/json"]
+    assert any("access" in example["value"] for example in success["examples"].values())
+
+    validation = operation["responses"]["400"]["content"]["application/problem+json"]
+    assert any(
+        example["value"]["code"] == "validation_error"
+        for example in validation["examples"].values()
+    )
+
+    unauthorized = operation["responses"]["401"]["content"]["application/problem+json"]
+    assert any(
+        example["value"]["code"] == "token_invalid" for example in unauthorized["examples"].values()
+    )

@@ -122,7 +122,21 @@ class ItemsView(ListAPIView):
 class ProblemResponseView(APIView):
     permission_classes = [AllowAny]
 
-    @extend_schema(responses=problem_response(404, "not_found", "Product not found."))
+    @extend_schema(responses=problem_response(404, ("not_found", "Product not found.")))
+    def get(self, request, *args, **kwargs):
+        return Response({"status": "ok"})
+
+
+class MultiProblemResponseView(APIView):
+    permission_classes = [AllowAny]
+
+    @extend_schema(
+        responses=problem_response(
+            401,
+            ("not_authenticated", "Authentication credentials were not provided."),
+            ("token_invalid", "Given token not valid for any token type."),
+        )
+    )
     def get(self, request, *args, **kwargs):
         return Response({"status": "ok"})
 
@@ -149,6 +163,7 @@ urlpatterns = [
                 path("validate/", ValidationView.as_view()),
                 path("items/", ItemsView.as_view()),
                 path("problem-response/", ProblemResponseView.as_view()),
+                path("multi-problem-response/", MultiProblemResponseView.as_view()),
             ]
         ),
     ),

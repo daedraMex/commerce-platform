@@ -4,6 +4,7 @@ Values come from environment variables, read from backend/.env when it exists.
 See backend/.env.example for the full list.
 """
 
+from datetime import timedelta
 from pathlib import Path
 
 import environ
@@ -102,6 +103,13 @@ REST_FRAMEWORK = {
     ],
     "EXCEPTION_HANDLER": "config.exceptions.problem_details_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=7),
+    "ROTATE_REFRESH_TOKENS": False,
+    "BLACKLIST_AFTER_ROTATION": False,
 }
 
 SPECTACULAR_SETTINGS = {

@@ -32,7 +32,7 @@ class LivenessView(APIView):
                     )
                 ],
             ),
-            **problem_response(500, "internal_error", "An unexpected error occurred."),
+            **problem_response(500, ("internal_error", "An unexpected error occurred.")),
         }
     )
     def get(self, request, *args, **kwargs):
