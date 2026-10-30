@@ -55,6 +55,29 @@ def test_schema_documents_liveness_internal_error_with_problem_details(schema):
     )
 
 
+def test_schema_documents_readiness_success_with_example(schema):
+    operation = schema["paths"]["/api/v1/health/ready/"]["get"]
+    response = operation["responses"]["200"]
+    examples = response["content"]["application/json"]["examples"].values()
+
+    assert any(
+        example["value"] == {"status": "ok", "checks": {"database": "ok", "redis": "ok"}}
+        for example in examples
+    )
+
+
+def test_schema_documents_readiness_unavailable_with_problem_details(schema):
+    operation = schema["paths"]["/api/v1/health/ready/"]["get"]
+    media = operation["responses"]["503"]["content"]["application/problem+json"]
+
+    assert media["schema"] == {"$ref": "#/components/schemas/ReadinessProblemDetails"}
+    assert any(
+        example["value"]["code"] == "service_unavailable"
+        and example["value"]["checks"] == {"database": "error", "redis": "ok"}
+        for example in media["examples"].values()
+    )
+
+
 @pytest.fixture
 def test_view_schema(client, settings):
     settings.ROOT_URLCONF = "tests.api.urls_for_tests"
