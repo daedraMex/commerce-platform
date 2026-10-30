@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "drf_spectacular",
     "apps.accounts",
+    "apps.stores",
 ]
 
 MIDDLEWARE = [
@@ -86,6 +87,14 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Our own modules log at INFO so records such as create_store's survive without an acting user.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {"apps": {"handlers": ["console"], "level": "INFO"}},
+}
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
