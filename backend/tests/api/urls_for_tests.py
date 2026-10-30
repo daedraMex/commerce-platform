@@ -15,7 +15,7 @@ from apps.shared.domain.exceptions import (
     NotFoundError,
     PermissionDeniedError,
 )
-from apps.shared.interfaces.permissions import RequireStore
+from apps.shared.interfaces.views import StoreScopedMixin
 from config.schema import problem_response
 
 
@@ -95,9 +95,7 @@ class DjangoNotFoundView(APIView):
         raise Http404("Product not found.")
 
 
-class StoreScopedView(APIView):
-    permission_classes = [RequireStore]
-
+class StoreScopedView(StoreScopedMixin, APIView):
     def get(self, request, *args, **kwargs):
         return Response({"slug": request.store.slug})
 

@@ -114,8 +114,10 @@ Goal: the base every endpoint will build on.
 - OpenAPI schema and docs with drf-spectacular at /api/v1/schema/ and /api/v1/docs/.
 - Health endpoints at /api/v1/health/live/ (liveness, no dependency checks) and
   /api/v1/health/ready/ (readiness, checks PostgreSQL and Redis), both public.
-- Middleware that resolves request.store from the X-Store header. For now it only stores
-  the slug; the Store model arrives in Phase 3, so design it to be swapped later.
+- Middleware that reads the X-Store header into `request.store_slug`; it never resolves
+  `request.store`. Store-scoped views opt in through a shared mixin (not a permission
+  class) that resolves the store after authentication and permissions; the Store model
+  arrives in Phase 3, so design the resolver to be swapped later.
   Endpoints are global by default (health, auth, docs); store-scoped views opt in, and
   only they reject a missing X-Store with 400 (`store_header_missing`); a malformed slug
   is rejected with 400 (`store_header_invalid`).

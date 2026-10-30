@@ -1,19 +1,18 @@
-from rest_framework.permissions import BasePermission
-
 from apps.shared.domain.exceptions import StoreHeaderMissingError
 from apps.shared.domain.ports import StoreResolver
 from apps.shared.infrastructure.store import SlugValidatingStoreResolver
 
 
-class RequireStore(BasePermission):
-    """Opt a store-scoped view into resolving request.store from X-Store."""
+class StoreScopedMixin:
+    """Opt a view into resolving request.store after authentication and permissions."""
 
     resolver: StoreResolver = SlugValidatingStoreResolver()
 
-    def has_permission(self, request, view):
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+
         slug = getattr(request, "store_slug", None)
         if slug is None:
             raise StoreHeaderMissingError("The X-Store header is required.")
 
         request.store = self.resolver.resolve(slug)
-        return True
