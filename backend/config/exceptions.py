@@ -15,6 +15,8 @@ from apps.shared.domain.exceptions import (
 
 logger = logging.getLogger(__name__)
 
+PROBLEM_DETAILS_FIELDS = frozenset({"type", "title", "status", "detail", "code"})
+
 INTERNAL_ERROR_DETAIL = "An unexpected error occurred."
 
 DOMAIN_ERROR_STATUS = {
@@ -124,7 +126,9 @@ def _validation_errors(detail, field=None):
         }
 
 
-def problem_details_response(status_code, *, code, detail, errors=None, headers=None, extra=None):
+def problem_details_response(
+    status_code, *, code, detail, errors=None, headers=None, extensions=None
+):
     body = {
         "type": "about:blank",
         "title": _title_for(status_code),
@@ -134,8 +138,11 @@ def problem_details_response(status_code, *, code, detail, errors=None, headers=
     }
     if errors is not None:
         body["errors"] = list(errors)
-    if extra is not None:
-        body.update(extra)
+    if extensions is not None:
+        reserved = PROBLEM_DETAILS_FIELDS.intersection(extensions)
+        if reserved:
+            raise ValueError(f"Extensions cannot override {sorted(reserved)}.")
+        body.update(extensions)
     return Response(
         body,
         status=status_code,

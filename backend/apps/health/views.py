@@ -3,6 +3,7 @@ import logging
 import psycopg
 import redis
 from django.conf import settings
+from django.db import models
 from drf_spectacular.utils import (
     OpenApiExample,
     OpenApiResponse,
@@ -24,17 +25,33 @@ STATEMENT_TIMEOUT_MILLISECONDS = CHECK_TIMEOUT_SECONDS * 1000
 SERVICE_UNAVAILABLE_DETAIL = "One or more dependencies are unavailable."
 
 
+class CheckStatus(models.TextChoices):
+    OK = "ok", "ok"
+    ERROR = "error", "error"
+
+
 def check_database():
     """Open a dedicated PostgreSQL connection and run ``SELECT 1``."""
     config = settings.DATABASES["default"]
+    options = dict(config.get("OPTIONS") or {})
+    options["options"] = " ".join(
+        filter(
+            None,
+            [
+                options.get("options"),
+                f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS}",
+            ],
+        )
+    )
+    options["connect_timeout"] = CHECK_TIMEOUT_SECONDS
+
     with psycopg.connect(
         dbname=config["NAME"],
         user=config["USER"],
         password=config["PASSWORD"],
         host=config["HOST"] or None,
         port=config["PORT"] or None,
-        connect_timeout=CHECK_TIMEOUT_SECONDS,
-        options=f"-c statement_timeout={STATEMENT_TIMEOUT_MILLISECONDS}",
+        **options,
     ) as connection:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -58,13 +75,13 @@ def _run_check(name, check):
         check()
     except Exception:
         logger.exception("Readiness check %r failed", name)
-        return "error"
-    return "ok"
+        return CheckStatus.ERROR
+    return CheckStatus.OK
 
 
 class ReadinessChecksSerializer(serializers.Serializer):
-    database = serializers.ChoiceField(choices=("ok", "error"))
-    redis = serializers.ChoiceField(choices=("ok", "error"))
+    database = serializers.ChoiceField(choices=CheckStatus.choices)
+    redis = serializers.ChoiceField(choices=CheckStatus.choices)
 
 
 class ReadinessProblemDetailsSerializer(ProblemDetailsSerializer):
@@ -150,12 +167,12 @@ class ReadinessView(APIView):
             "database": _run_check("database", check_database),
             "redis": _run_check("redis", check_redis),
         }
-        if all(result == "ok" for result in checks.values()):
+        if all(result == CheckStatus.OK for result in checks.values()):
             return Response({"status": "ok", "checks": checks})
 
         return problem_details_response(
             503,
             code="service_unavailable",
             detail=SERVICE_UNAVAILABLE_DETAIL,
-            extra={"checks": checks},
+            extensions={"checks": checks},
         )

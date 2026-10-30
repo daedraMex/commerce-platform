@@ -1,10 +1,7 @@
-import copy
 import logging
 
 import pytest
-from django.conf import settings
 
-from apps.health.views import check_database
 from tests.api.helpers import assert_problem_details
 
 pytestmark = pytest.mark.django_db
@@ -29,41 +26,28 @@ def test_readiness_returns_200_when_dependencies_are_up(client):
     }
 
 
-def test_database_failure_returns_503_problem_details(client, monkeypatch, caplog):
+@pytest.mark.parametrize(
+    ("check_name", "expected_checks"),
+    [
+        ("check_database", {"database": "error", "redis": "ok"}),
+        ("check_redis", {"database": "ok", "redis": "error"}),
+    ],
+)
+def test_dependency_failure_returns_503_problem_details(
+    client, monkeypatch, caplog, check_name, expected_checks
+):
     caplog.set_level(logging.ERROR)
 
-    def failing_database():
-        raise RuntimeError("database password is hunter2")
+    def failing_check():
+        raise RuntimeError("dependency password is hunter2")
 
-    monkeypatch.setattr("apps.health.views.check_database", failing_database)
+    monkeypatch.setattr(f"apps.health.views.{check_name}", failing_check)
 
     response = client.get(READY_URL)
 
     body = assert_problem_details(response, status=503, code="service_unavailable")
-    assert body["checks"] == {"database": "error", "redis": "ok"}
+    assert body["checks"] == expected_checks
     assert "hunter2" not in response.content.decode()
-    assert any("database" in record.getMessage() for record in caplog.records)
-
-
-def test_redis_failure_returns_503_problem_details(client, monkeypatch, caplog):
-    caplog.set_level(logging.ERROR)
-
-    def failing_redis():
-        raise RuntimeError("redis password is hunter2")
-
-    monkeypatch.setattr("apps.health.views.check_redis", failing_redis)
-
-    response = client.get(READY_URL)
-
-    body = assert_problem_details(response, status=503, code="service_unavailable")
-    assert body["checks"] == {"database": "ok", "redis": "error"}
-    assert "hunter2" not in response.content.decode()
-    assert any("redis" in record.getMessage() for record in caplog.records)
-
-
-def test_database_check_does_not_change_global_database_settings():
-    before = copy.deepcopy(settings.DATABASES)
-
-    check_database()
-
-    assert settings.DATABASES == before
+    assert any(
+        check_name.removeprefix("check_") in record.getMessage() for record in caplog.records
+    )

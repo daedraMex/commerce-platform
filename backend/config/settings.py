@@ -120,6 +120,6 @@ SPECTACULAR_SETTINGS = {
     "SERVE_AUTHENTICATION": [],
     "SERVE_INCLUDE_SCHEMA": False,
     "ENUM_NAME_OVERRIDES": {
-        "ReadinessCheckStatus": [("ok", "ok"), ("error", "error")],
+        "CheckStatus": [("ok", "ok"), ("error", "error")],
     },
 }
