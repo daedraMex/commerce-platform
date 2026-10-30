@@ -62,7 +62,10 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   the X-Store header (missing or unknown store returns 400).
 - Every store-scoped query filters by request.store (resolved from the X-Store header).
 - Every Celery task receives the store explicitly; never fall back to a default store.
-- Integration credentials are per store, never global environment variables.
+- Integration credentials are per store, never global environment variables; they are
+  encrypted in the database and read only through the CredentialStore port (ADR-0020).
+- Store actions are authorized only through the Authorizer port; never use
+  user.has_perm() or Django's auth.Permission for them (those only gate the admin).
 - New features ship behind a per-store feature flag.
 - Inventory is per store and always addressed by Location (StockItem = variant + location).
 

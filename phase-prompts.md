@@ -317,7 +317,8 @@ Goal: the anime store and the external channels.
 Phase 9 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
 Goal: scheduled, validated and approved social media posts.
-- apps/social: SocialAccount (credentials_ref to a secret manager, never the token),
+- apps/social: SocialAccount (credentials read through the CredentialStore port,
+  ADR-0020; never a token on the model),
   PostingSchedule, Post (status machine: planned, generating, validating, needs_review,
   approved, rejected, publishing, published, failed), PostTarget (one per account,
   external_post_id prevents double publishing), PostMedia, PostMetrics.
@@ -331,7 +332,12 @@ Goal: scheduled, validated and approved social media posts.
     for tone. Returns a ValidationResult with each check.
   - Every LLM call recorded in AgentRun (model, prompt_version, tokens, latency, status).
 - Celery Beat creates posts from schedules; rejected posts regenerate at most twice,
-  then go to needs_review. Approval requires social.approve_post.
+  then go to needs_review. Add a social.propose_post permission for content_editor
+  (a new data migration, ADR-0021); approval requires social.approve_post, so posts
+  proposed by content_editor need approval from owner or store_admin.
+  Open question for the grilling: should a per-person four-eyes rule also apply
+  (nobody approves a post they proposed), and what happens in a store with a
+  single owner?
 - Publishers for Meta Graph API and TikTok Content Posting API behind ports.
 - evals/: dataset, graders (code and model based) and a runner; a GitHub Actions job runs
   it when prompts change and fails below the threshold.
