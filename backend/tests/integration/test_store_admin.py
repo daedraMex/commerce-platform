@@ -64,3 +64,15 @@ def test_admin_rejects_a_malformed_slug(admin_client_by_email):
 
     assert response.status_code == 200
     assert not Store.objects.exists()
+
+
+def test_admin_does_not_rename_an_existing_store(admin_client_by_email):
+    store = Store.objects.create(slug="home", name="Home")
+
+    admin_client_by_email.post(
+        f"/admin/stores/store/{store.pk}/change/",
+        {"slug": "blankets", "name": "Home", "domain": "", "is_active": "on"},
+    )
+
+    store.refresh_from_db()
+    assert store.slug == "home"
