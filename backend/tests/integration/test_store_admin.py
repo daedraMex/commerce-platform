@@ -1,6 +1,9 @@
 import pytest
 
 from apps.stores.models import Store
+from tests.integration.admin_forms import empty_inline
+
+NO_MEMBERSHIPS = empty_inline("memberships")
 
 pytestmark = pytest.mark.django_db
 
@@ -22,7 +25,7 @@ def test_admin_deactivates_a_store(admin_client_by_email):
     response = admin_client_by_email.post(
         f"/admin/stores/store/{store.pk}/change/",
         # An unchecked checkbox is left out of the form, which clears is_active.
-        {"slug": "home", "name": "Home", "domain": ""},
+        {"slug": "home", "name": "Home", "domain": "", **NO_MEMBERSHIPS},
     )
 
     assert response.status_code == 302
@@ -32,14 +35,20 @@ def test_admin_deactivates_a_store(admin_client_by_email):
 
 def test_admin_stores_a_blank_domain_as_null_and_a_domain_lowercase(admin_client_by_email):
     admin_client_by_email.post(
-        "/admin/stores/store/add/", {"slug": "anime", "name": "Anime", "domain": ""}
+        "/admin/stores/store/add/",
+        {"slug": "anime", "name": "Anime", "domain": "", **NO_MEMBERSHIPS},
     )
     admin_client_by_email.post(
-        "/admin/stores/store/add/", {"slug": "home", "name": "Home", "domain": ""}
+        "/admin/stores/store/add/", {"slug": "home", "name": "Home", "domain": "", **NO_MEMBERSHIPS}
     )
     admin_client_by_email.post(
         "/admin/stores/store/add/",
-        {"slug": "blankets", "name": "Blankets", "domain": "Blankets.Example.com"},
+        {
+            "slug": "blankets",
+            "name": "Blankets",
+            "domain": "Blankets.Example.com",
+            **NO_MEMBERSHIPS,
+        },
     )
 
     domains = dict(Store.objects.values_list("slug", "domain"))
@@ -59,7 +68,7 @@ def test_admin_never_deletes_a_store(admin_client_by_email):
 
 def test_admin_rejects_a_malformed_slug(admin_client_by_email):
     response = admin_client_by_email.post(
-        "/admin/stores/store/add/", {"slug": "Home", "name": "Home", "domain": ""}
+        "/admin/stores/store/add/", {"slug": "Home", "name": "Home", "domain": "", **NO_MEMBERSHIPS}
     )
 
     assert response.status_code == 200
@@ -71,7 +80,7 @@ def test_admin_does_not_rename_an_existing_store(admin_client_by_email):
 
     admin_client_by_email.post(
         f"/admin/stores/store/{store.pk}/change/",
-        {"slug": "blankets", "name": "Home", "domain": "", "is_active": "on"},
+        {"slug": "blankets", "name": "Home", "domain": "", "is_active": "on", **NO_MEMBERSHIPS},
     )
 
     store.refresh_from_db()
