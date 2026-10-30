@@ -20,3 +20,11 @@ class NotFoundError(DomainError):
 
 class PermissionDeniedError(DomainError):
     code = "permission_denied"
+
+
+class StoreHeaderMissingError(DomainError):
+    code = "store_header_missing"
+
+
+class StoreHeaderInvalidError(DomainError):
+    code = "store_header_invalid"

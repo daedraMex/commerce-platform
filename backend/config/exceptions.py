@@ -11,6 +11,8 @@ from apps.shared.domain.exceptions import (
     DomainError,
     NotFoundError,
     PermissionDeniedError,
+    StoreHeaderInvalidError,
+    StoreHeaderMissingError,
 )
 
 logger = logging.getLogger(__name__)
@@ -22,6 +24,8 @@ INTERNAL_ERROR_DETAIL = "An unexpected error occurred."
 DOMAIN_ERROR_STATUS = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     PermissionDeniedError: status.HTTP_403_FORBIDDEN,
+    StoreHeaderMissingError: status.HTTP_400_BAD_REQUEST,
+    StoreHeaderInvalidError: status.HTTP_400_BAD_REQUEST,
 }
 
 CODE_BY_STATUS = {
