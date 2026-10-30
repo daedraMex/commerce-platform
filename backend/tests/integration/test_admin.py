@@ -4,16 +4,6 @@ from django.contrib.auth import get_user_model
 pytestmark = pytest.mark.django_db
 
 
-@pytest.fixture
-def admin_client_by_email(client):
-    get_user_model().objects.create_superuser(email="owner@example.com", password="s3cret-pass")
-    client.post(
-        "/admin/login/",
-        {"username": "owner@example.com", "password": "s3cret-pass"},
-    )
-    return client
-
-
 def test_superuser_logs_into_the_admin_with_email(admin_client_by_email):
     response = admin_client_by_email.get("/admin/")
 
