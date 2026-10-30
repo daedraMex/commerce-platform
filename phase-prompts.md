@@ -117,7 +117,8 @@ Goal: the base every endpoint will build on.
 - Middleware that resolves request.store from the X-Store header. For now it only stores
   the slug; the Store model arrives in Phase 3, so design it to be swapped later.
   Endpoints are global by default (health, auth, docs); store-scoped views opt in, and
-  only they reject a missing X-Store with 400.
+  only they reject a missing X-Store with 400 (`store_header_missing`); a malformed slug
+  is rejected with 400 (`store_header_invalid`).
 - pytest configured with pytest-django; tests/unit and tests/api folders; one test per item.
 - Ruff for linting and formatting, with a pre-commit hook.
 - GitHub Actions workflow that runs ruff and pytest on every pull request, with a

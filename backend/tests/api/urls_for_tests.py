@@ -15,6 +15,7 @@ from apps.shared.domain.exceptions import (
     NotFoundError,
     PermissionDeniedError,
 )
+from apps.shared.interfaces.permissions import RequireStore
 from config.schema import problem_response
 
 
@@ -94,6 +95,13 @@ class DjangoNotFoundView(APIView):
         raise Http404("Product not found.")
 
 
+class StoreScopedView(APIView):
+    permission_classes = [RequireStore]
+
+    def get(self, request, *args, **kwargs):
+        return Response({"slug": request.store.slug})
+
+
 class NameSerializer(serializers.Serializer):
     name = serializers.CharField()
 
@@ -162,6 +170,7 @@ urlpatterns = [
                 path("django-not-found/", DjangoNotFoundView.as_view()),
                 path("validate/", ValidationView.as_view()),
                 path("items/", ItemsView.as_view()),
+                path("store-scoped/", StoreScopedView.as_view()),
                 path("problem-response/", ProblemResponseView.as_view()),
                 path("multi-problem-response/", MultiProblemResponseView.as_view()),
             ]
