@@ -17,6 +17,14 @@ def test_liveness_returns_200_without_credentials(client):
     assert response.json() == {"status": "ok"}
 
 
+@pytest.mark.parametrize("store_header", ["anime", "Not A Slug"])
+def test_liveness_ignores_the_store_header(client, store_header):
+    response = client.get("/api/v1/health/live/", HTTP_X_STORE=store_header)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_readiness_returns_200_when_dependencies_are_up(client):
     response = client.get(READY_URL)
 
