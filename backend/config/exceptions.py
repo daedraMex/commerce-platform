@@ -13,6 +13,7 @@ from apps.shared.domain.exceptions import (
     PermissionDeniedError,
     StoreHeaderInvalidError,
     StoreHeaderMissingError,
+    StoreNotFoundError,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,7 @@ DOMAIN_ERROR_STATUS = {
     PermissionDeniedError: status.HTTP_403_FORBIDDEN,
     StoreHeaderMissingError: status.HTTP_400_BAD_REQUEST,
     StoreHeaderInvalidError: status.HTTP_400_BAD_REQUEST,
+    StoreNotFoundError: status.HTTP_400_BAD_REQUEST,
 }
 
 CODE_BY_STATUS = {

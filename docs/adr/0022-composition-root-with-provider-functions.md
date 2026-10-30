@@ -4,7 +4,7 @@ status: accepted
 
 # Port implementations are wired in one composition root through provider functions
 
-`apps/shared` defines ports such as `StoreResolver`, `Authorizer` and `FeatureFlags`, but must not import the modules that implement them. `config/dependencies.py` is the single place that knows which implementation backs each port, and it exposes provider functions (`get_store_resolver()`, `get_authorizer()`, `get_feature_flags()`), never objects built at import time. Views, mixins and use-case wiring call a provider when they need the port, so there are no circular imports, and tests replace a provider with a fixture instead of patching module attributes.
+`apps/shared` defines ports such as `StoreResolver`, `Authorizer` and `FeatureFlags`, but must not import the modules that implement them. `config/dependencies.py` is the single place that knows which implementation backs each port, and it exposes provider functions (`get_store_resolver()`, `get_authorizer()`, `get_feature_flags()`), never objects built at import time. Views, mixins and use-case wiring call a provider when they need the port, so there are no circular imports, and tests replace a provider with a fixture instead of patching module attributes. A provider returns the factory registered with `override(provider, factory)` until `clear_overrides()`, so a pytest fixture swaps it however the caller imported the provider, and each provider imports its implementation inside the function so importing `apps/shared` never loads a module.
 
 ## Considered Options
 

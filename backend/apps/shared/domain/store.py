@@ -22,6 +22,7 @@ def is_valid_store_slug(value: str) -> bool:
 
 @dataclass(frozen=True, slots=True)
 class StoreReference:
-    """The store a request is scoped to, as far as this phase can know it."""
+    """The store a request is scoped to."""
 
+    id: int
     slug: str

@@ -28,3 +28,7 @@ class StoreHeaderMissingError(DomainError):
 
 class StoreHeaderInvalidError(DomainError):
     code = "store_header_invalid"
+
+
+class StoreNotFoundError(DomainError):
+    code = "store_not_found"

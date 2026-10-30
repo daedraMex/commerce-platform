@@ -1,12 +1,9 @@
 from apps.shared.domain.exceptions import StoreHeaderMissingError
-from apps.shared.domain.ports import StoreResolver
-from apps.shared.infrastructure.store import SlugValidatingStoreResolver
+from config.dependencies import get_store_resolver
 
 
 class StoreScopedMixin:
     """Opt a view into resolving request.store after authentication and permissions."""
-
-    resolver: StoreResolver = SlugValidatingStoreResolver()
 
     def initial(self, request, *args, **kwargs):
         super().initial(request, *args, **kwargs)
@@ -15,4 +12,4 @@ class StoreScopedMixin:
         if slug is None:
             raise StoreHeaderMissingError("The X-Store header is required.")
 
-        request.store = self.resolver.resolve(slug)
+        request.store = get_store_resolver().resolve(slug)

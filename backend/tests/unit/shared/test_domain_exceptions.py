@@ -4,6 +4,7 @@ from apps.shared.domain.exceptions import (
     DomainError,
     NotFoundError,
     PermissionDeniedError,
+    StoreNotFoundError,
 )
 
 
@@ -12,6 +13,7 @@ from apps.shared.domain.exceptions import (
     [
         (NotFoundError("Product not found"), "not_found"),
         (PermissionDeniedError("Not allowed"), "permission_denied"),
+        (StoreNotFoundError("No such store"), "store_not_found"),
     ],
 )
 def test_domain_errors_carry_a_message_and_a_stable_code(error, code):
