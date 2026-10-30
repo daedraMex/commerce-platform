@@ -15,6 +15,8 @@ from apps.shared.domain.exceptions import (
 
 logger = logging.getLogger(__name__)
 
+PROBLEM_DETAILS_FIELDS = frozenset({"type", "title", "status", "detail", "code"})
+
 INTERNAL_ERROR_DETAIL = "An unexpected error occurred."
 
 DOMAIN_ERROR_STATUS = {
@@ -40,7 +42,7 @@ def problem_details_exception_handler(exc, context):
     if isinstance(exc, DomainError):
         domain_status = _domain_error_status(exc)
         if domain_status is not None:
-            return _problem_details(domain_status, code=exc.code, detail=exc.message)
+            return problem_details_response(domain_status, code=exc.code, detail=exc.message)
 
         _log_exception("Unmapped domain error", exc)
         set_rollback()
@@ -54,7 +56,7 @@ def problem_details_exception_handler(exc, context):
 
     headers = _headers_from(response)
     if isinstance(exc, exceptions.ValidationError):
-        return _problem_details(
+        return problem_details_response(
             response.status_code,
             code=_code_for(exc, response.status_code),
             detail="Validation failed.",
@@ -62,7 +64,7 @@ def problem_details_exception_handler(exc, context):
             headers=headers,
         )
 
-    return _problem_details(
+    return problem_details_response(
         response.status_code,
         code=_code_for(exc, response.status_code),
         detail=_detail_from(response.data),
@@ -93,7 +95,7 @@ def _log_exception(message, exc):
 
 
 def _internal_error():
-    return _problem_details(
+    return problem_details_response(
         status.HTTP_500_INTERNAL_SERVER_ERROR,
         code="internal_error",
         detail=INTERNAL_ERROR_DETAIL,
@@ -124,7 +126,9 @@ def _validation_errors(detail, field=None):
         }
 
 
-def _problem_details(status_code, *, code, detail, errors=None, headers=None):
+def problem_details_response(
+    status_code, *, code, detail, errors=None, headers=None, extensions=None
+):
     body = {
         "type": "about:blank",
         "title": _title_for(status_code),
@@ -134,6 +138,11 @@ def _problem_details(status_code, *, code, detail, errors=None, headers=None):
     }
     if errors is not None:
         body["errors"] = list(errors)
+    if extensions is not None:
+        reserved = PROBLEM_DETAILS_FIELDS.intersection(extensions)
+        if reserved:
+            raise ValueError(f"Extensions cannot override {sorted(reserved)}.")
+        body.update(extensions)
     return Response(
         body,
         status=status_code,
