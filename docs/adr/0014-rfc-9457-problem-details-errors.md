@@ -4,7 +4,7 @@ All API errors, including validation errors and domain exceptions mapped by the 
 
 ## Published codes
 
-These are the problem codes published in Phase 2. Clients branch on the `code`, not on the status or the detail text; a code can only be added, never renamed.
+These are the published problem codes; Phase 2 published the first set and later phases only add to it. Clients branch on the `code`, not on the status or the detail text; a code can only be added, never renamed.
 
 | Code | Status |
 | --- | --- |
@@ -21,5 +21,6 @@ These are the problem codes published in Phase 2. Clients branch on the `code`, 
 | `throttled` | 429 |
 | `store_header_missing` | 400 |
 | `store_header_invalid` | 400 |
+| `store_not_found` | 400 |
 | `service_unavailable` | 503 |
 | `internal_error` | 500 |

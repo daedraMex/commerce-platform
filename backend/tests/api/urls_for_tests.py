@@ -97,7 +97,7 @@ class DjangoNotFoundView(APIView):
 
 class StoreScopedView(StoreScopedMixin, APIView):
     def get(self, request, *args, **kwargs):
-        return Response({"slug": request.store.slug})
+        return Response({"id": request.store.id, "slug": request.store.slug})
 
 
 class NameSerializer(serializers.Serializer):
