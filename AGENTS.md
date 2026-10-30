@@ -18,6 +18,14 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   (openspec/, odd/, feature documents). Specs and tickets come from /to-spec and
   /to-tickets, tracked in GitHub Issues.
 - Decisions go to docs/adr/ and vocabulary to GLOSSARY.md, not only to agent memory.
+- Before /implement, check the ticket's blocking edges; if any blocker is open, stop and
+  report. Never stack branches.
+- When /implement invokes TDD, the ticket's acceptance criteria are the agreed seams.
+- Pin every GitHub Actions dependency to a commit SHA after verifying the tagged
+  version exists.
+- Explore with Grep, Glob and Read (they skip `.venv`); avoid `grep -r` and `cat`.
+- There is no typechecker in this repo: skip /implement's typechecking step and run
+  `./scripts/check.sh` instead.
 
 ## Stack
 - backend/: Python 3.12 managed with uv, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
@@ -62,8 +70,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - docker compose up -d                      # PostgreSQL and Redis
 - cd backend && uv sync                     # Python dependencies from uv.lock
 - uv run python manage.py runserver
-- uv run pytest
-- uv run ruff check . && uv run ruff format .
+- cd backend && ./scripts/check.sh           # everything CI runs: ruff, migrations, schema, pytest
+- cd backend && uv run pytest tests/api/test_health.py   # one test file while iterating
 - cd backend && uv run pre-commit install --config ../.pre-commit-config.yaml
   # installs the ruff hooks that run on every commit
 
