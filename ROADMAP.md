@@ -85,7 +85,8 @@ Una tarea que se cumple a medias **no** es `done`: se divide y lo pendiente vuel
 - [ ] Los webhooks verifican la firma y responden rápido (encolan y contestan 200).
 - [ ] Es **idempotente**: recibir el mismo evento dos veces no duplica nada.
 - [ ] Tiene reintentos con espera y un estado de error visible (no falla en silencio).
-- [ ] Las credenciales viven en el gestor de secretos o en variables de entorno, nunca en la base.
+- [ ] Las credenciales son por tienda, cifradas en la base con una llave que vive fuera de ella, y se
+      leen solo por el puerto `CredentialStore` (ADR-0020).
 
 ### 3.5 Extra si la tarea crea o cambia un agente o un prompt
 - [ ] El prompt es una plantilla versionada y se subió la versión (`PROMPT_VERSION`).

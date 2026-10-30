@@ -1,3 +1,7 @@
+---
+status: accepted, amended by ADR-0019
+---
+
 # The X-Store header is read by middleware, enforced by DRF, and resolved behind a port
 
 Store-scoped endpoints identify their store with the `X-Store` header, but the Store model only arrives in Phase 3. The middleware only reads the header and attaches it to the request; it never rejects a request, because a response returned from Django middleware bypasses the DRF exception handler and would not be an RFC 9457 problem details response (ADR-0014). Store-scoped views opt in through a mixin, never through a permission class, so opting in never replaces the globally configured authentication and permission classes. The mixin resolves the store after authentication and permissions have run, then raises domain exceptions: `store_header_missing` when the header is absent and `store_header_invalid` when the slug is malformed, both 400 (ADR-0014). Turning the header into a store goes through a `StoreResolver` port: in Phase 2 it only validates the slug format, and in Phase 3 it is replaced by an implementation that looks the store up and adds `store_not_found`, without touching the views.

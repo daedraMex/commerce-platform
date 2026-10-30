@@ -19,6 +19,10 @@ _Avoid_: Toggle, setting
 Said of an endpoint, query or task that acts on exactly one store and needs to know which one; everything else is global.
 _Avoid_: Tenant-scoped, multi-tenant
 
+**Integration credential**:
+The secret a store uses to act on an external service in its own name, such as its payment or messaging account. It belongs to one store.
+_Avoid_: API key, token, secret (as the name of the thing)
+
 **Rollout ring**:
 The group of stores a feature is enabled for at a given stage; our own stores are always the first ring.
 _Avoid_: Beta group, cohort
@@ -50,7 +54,7 @@ The right to perform one kind of action, named by a code such as `orders.refund`
 _Avoid_: Privilege, capability, scope
 
 **Store membership**:
-The link that makes someone staff of one store, with exactly one role there.
+The link that makes someone staff of one store, with exactly one role there. An inactive membership grants nothing.
 _Avoid_: Assignment, employment
 
 ### Catalog
