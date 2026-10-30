@@ -41,7 +41,7 @@ jobs:
           --health-retries 10
 
     env:
-      SECRET_KEY: ci-not-a-secret
+      SECRET_KEY: ci-not-a-secret-change-me-0123456789
       DEBUG: "False"
       ALLOWED_HOSTS: localhost,127.0.0.1
       DATABASE_URL: postgres://shop:shop@localhost:5432/shop
@@ -59,17 +59,5 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Lint
-        run: uv run ruff check .
-
-      - name: Check formatting
-        run: uv run ruff format --check .
-
-      - name: Check for missing migrations
-        run: uv run python manage.py makemigrations --check --dry-run
-
-      - name: Validate OpenAPI schema
-        run: uv run python manage.py spectacular --validate --fail-on-warn
-
-      - name: Test
-        run: uv run pytest
+      - name: Check
+        run: ./scripts/check.sh
