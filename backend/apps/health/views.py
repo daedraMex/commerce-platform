@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import psycopg
 import redis
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 CHECK_TIMEOUT_SECONDS = 1
 STATEMENT_TIMEOUT_MILLISECONDS = CHECK_TIMEOUT_SECONDS * 1000
+READINESS_DEADLINE_SECONDS = 1
 SERVICE_UNAVAILABLE_DETAIL = "One or more dependencies are unavailable."
 
 
@@ -77,6 +79,28 @@ def _run_check(name, check):
         logger.exception("Readiness check %r failed", name)
         return CheckStatus.ERROR
     return CheckStatus.OK
+
+
+def _run_checks(checks):
+    executor = ThreadPoolExecutor(max_workers=len(checks), thread_name_prefix="readiness-check")
+    try:
+        futures = {name: executor.submit(_run_check, name, check) for name, check in checks.items()}
+        _, pending = wait(futures.values(), timeout=READINESS_DEADLINE_SECONDS)
+    finally:
+        executor.shutdown(wait=False)
+
+    results = {}
+    for name, future in futures.items():
+        if future in pending:
+            logger.error(
+                "Readiness check %r timed out after %s seconds",
+                name,
+                READINESS_DEADLINE_SECONDS,
+            )
+            results[name] = CheckStatus.ERROR
+        else:
+            results[name] = future.result()
+    return results
 
 
 class ReadinessChecksSerializer(serializers.Serializer):
@@ -163,10 +187,12 @@ class ReadinessView(APIView):
         }
     )
     def get(self, request, *args, **kwargs):
-        checks = {
-            "database": _run_check("database", check_database),
-            "redis": _run_check("redis", check_redis),
-        }
+        checks = _run_checks(
+            {
+                "database": check_database,
+                "redis": check_redis,
+            }
+        )
         if all(result == CheckStatus.OK for result in checks.values()):
             return Response({"status": "ok", "checks": checks})
 

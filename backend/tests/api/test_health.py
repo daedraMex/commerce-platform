@@ -1,4 +1,5 @@
 import logging
+import time
 
 import pytest
 
@@ -50,4 +51,27 @@ def test_dependency_failure_returns_503_problem_details(
     assert "hunter2" not in response.content.decode()
     assert any(
         check_name.removeprefix("check_") in record.getMessage() for record in caplog.records
+    )
+
+
+def test_slow_check_counts_as_error_within_deadline(client, monkeypatch, caplog):
+    caplog.set_level(logging.ERROR)
+
+    def slow_check():
+        time.sleep(2)
+
+    monkeypatch.setattr("apps.health.views.check_database", slow_check)
+
+    started = time.monotonic()
+    response = client.get(READY_URL)
+    elapsed = time.monotonic() - started
+
+    body = assert_problem_details(response, status=503, code="service_unavailable")
+    assert body["checks"] == {"database": "error", "redis": "ok"}
+    assert elapsed < 1.5
+    assert any(
+        "database" in record.getMessage()
+        and "timed out" in record.getMessage()
+        and record.levelno == logging.ERROR
+        for record in caplog.records
     )
