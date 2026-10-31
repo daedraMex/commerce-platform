@@ -2,8 +2,10 @@ import logging
 from io import StringIO
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 
+from apps.accounts.models import StoreMembership
 from apps.stores.models import Store
 
 pytestmark = pytest.mark.django_db
@@ -75,3 +77,38 @@ def test_the_application_logger_emits_info_records_outside_tests():
     logger = logging.getLogger("apps.stores.management.commands.create_store")
 
     assert logger.isEnabledFor(logging.INFO)
+
+
+def test_owner_option_gives_the_new_store_an_active_owner_membership():
+    user = get_user_model().objects.create_user(email="a@example.com")
+
+    output = run_create_store("home", name="Home", owner="a@example.com")
+
+    membership = StoreMembership.objects.get(store__slug="home")
+    assert membership.user == user
+    assert membership.role.name == "owner"
+    assert membership.is_active is True
+    assert "a@example.com" in output
+
+
+def test_owner_option_matches_the_email_regardless_of_case():
+    user = get_user_model().objects.create_user(email="a@example.com")
+
+    run_create_store("home", name="Home", owner="A@Example.com")
+
+    assert StoreMembership.objects.get(store__slug="home").user == user
+
+
+def test_owner_with_no_user_fails_and_creates_no_store_membership_or_user():
+    with pytest.raises(CommandError, match="nobody@example.com"):
+        run_create_store("home", name="Home", owner="nobody@example.com")
+
+    assert not Store.objects.exists()
+    assert not StoreMembership.objects.exists()
+    assert not get_user_model().objects.exists()
+
+
+def test_without_owner_the_store_has_no_membership():
+    run_create_store("home", name="Home")
+
+    assert not StoreMembership.objects.exists()

@@ -1,6 +1,8 @@
 import pytest
 from django.contrib.auth import get_user_model
 
+from apps.stores.models import Store
+
 
 @pytest.fixture
 def admin_client_by_email(client):
@@ -10,3 +12,13 @@ def admin_client_by_email(client):
         {"username": "owner@example.com", "password": "s3cret-pass"},
     )
     return client
+
+
+@pytest.fixture
+def user():
+    return get_user_model().objects.create_user(email="staff@example.com")
+
+
+@pytest.fixture
+def store():
+    return Store.objects.create(slug="home", name="Home")
