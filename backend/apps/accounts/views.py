@@ -18,7 +18,6 @@ from apps.accounts.serializers import (
     TokenRefreshRequestSerializer,
     TokenRefreshResponseSerializer,
 )
-from apps.accounts.services import get_active_membership
 from apps.shared.interfaces.views import StoreScopedMixin
 from config.schema import problem_response
 
@@ -158,7 +157,7 @@ class StaffMeView(StoreScopedMixin, APIView):
     store_permission_classes = [IsStoreStaff]
 
     def get(self, request, *args, **kwargs):
-        membership = get_active_membership(user=request.user, store_id=request.store.id)
+        membership = request.store_membership
         data = {
             "store": {"slug": membership.store.slug, "name": membership.store.name},
             "role": membership.role.name,
