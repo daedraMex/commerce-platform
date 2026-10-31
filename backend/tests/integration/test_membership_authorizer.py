@@ -52,3 +52,19 @@ def test_denies_a_superuser_without_a_membership(store):
 
     with pytest.raises(PermissionDeniedError):
         get_authorizer().require(superuser.id, reference(store), REFUND_ORDER)
+
+
+def test_denies_an_inactive_user_with_an_active_membership(user, store):
+    grant_membership(user=user, store=store, role_name="owner")
+    get_user_model().objects.filter(pk=user.pk).update(is_active=False)
+
+    with pytest.raises(PermissionDeniedError):
+        get_authorizer().require(user.id, reference(store), REFUND_ORDER)
+
+
+def test_denies_an_active_membership_in_an_inactive_store(user, store):
+    grant_membership(user=user, store=store, role_name="owner")
+    Store.objects.filter(pk=store.pk).update(is_active=False)
+
+    with pytest.raises(PermissionDeniedError):
+        get_authorizer().require(user.id, reference(store), REFUND_ORDER)

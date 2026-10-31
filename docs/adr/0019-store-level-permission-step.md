@@ -15,3 +15,4 @@ This amends ADR-0016. A permission class such as `IsStoreStaff` needs `request.s
 
 - An inactive store resolves as `store_not_found` through the API.
 - The platform operator gets no bypass: `IsStoreStaff` and the Authorizer require an active store membership, also for superusers.
+- The Authorizer denies an inactive user or an inactive store, even with an active membership whose role holds the permission. It is called from use cases, Celery tasks and agents, where no authentication or store resolver runs first, so it must not rely on them.

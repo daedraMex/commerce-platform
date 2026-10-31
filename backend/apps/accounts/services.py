@@ -35,7 +35,8 @@ def get_active_membership(*, user, store_id):
 def has_store_permission(*, user_id, store_id, permission):
     """Return whether the user's active membership in the store has a role holding ``permission``.
 
-    There is no bypass for superusers or ``is_staff`` (ADR-0019).
+    An inactive user or an inactive store grants nothing. There is no bypass for superusers
+    or ``is_staff`` (ADR-0019).
     """
     return (
         _active_memberships(user_id=user_id, store_id=store_id)
@@ -46,4 +47,12 @@ def has_store_permission(*, user_id, store_id, permission):
 
 def _active_memberships(*, user_id, store_id):
     # The one definition of an active membership, shared by IsStoreStaff and the Authorizer.
-    return StoreMembership.objects.filter(user_id=user_id, store_id=store_id, is_active=True)
+    # The user and the store must be active too: the Authorizer also runs from use cases,
+    # Celery tasks and agents, where no authentication or store resolver has run (ADR-0019).
+    return StoreMembership.objects.filter(
+        user_id=user_id,
+        store_id=store_id,
+        is_active=True,
+        user__is_active=True,
+        store__is_active=True,
+    )
