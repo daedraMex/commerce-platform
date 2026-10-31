@@ -157,3 +157,45 @@ def test_schema_documents_token_refresh_with_an_example_per_status(schema):
     assert any(
         example["value"]["code"] == "token_invalid" for example in unauthorized["examples"].values()
     )
+
+
+def _example_codes(operation, status):
+    media = operation["responses"][status]["content"]["application/problem+json"]
+    assert media["schema"] == {"$ref": "#/components/schemas/ProblemDetails"}
+    return {example["value"]["code"] for example in media["examples"].values()}
+
+
+def test_schema_documents_staff_me_with_an_example_per_status(schema):
+    operation = schema["paths"]["/api/v1/staff/me/"]["get"]
+
+    success = operation["responses"]["200"]["content"]["application/json"]
+    assert any(
+        example["value"]
+        == {
+            "store": {"slug": "home", "name": "Home"},
+            "role": "store_admin",
+            "permissions": [
+                "catalog.manage",
+                "inventory.adjust",
+                "orders.place_manual",
+                "social.approve_post",
+            ],
+        }
+        for example in success["examples"].values()
+    )
+    assert _example_codes(operation, "400") == {
+        "store_header_missing",
+        "store_header_invalid",
+        "store_not_found",
+    }
+    assert _example_codes(operation, "401") == {"not_authenticated", "token_invalid"}
+    assert _example_codes(operation, "403") == {"permission_denied"}
+
+
+def test_schema_documents_staff_me_requires_the_store_header(schema):
+    parameters = schema["paths"]["/api/v1/staff/me/"]["get"]["parameters"]
+
+    assert any(
+        parameter["name"] == "X-Store" and parameter["in"] == "header" and parameter["required"]
+        for parameter in parameters
+    )

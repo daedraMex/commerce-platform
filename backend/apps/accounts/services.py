@@ -15,3 +15,18 @@ def grant_membership(*, user, store, role_name):
         user=user, store=store, defaults={"role": role, "is_active": True}
     )
     return membership
+
+
+def get_active_membership(*, user, store_id):
+    """Return the active membership of ``user`` in the store, or None.
+
+    An inactive membership grants nothing, so it is never returned.
+    """
+    if not user.is_authenticated:
+        return None
+    return (
+        StoreMembership.objects.select_related("store", "role")
+        .prefetch_related("role__permissions")
+        .filter(user=user, store_id=store_id, is_active=True)
+        .first()
+    )
