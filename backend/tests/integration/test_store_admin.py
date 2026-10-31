@@ -2,10 +2,10 @@ import pytest
 from django.contrib.auth import get_user_model
 
 from apps.accounts.models import Role, StoreMembership
-from apps.stores.models import Store
+from apps.stores.models import Store, StoreFeatureFlag
 from tests.integration.admin_forms import empty_inline
 
-NO_MEMBERSHIPS = empty_inline("memberships")
+NO_INLINES = {**empty_inline("memberships"), **empty_inline("feature_flags")}
 
 pytestmark = pytest.mark.django_db
 
@@ -27,7 +27,7 @@ def test_admin_deactivates_a_store(admin_client_by_email):
     response = admin_client_by_email.post(
         f"/admin/stores/store/{store.pk}/change/",
         # An unchecked checkbox is left out of the form, which clears is_active.
-        {"slug": "home", "name": "Home", "domain": "", **NO_MEMBERSHIPS},
+        {"slug": "home", "name": "Home", "domain": "", **NO_INLINES},
     )
 
     assert response.status_code == 302
@@ -38,10 +38,10 @@ def test_admin_deactivates_a_store(admin_client_by_email):
 def test_admin_stores_a_blank_domain_as_null_and_a_domain_lowercase(admin_client_by_email):
     admin_client_by_email.post(
         "/admin/stores/store/add/",
-        {"slug": "anime", "name": "Anime", "domain": "", **NO_MEMBERSHIPS},
+        {"slug": "anime", "name": "Anime", "domain": "", **NO_INLINES},
     )
     admin_client_by_email.post(
-        "/admin/stores/store/add/", {"slug": "home", "name": "Home", "domain": "", **NO_MEMBERSHIPS}
+        "/admin/stores/store/add/", {"slug": "home", "name": "Home", "domain": "", **NO_INLINES}
     )
     admin_client_by_email.post(
         "/admin/stores/store/add/",
@@ -49,7 +49,7 @@ def test_admin_stores_a_blank_domain_as_null_and_a_domain_lowercase(admin_client
             "slug": "blankets",
             "name": "Blankets",
             "domain": "Blankets.Example.com",
-            **NO_MEMBERSHIPS,
+            **NO_INLINES,
         },
     )
 
@@ -70,7 +70,7 @@ def test_admin_never_deletes_a_store(admin_client_by_email):
 
 def test_admin_rejects_a_malformed_slug(admin_client_by_email):
     response = admin_client_by_email.post(
-        "/admin/stores/store/add/", {"slug": "Home", "name": "Home", "domain": "", **NO_MEMBERSHIPS}
+        "/admin/stores/store/add/", {"slug": "Home", "name": "Home", "domain": "", **NO_INLINES}
     )
 
     assert response.status_code == 200
@@ -82,7 +82,7 @@ def test_admin_does_not_rename_an_existing_store(admin_client_by_email):
 
     admin_client_by_email.post(
         f"/admin/stores/store/{store.pk}/change/",
-        {"slug": "blankets", "name": "Home", "domain": "", "is_active": "on", **NO_MEMBERSHIPS},
+        {"slug": "blankets", "name": "Home", "domain": "", "is_active": "on", **NO_INLINES},
     )
 
     store.refresh_from_db()
@@ -125,8 +125,47 @@ def test_admin_posting_a_membership_delete_leaves_the_row(admin_client_by_email)
             "memberships-0-role": str(membership.role_id),
             "memberships-0-is_active": "on",
             "memberships-0-DELETE": "on",
+            **empty_inline("feature_flags"),
         },
     )
 
     assert response.status_code == 302
     assert StoreMembership.objects.filter(pk=membership.pk, is_active=True).exists()
+
+
+def test_admin_shows_feature_flags_as_an_inline(admin_client_by_email):
+    store = Store.objects.create(slug="home", name="Home")
+    StoreFeatureFlag.objects.create(store=store, code="instagram-publishing", enabled=True)
+
+    response = admin_client_by_email.get(f"/admin/stores/store/{store.pk}/change/")
+
+    assert response.status_code == 200
+    assert b'name="feature_flags-0-code"' in response.content
+    assert b'value="instagram-publishing"' in response.content
+
+
+def test_admin_turns_a_feature_flag_on_for_a_store(admin_client_by_email):
+    store = Store.objects.create(slug="home", name="Home")
+
+    response = admin_client_by_email.post(
+        f"/admin/stores/store/{store.pk}/change/",
+        {
+            "slug": "home",
+            "name": "Home",
+            "domain": "",
+            "is_active": "on",
+            **empty_inline("memberships"),
+            "feature_flags-TOTAL_FORMS": "1",
+            "feature_flags-INITIAL_FORMS": "0",
+            "feature_flags-MIN_NUM_FORMS": "0",
+            "feature_flags-MAX_NUM_FORMS": "1000",
+            "feature_flags-0-store": str(store.pk),
+            "feature_flags-0-code": "instagram-publishing",
+            "feature_flags-0-enabled": "on",
+        },
+    )
+
+    assert response.status_code == 302
+    assert StoreFeatureFlag.objects.filter(
+        store=store, code="instagram-publishing", enabled=True
+    ).exists()

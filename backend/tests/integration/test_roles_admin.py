@@ -6,6 +6,7 @@ from django.contrib.auth.models import Group
 
 from apps.accounts.models import Permission, Role, StoreMembership
 from apps.stores.models import Store
+from tests.integration.admin_forms import empty_inline
 
 pytestmark = pytest.mark.django_db
 
@@ -82,6 +83,7 @@ def test_adding_a_membership_on_the_store_page_is_recorded_in_the_admin_log(
             "memberships-0-user": str(user.pk),
             "memberships-0-role": str(support.pk),
             "memberships-0-is_active": "on",
+            **empty_inline("feature_flags"),
         },
     )
 

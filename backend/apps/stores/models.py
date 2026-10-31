@@ -49,3 +49,25 @@ class Store(models.Model):
     def clean(self):
         # Runs before the admin's unique checks, so they compare the stored form.
         self.domain = normalize_domain(self.domain)
+
+
+class StoreFeatureFlag(models.Model):
+    """Whether a feature is on for one store; edited only by the platform operator (ADR-0013).
+
+    Codes follow the store slug rule and are declared as constants next to their feature.
+    """
+
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="feature_flags")
+    code = models.CharField(max_length=STORE_SLUG_MAX_LENGTH, validators=[validate_store_slug])
+    enabled = models.BooleanField(default=False)
+
+    class Meta:
+        ordering = ("store", "code")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("store", "code"), name="stores_storefeatureflag_store_code_unique"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.store} / {self.code}"

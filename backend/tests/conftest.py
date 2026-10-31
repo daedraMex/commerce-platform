@@ -23,3 +23,14 @@ def override_authorizer():
 
     yield override
     dependencies.clear_overrides()
+
+
+@pytest.fixture
+def override_feature_flags():
+    """Back get_feature_flags() with the given flags for one test."""
+
+    def override(feature_flags):
+        dependencies.override(dependencies.get_feature_flags, lambda: feature_flags)
+
+    yield override
+    dependencies.clear_overrides()
