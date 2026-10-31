@@ -15,6 +15,8 @@ admin.site.unregister(Group)
 class StoreMembershipInline(admin.TabularInline):
     model = StoreMembership
     extra = 0
+    # Access is removed by deactivating, which keeps the history and the reactivation rule.
+    can_delete = False
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
