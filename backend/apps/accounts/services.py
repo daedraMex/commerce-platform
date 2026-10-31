@@ -25,8 +25,25 @@ def get_active_membership(*, user, store_id):
     if not user.is_authenticated:
         return None
     return (
-        StoreMembership.objects.select_related("store", "role")
+        _active_memberships(user_id=user.id, store_id=store_id)
+        .select_related("store", "role")
         .prefetch_related("role__permissions")
-        .filter(user=user, store_id=store_id, is_active=True)
         .first()
     )
+
+
+def has_store_permission(*, user_id, store_id, permission):
+    """Return whether the user's active membership in the store has a role holding ``permission``.
+
+    There is no bypass for superusers or ``is_staff`` (ADR-0019).
+    """
+    return (
+        _active_memberships(user_id=user_id, store_id=store_id)
+        .filter(role__permissions__code=permission)
+        .exists()
+    )
+
+
+def _active_memberships(*, user_id, store_id):
+    # The one definition of an active membership, shared by IsStoreStaff and the Authorizer.
+    return StoreMembership.objects.filter(user_id=user_id, store_id=store_id, is_active=True)
