@@ -34,3 +34,17 @@ class TokenPairResponseSerializer(serializers.Serializer):
 
 class TokenRefreshResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
+
+
+class StaffStoreSerializer(serializers.Serializer):
+    slug = serializers.CharField()
+    name = serializers.CharField()
+
+
+class StaffMeSerializer(serializers.Serializer):
+    store = StaffStoreSerializer()
+    role = serializers.CharField(help_text="The role the user holds in this store.")
+    permissions = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Permission codes the role allows in this store, sorted alphabetically.",
+    )
