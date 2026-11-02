@@ -192,7 +192,7 @@ def staff_client_with_flag_permissions(client):
     return client
 
 
-def test_a_non_superuser_staff_user_does_not_see_the_feature_flags_inline(
+def test_a_non_superuser_staff_user_cannot_open_the_store_page_with_its_flags(
     staff_client_with_flag_permissions,
 ):
     store = Store.objects.create(slug="home", name="Home")
@@ -200,9 +200,8 @@ def test_a_non_superuser_staff_user_does_not_see_the_feature_flags_inline(
 
     response = staff_client_with_flag_permissions.get(f"/admin/stores/store/{store.pk}/change/")
 
-    assert response.status_code == 200
-    assert b"feature_flags-TOTAL_FORMS" not in response.content
-    assert b"instagram-publishing" not in response.content
+    assert response.status_code == 302
+    assert response.url.startswith("/admin/login/")
 
 
 def test_a_non_superuser_staff_user_cannot_turn_a_feature_flag_on(

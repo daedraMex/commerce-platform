@@ -5,4 +5,5 @@ There is no Business, Organization or Merchant entity above Store yet. Owner is 
 ## Consequences
 
 - An owner of both stores holds two store memberships, one per store.
+- The Django admin belongs to the platform operator: `config.admin.PlatformAdminSite` admits only an active superuser, so Django model permissions never open it to store staff.
 - When the SaaS model is chosen, a tenant level may be introduced above Store and roles may become tenant-specific; nothing built now may assume either.
