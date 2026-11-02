@@ -6,6 +6,7 @@ from django.contrib.auth.models import Group
 
 from apps.accounts.models import Permission, Role, StoreMembership
 from apps.stores.models import Store
+from tests.integration.admin_forms import STORE_ADMIN_EMPTY_INLINES, inline
 
 pytestmark = pytest.mark.django_db
 
@@ -75,13 +76,11 @@ def test_adding_a_membership_on_the_store_page_is_recorded_in_the_admin_log(
             "name": "Home",
             "domain": "",
             "is_active": "on",
-            "memberships-TOTAL_FORMS": "1",
-            "memberships-INITIAL_FORMS": "0",
-            "memberships-MIN_NUM_FORMS": "0",
-            "memberships-MAX_NUM_FORMS": "1000",
-            "memberships-0-user": str(user.pk),
-            "memberships-0-role": str(support.pk),
-            "memberships-0-is_active": "on",
+            **STORE_ADMIN_EMPTY_INLINES,
+            **inline(
+                "memberships",
+                [{"user": str(user.pk), "role": str(support.pk), "is_active": "on"}],
+            ),
         },
     )
 

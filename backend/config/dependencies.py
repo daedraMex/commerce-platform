@@ -6,7 +6,7 @@ function, so nothing is built or loaded at import time and importing shared neve
 
 from collections.abc import Callable
 
-from apps.shared.domain.ports import Authorizer, StoreResolver
+from apps.shared.domain.ports import Authorizer, FeatureFlags, StoreResolver
 
 _overrides: dict[Callable, Callable] = {}
 
@@ -36,3 +36,12 @@ def get_authorizer() -> Authorizer:
     from apps.accounts.authorizer import MembershipAuthorizer
 
     return MembershipAuthorizer()
+
+
+def get_feature_flags() -> FeatureFlags:
+    if get_feature_flags in _overrides:
+        return _overrides[get_feature_flags]()
+
+    from apps.stores.feature_flags import DatabaseFeatureFlags
+
+    return DatabaseFeatureFlags()

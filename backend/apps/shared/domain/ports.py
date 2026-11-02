@@ -20,3 +20,11 @@ class Authorizer(Protocol):
     def require(self, user_id: int, store: StoreReference, permission: str) -> None:
         """Pass if the user holds ``permission`` in ``store``; else raise PermissionDeniedError."""
         ...
+
+
+class FeatureFlags(Protocol):
+    """Answer whether a feature is on for a store (ADR-0001, ADR-0013)."""
+
+    def is_enabled(self, store: StoreReference, code: str) -> bool:
+        """Return whether flag ``code`` is on in ``store``; a flag with no row is off."""
+        ...

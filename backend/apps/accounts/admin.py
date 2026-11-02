@@ -48,7 +48,7 @@ admin.site.unregister(Store)
 
 @admin.register(Store)
 class StoreWithMembershipsAdmin(StoreAdmin):
-    inlines = (StoreMembershipInline,)
+    inlines = (*StoreAdmin.inlines, StoreMembershipInline)
 
 
 @admin.register(User)
