@@ -48,7 +48,22 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - name: Verify actions are pinned to a commit SHA
+        run: |
+          set -euo pipefail
+          status=0
+          while IFS=: read -r file line_no rest; do
+            ref="${rest#*uses:}"
+            ref="${ref%%#*}"
+            ref="$(printf '%s' "$ref" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+            if [[ ! "$ref" =~ ^[^@]+@[0-9a-f]{40}$ ]]; then
+              echo "::error file=$file,line=$line_no::$ref is not pinned to a commit SHA"
+              status=1
+            fi
+          done < <(grep -rnE '^[[:space:]]*(-[[:space:]]+)?uses:' .github/workflows/)
+          exit "$status"
 
       - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
         with:
