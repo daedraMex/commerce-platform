@@ -23,6 +23,9 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - When /implement invokes TDD, the ticket's acceptance criteria are the agreed seams.
 - Pin every GitHub Actions dependency to a commit SHA after verifying the tagged
   version exists.
+- Commit before /code-review, because it diffs `main...HEAD`.
+- Before rewording a phrase in the docs, search the whole repo for it and change
+  every copy at once.
 - Explore with Grep, Glob and Read (they skip `.venv`); avoid `grep -r` and `cat`.
 - There is no typechecker in this repo: skip /implement's typechecking step and run
   `./scripts/check.sh` instead.
