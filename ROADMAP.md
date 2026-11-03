@@ -110,7 +110,7 @@ Una tarea que se cumple a medias **no** es `done`: se divide y lo pendiente vuel
 - [ ] Todas sus tareas están en `done`.
 - [ ] Se cumple su **criterio de salida** (abajo), demostrado de punta a punta.
 - [ ] `/retro` hecho y sus mejoras aplicadas a `AGENTS.md`, skills o este roadmap.
-- [ ] Tag de versión en git (`v0.<fase>.0`).
+- [ ] Tag de versión en git (`v0.<fase>.0`; las fases con letra usan `v0.<fase>.1`, por ejemplo `v0.4.1` para 4b).
 
 ---
 
@@ -152,9 +152,18 @@ permisos que usarán las fases siguientes; puerto `Authorizer` y su implementaci
 
 ### Fase 4 — Catálogo
 **Objetivo:** cargar y mostrar los productos reales.
-**Entregables:** categorías con esquema de atributos, productos, variantes con SKU y media en
-almacenamiento S3; admin con inlines; endpoints públicos de lectura, incluida la búsqueda por SKU.
-**Criterio de salida:** las frazadas reales están cargadas y la API las devuelve solo para `home`.
+**Entregables:** proveedores, diseños, categorías planas con esquema de atributos y opciones,
+productos, variantes con SKU generado, colecciones y media en Cloudflare R2; admin con inlines;
+comandos `import_catalog` y `set_prices`; endpoints públicos de lectura, incluida la búsqueda por SKU.
+**Criterio de salida:** el catálogo real está cargado con `import_catalog` y la API lo devuelve solo
+para `home` (las imágenes llegan en la fase 4b).
+
+### Fase 4b — Fotos del catálogo
+**Objetivo:** que el staff convierta una foto del celular en la imagen del catálogo.
+**Entregables:** endpoints de staff para media del catálogo con `catalog.manage`; página para
+celular donde se sube la foto (HEIC a JPEG) y se marcan las cuatro esquinas; procesamiento en
+Celery que endereza, recorta a la proporción real y corrige la luz.
+**Criterio de salida:** un miembro del staff fotografía una frazada y queda como su imagen principal.
 
 ### Fase 5 — Inventario y pedidos
 **Objetivo:** vender sin vender de más.
@@ -162,6 +171,14 @@ almacenamiento S3; admin con inlines; endpoints públicos de lectura, incluida l
 `CancelOrder`; historial de movimientos; copia de datos en cada `OrderItem`; skill propia
 `new-domain-module`.
 **Criterio de salida:** un pedido descuenta stock en una sola transacción y pedir de más devuelve 409.
+
+### Fase 5b — Compras y resurtido
+**Objetivo:** comprarle al proveedor en el ciclo semanal sin perder lo que se vendió sin stock.
+**Entregables:** lista de compras, órdenes de compra con recepciones parciales que crean
+movimientos de entrada, calendario de resurtido con días cerrados y visitas extra, corte de pedidos
+y fecha prometida en la zona horaria de la tienda, borrador automático de la orden de compra.
+**Criterio de salida:** una venta sin stock entra a la lista de compras, pasa a una orden de compra
+y una recepción parcial suma al stock lo recibido.
 
 ### Fase 6 — Pagos y despliegue
 **Objetivo:** cobrar de verdad y tener la plataforma en internet.
@@ -171,6 +188,14 @@ credenciales separadas; respaldos a almacenamiento externo; logs y seguimiento d
 **Criterio de salida:** un pago de prueba en staging marca el pedido como pagado y envía el email.
 **Trámites que arrancan aquí:** revisión de la app de Meta (Instagram) y verificación de
 WhatsApp Business Platform.
+
+### Fase 6b — Envíos
+**Objetivo:** cotizar y enviar con Envíosperros todo pedido que no sea de TikTok Shop.
+**Entregables:** puerto `ShippingProvider` con Envíosperros (cotización, guía, descarga y
+recolección); el canal decide la paquetería; recargo por envío de 10 MXN al dejar el paquete
+en sucursal; peso y medidas de paquete obligatorios para cotizar.
+**Criterio de salida:** un pedido en staging se cotiza, se genera y descarga su guía, y el precio
+mostrado incluye el recargo.
 
 ### Fase 7 — Storefront, primero con la tienda de frazadas
 **Objetivo:** vender en tu propio dominio.

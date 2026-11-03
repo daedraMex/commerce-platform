@@ -26,7 +26,7 @@ We are starting commerce-platform. Read AGENTS.md, ROADMAP.md and docs/agents/.
 
 Decisions ALREADY TAKEN (do not reopen them; record each one as an ADR in docs/adr/):
 1. One business today, SaaS later. Our own stores are the first rollout ring;
-   new features ship behind per-store feature flags. The SaaS isolation model is
+   new optional features ship behind per-store feature flags. The SaaS isolation model is
    decided later, with real usage data.
 2. Stores are data (created with a create_store command), N stores supported.
    Every business table belongs to a Store.
@@ -164,30 +164,96 @@ Goal: stores and store-scoped role-based access control.
 ## Phase 4 — Catalog
 
 ```
-Phase 4 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
+Phase 4 of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0023 and ADR-0024.
 
-Goal: the product catalog, managed from the admin and readable through the API.
-- apps/catalog (plain Django, no clean architecture):
-  - Category: store, parent (self, nullable), name, slug (unique per store),
-    attribute_schema (JSON).
-  - Product: store, category, name, slug (unique per store), description,
-    attributes (JSON), is_active, timestamps.
-  - ProductVariant: product, sku (unique), options (JSON), price, compare_at_price,
-    cost, weight_grams, is_active. Stock is NOT here; it belongs to inventory in Phase 5.
-  - Media: storage_key (path, not full URL), mime_type, alt_text, width, height, metadata.
-  - ProductMedia: product, variant (nullable), media, role (main, thumbnail, detail,
-    gallery), position; only one main image per product (conditional unique constraint).
-- File storage through django-storages with an S3-compatible bucket; local filesystem in
-  development. Build public URLs in serializers from storage_key.
-- Validate Product.attributes against its Category.attribute_schema.
-- Admin with inlines for variants and media.
-- Public read-only endpoints, filtered by request.store and is_active:
-  list categories, list products (filter by category, search by name), product detail
-  by slug, variant lookup by SKU (for the future QR feature). Cost is never exposed.
+Goal: the product catalog, managed by the platform operator in the admin, loaded in bulk
+with import_catalog, and readable through the API.
+- apps/catalog (plain Django, no clean architecture). Every model belongs to a store,
+  directly or through its parent; nothing is deleted except the ProductMedia link
+  (is_active, PROTECT foreign keys).
+  - Supplier: store, name, is_active.
+  - Design: store, number (unique per store, assigned in order on creation, never edited
+    or reused, shown as 5 digits), name, supplier, supplier_design_name (unique per
+    supplier).
+  - Category (flat, no parent): store, name, slug (unique per store), sku_code, shape
+    (rectangle or round), attribute and option schema in our own format (ADR-0024; size
+    values carry width_cm and height_cm), is_active. A schema edit that would invalidate
+    an active product, or remove or rename an option value code in use, is rejected.
+  - Product: store, category, design, name (category name + design name by default),
+    slug (unique per store, generated without accents, editable), description,
+    attributes, is_active, timestamps. Category and design are read-only once it has
+    variants.
+  - ProductVariant: product, store (denormalized, must match), sku, option values,
+    price, compare_at_price, cost, weight_grams, package_length_cm, package_width_cm,
+    package_height_cm (shipping fields optional until Phase 6b), is_active.
+    SKU = <category sku_code>-<design number>-<option value codes> (FRZ-00012-MAT,
+    ALM-00012-DON-80), generated on creation, unique per store ignoring case (stored
+    uppercase), never changed or reused; typed by hand only for a product without a
+    design. Option values are read-only once created. Stock is NOT here (Phase 5).
+  - Prices (ADR-0023): MXN, 2 decimals; price > 0 and compare_at_price empty or greater,
+    both with IVA; cost >= 0, required, without IVA. One validator used by the admin and
+    both commands.
+  - Collection: store, name, slug (unique per store), description, supplier (optional),
+    is_active, ordered products (a product may be in several or none).
+  - Media: store, storage_key (stores/<store_id>/media/<sha256>.<ext>, content hash unique
+    per store), mime_type, alt_text, width, height (read with Pillow), metadata.
+    JPEG, PNG or WebP up to 10 MB.
+  - ProductMedia: product, variant (nullable), media of the same store, role (main or
+    gallery), position; at most one main image per product (conditional unique
+    constraint).
+- File storage through django-storages: Cloudflare R2 in staging and production (bucket
+  credentials from the environment; public product media only, served from our own
+  media domain), local filesystem in development. Build public URLs from storage_key and
+  MEDIA_BASE_URL. Content-addressed files get long-lived cache headers.
+- Admin with inlines for variants and media; platform operator only (ADR-0012).
+- import_catalog --store <slug> --csv <file> [--images <dir>] --operator <email>
+  [--dry-run]: one row per variant; categories and suppliers must already exist (an
+  unknown one rejects the row), collections are created if missing and the dry-run
+  report lists every one it would create; designs matched by (supplier,
+  supplier_design_name) and numbered in order of first appearance; variants matched by
+  SKU; validates every row first, then writes all or nothing; never deactivates rows
+  missing from the file; images optional, deduplicated by content hash. Ship a template
+  spreadsheet for the CSV.
+- set_prices --store <slug> --category <slug> [--option-value <code>] --price X
+  [--compare-at-price Y | --clear-compare-at-price] [--cost Z] --operator <email>
+  [--dry-run]: updates every variant of that category and size, active and inactive, in
+  one transaction; the report counts active and inactive variants separately and those
+  already at those prices.
+- Both commands require an active superuser as --operator and write one admin LogEntry
+  per changed variant with old and new values; --dry-run writes nothing.
+- Public read-only endpoints, anonymous and store-scoped, filtered by request.store:
+  list categories, list collections, list products (filter by category or collection,
+  search by product name ignoring case and accents with PostgreSQL unaccent), product
+  detail by slug, variant lookup by SKU (for the future QR feature). A product is
+  visible when it, its category and at least one variant are active; it may have no
+  image yet. Products are listed newest first, or in the collection's order when
+  filtered by collection. Never expose cost, the supplier or the supplier design name.
+  Enabling unaccent needs a database role allowed to run CREATE EXTENSION; production
+  (Phase 6) must grant it.
 - API tests proving a product from one store never appears in the other.
 ```
 
-**Done when:** the real blanket products are loaded and the API returns them only for `home`.
+**Done when:** the real catalog is loaded with `import_catalog` and the API returns it only for `home` (images come in Phase 4b).
+
+---
+
+## Phase 4b — Catalog photos
+
+```
+Phase 4b of commerce-platform. Read AGENTS.md, GLOSSARY.md and issue #1 (catalog photos).
+
+Goal: staff turn a phone photo of a blanket into its catalog image.
+- Staff write endpoints for catalog media, guarded by catalog.manage through the
+  Authorizer.
+- A mobile-first staff page: upload a photo (HEIC converted to JPEG), tap the four
+  corners of the product.
+- Processing in Celery: straighten, crop to the size's real aspect ratio (round for
+  round categories), correct light, attach the result as the product's main image.
+- Open for the grilling: where the staff page lives (Django templates or the Next.js
+  app); automatic corner detection later, with staff confirming the corners.
+```
+
+**Done when:** a staff member photographs a blanket on their phone and it becomes that product's main image.
 
 ---
 
@@ -226,11 +292,37 @@ apps/orders
 - PlaceOrder runs in one database transaction: all or nothing.
 - Map OutOfStock and InvalidTransition to 409 in the domain exception handler.
 
+Open for the grilling (issue #1): selling a variant with zero stock when it is made to
+order from its supplier (Phase 5b builds purchasing on top), the supplier's availability
+per variant, and Store.timezone.
+
 When finished, propose a project skill `new-domain-module` in .claude/skills/ based on
 how apps/orders was built (use /writing-for-agents).
 ```
 
 **Done when:** placing an order reduces stock atomically, ordering more than available returns 409, and the unit tests run without a database.
+
+---
+
+## Phase 5b — Purchasing and restocking
+
+```
+Phase 5b of commerce-platform. Read AGENTS.md, GLOSSARY.md and issue #1 (purchasing and
+restocking).
+
+Goal: buy from suppliers on a weekly restock cycle without losing track of what was sold
+before it was in stock.
+- A module with business rules (clean architecture): purchase list (sold-but-not-in-stock
+  variants and items added by hand), purchase orders (draft, sent, partially received,
+  received, cancelled), receipts that create inbound stock movements for what arrived.
+- A supplier's weekly restock schedule, closed days and extra visits; order cutoff and
+  the promised date computed in the store's timezone.
+- A scheduled task that drafts the purchase order the day before each restock; restock
+  suggestions from recent sales.
+- Customer orders waiting for an item that did not arrive are flagged.
+```
+
+**Done when:** a sale of an out-of-stock variant appears on the purchase list, goes into a purchase order, and a partial receipt adds the received quantity to stock.
 
 ---
 
@@ -264,6 +356,26 @@ Deployment
 
 **Done when:** a test payment in staging marks the order as paid and sends the email.
 **Also start now:** the Meta and TikTok developer app reviews needed in Phase 9.
+
+---
+
+## Phase 6b — Shipping
+
+```
+Phase 6b of commerce-platform. Read AGENTS.md, GLOSSARY.md and issue #1 (shipping).
+
+Goal: quote and ship every non-TikTok order through Envíosperros.
+- A ShippingProvider port with an Envíosperros implementation (API v3: rates, labels,
+  label download, pickup); staging only in development and tests.
+- The Envíosperros token is a per-store integration credential (ADR-0020).
+- The sales channel decides the carrier: TikTok Shop orders ship with TikTok's
+  logistics; every other order through Envíosperros.
+- A per-shipment drop-off surcharge (10 MXN) added to the quote shown to the customer,
+  never to a variant's cost.
+- Variant weight and package dimensions become required to quote.
+```
+
+**Done when:** a staging order gets a quote, a label is created and downloaded, and the price shown includes the surcharge.
 
 ---
 
@@ -302,6 +414,7 @@ Goal: the anime store and the external channels.
     channel=tiktok (idempotent by external_id) and pushes stock levels to TikTok.
     Wrap the TikTok API behind a port so it can be faked in tests.
   - Catalog feed endpoints per store for Meta and TikTok catalogs.
+  - A collection's catalog PDF generated from its products.
   - Server-side conversion events (Meta Conversions API, TikTok Events API) sent by Celery
     when an order is paid.
 - Storefront pixels per store; UTM parameters stored on the order.

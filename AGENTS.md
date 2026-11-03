@@ -5,7 +5,7 @@ stores (today `anime`: anime-style stationery, and `home`: blankets), a single
 themed storefront, a future mobile app, and a platform of AI agents (Instagram
 publishing, WhatsApp sales, customer follow-up, bundle suggestions).
 
-It runs for one business today and will become a SaaS later. New features are
+It runs for one business today and will become a SaaS later. New optional features are
 enabled for our own stores first (feature flags) and rolled out to others after.
 
 Read GLOSSARY.md for the domain vocabulary, ROADMAP.md for phases and the
@@ -57,6 +57,9 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   Authorizer port, not only in views.
 - Never delete products or orders; use is_active or status.
 - Every API error is an RFC 9457 problem details response with a stable `code`.
+- The media bucket holds public product media only; never store private files
+  (invoices, customer documents) in it.
+- Never upload a supplier's watermarked image; every catalog image is our own photo.
 
 ## Stores (one business today, SaaS later)
 - Never hardcode store names; stores are data, created with the `create_store` command.
@@ -69,7 +72,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   encrypted in the database and read only through the CredentialStore port (ADR-0020).
 - Store actions are authorized only through the Authorizer port; never use
   user.has_perm() or Django's auth.Permission for them (those only gate the admin).
-- New features ship behind a per-store feature flag.
+- New optional features ship behind a per-store feature flag; core modules (catalog,
+  inventory, orders) do not.
 - Inventory is per store and always addressed by Location (StockItem = variant + location).
 
 ## Commands
