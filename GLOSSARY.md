@@ -68,7 +68,7 @@ One purchasable version of a product, distinguished from its siblings by its opt
 _Avoid_: SKU (as the name of the thing)
 
 **Option**:
-A dimension the variants of a product differ on, such as size, color or design; each variant has one value per option.
+A dimension the variants of a product differ on, such as size or color; each variant has one value per option.
 _Avoid_: Variation, attribute (for this)
 
 **Attribute**:

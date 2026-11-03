@@ -170,7 +170,9 @@ Celery que endereza, recorta a la proporción real y corrige la luz.
 **Entregables:** módulos `inventory` y `orders` con clean architecture; `ReserveStock`, `PlaceOrder`,
 `CancelOrder`; historial de movimientos; copia de datos en cada `OrderItem`; skill propia
 `new-domain-module`.
-**Criterio de salida:** un pedido descuenta stock en una sola transacción y pedir de más devuelve 409.
+**Criterio de salida:** un pedido descuenta stock en una sola transacción y pedir de más de una variante
+que se vende desde stock devuelve 409 (vender sin stock una variante sobre pedido se decide en el
+/grill-with-docs de la fase 5).
 
 ### Fase 5b — Compras y resurtido
 **Objetivo:** comprarle al proveedor en el ciclo semanal sin perder lo que se vendió sin stock.
@@ -192,8 +194,8 @@ WhatsApp Business Platform.
 ### Fase 6b — Envíos
 **Objetivo:** cotizar y enviar con Envíosperros todo pedido que no sea de TikTok Shop.
 **Entregables:** puerto `ShippingProvider` con Envíosperros (cotización, guía, descarga y
-recolección); el canal decide la paquetería; recargo por envío de 10 MXN al dejar el paquete
-en sucursal; peso y medidas de paquete obligatorios para cotizar.
+recolección); el canal decide la paquetería; recargo por envío al dejar el paquete en sucursal,
+configurable por tienda (hoy 10 MXN para `home`); peso y medidas de paquete obligatorios para cotizar.
 **Criterio de salida:** un pedido en staging se cotiza, se genera y descarga su guía, y el precio
 mostrado incluye el recargo.
 

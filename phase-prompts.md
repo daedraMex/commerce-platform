@@ -300,7 +300,7 @@ When finished, propose a project skill `new-domain-module` in .claude/skills/ ba
 how apps/orders was built (use /writing-for-agents).
 ```
 
-**Done when:** placing an order reduces stock atomically, ordering more than available returns 409, and the unit tests run without a database.
+**Done when:** placing an order reduces stock atomically, ordering more than available of a variant sold from stock returns 409 (selling a made-to-order variant with zero stock is decided in the Phase 5 grilling), and the unit tests run without a database.
 
 ---
 
@@ -370,8 +370,8 @@ Goal: quote and ship every non-TikTok order through Envíosperros.
 - The Envíosperros token is a per-store integration credential (ADR-0020).
 - The sales channel decides the carrier: TikTok Shop orders ship with TikTok's
   logistics; every other order through Envíosperros.
-- A per-shipment drop-off surcharge (10 MXN) added to the quote shown to the customer,
-  never to a variant's cost.
+- A per-shipment drop-off surcharge, a per-store setting (10 MXN for home today), added
+  to the quote shown to the customer, never to a variant's cost.
 - Variant weight and package dimensions become required to quote.
 ```
 
