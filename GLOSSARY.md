@@ -80,7 +80,7 @@ The code that identifies a variant within its store, the same whatever its lette
 _Avoid_: Barcode, reference
 
 **Category**:
-The type of a product, such as blankets or donut pillows, which defines the attributes and options its products have. Every product has exactly one.
+The type of a product, such as blankets or figure pillows, which defines the attributes and options its products have. Every product has exactly one.
 _Avoid_: Product type, department
 
 **Design**:

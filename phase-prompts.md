@@ -176,7 +176,7 @@ with import_catalog, and readable through the API.
     or reused, shown as 5 digits), name, supplier, supplier_design_name (unique per
     supplier).
   - Category (flat, no parent): store, name, slug (unique per store), sku_code, shape
-    (rectangle or round), attribute and option schema in our own format (ADR-0024; size
+    (rectangle or contour), attribute and option schema in our own format (ADR-0024; size
     values carry width_cm and height_cm), is_active. A schema edit that would invalidate
     an active product, or remove or rename an option value code in use, is rejected.
   - Product: store, category, design, name (category name + design name by default),
@@ -187,7 +187,7 @@ with import_catalog, and readable through the API.
     price, compare_at_price, cost, weight_grams, package_length_cm, package_width_cm,
     package_height_cm (shipping fields optional until Phase 6b), is_active.
     SKU = <category sku_code>-<design number>-<option value codes> (FRZ-00012-MAT,
-    ALM-00012-DON-80), generated on creation, unique per store ignoring case (stored
+    ALM-00012-FIG-80), generated on creation, unique per store ignoring case (stored
     uppercase), never changed or reused; typed by hand only for a product without a
     design. Option values are read-only once created. Stock is NOT here (Phase 5).
   - Prices (ADR-0023): MXN, 2 decimals; price > 0 and compare_at_price empty or greater,
@@ -245,10 +245,12 @@ Phase 4b of commerce-platform. Read AGENTS.md, GLOSSARY.md and issue #1 (catalog
 Goal: staff turn a phone photo of a blanket into its catalog image.
 - Staff write endpoints for catalog media, guarded by catalog.manage through the
   Authorizer.
-- A mobile-first staff page: upload a photo (HEIC converted to JPEG), tap the four
-  corners of the product.
-- Processing in Celery: straighten, crop to the size's real aspect ratio (round for
-  round categories), correct light, attach the result as the product's main image.
+- A mobile-first staff page: upload a photo (HEIC converted to JPEG); tap the four
+  corners of a rectangle product, while contour products get a cutout.
+- Processing in Celery: for rectangle categories straighten and crop to the size's
+  bounding-box aspect ratio; for contour categories remove the background around the
+  design's irregular outline; correct light; attach the result as the product's main
+  image.
 - Open for the grilling: where the staff page lives (Django templates or the Next.js
   app); automatic corner detection later, with staff confirming the corners.
 ```
