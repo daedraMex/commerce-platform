@@ -6,8 +6,10 @@ from django.db.models.functions import Lower
 from apps.catalog.rules import (
     SKU_MAX_LENGTH,
     SLUG_MAX_LENGTH,
+    ActiveProduct,
     CatalogRuleError,
     OtherCategory,
+    VariantInUse,
     build_sku,
     default_product_name,
     find_sku_conflicts,
@@ -15,10 +17,13 @@ from apps.catalog.rules import (
     normalize_sku,
     slugify,
     validate_attribute_schema,
+    validate_attribute_schema_change,
     validate_option_schema,
+    validate_option_schema_change,
     validate_option_values,
     validate_prices,
     validate_product_attributes,
+    validate_sku_code_change,
 )
 from apps.stores.models import Store
 from apps.stores.services import lock_store
@@ -147,6 +152,7 @@ class Category(models.Model):
         self.sku_code = (self.sku_code or "").strip().upper()
         self._ensure_slug()
         self._validate_schema()
+        self._validate_schema_change()
         self._validate_sku_overlap()
 
     def _ensure_slug(self):
@@ -161,6 +167,45 @@ class Category(models.Model):
             raise ValidationError({"attribute_schema": str(error)}) from error
         try:
             validate_option_schema(self.option_schema)
+        except CatalogRuleError as error:
+            raise ValidationError({"option_schema": str(error)}) from error
+
+    def _validate_schema_change(self):
+        if self._state.adding or not self.pk:
+            return
+        stored = (
+            Category.objects.filter(pk=self.pk)
+            .values("attribute_schema", "option_schema", "sku_code")
+            .first()
+        )
+        if stored is None:
+            return
+
+        variants = [
+            VariantInUse(sku=variant.sku, option_values=variant.option_values)
+            for variant in ProductVariant.objects.filter(product__category_id=self.pk).only(
+                "sku", "option_values"
+            )
+        ]
+
+        try:
+            validate_sku_code_change(stored["sku_code"], self.sku_code, variants)
+        except CatalogRuleError as error:
+            raise ValidationError({"sku_code": str(error)}) from error
+
+        active_products = [
+            ActiveProduct(name=product.name, attributes=product.attributes)
+            for product in self.products.filter(is_active=True).only("name", "attributes")
+        ]
+        try:
+            validate_attribute_schema_change(
+                stored["attribute_schema"], self.attribute_schema, active_products
+            )
+        except CatalogRuleError as error:
+            raise ValidationError({"attribute_schema": str(error)}) from error
+
+        try:
+            validate_option_schema_change(stored["option_schema"], self.option_schema, variants)
         except CatalogRuleError as error:
             raise ValidationError({"option_schema": str(error)}) from error
 
