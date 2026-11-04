@@ -32,6 +32,7 @@ INSTALLED_APPS = [
     "drf_spectacular",
     "apps.accounts",
     "apps.stores",
+    "apps.catalog",
 ]
 
 MIDDLEWARE = [
