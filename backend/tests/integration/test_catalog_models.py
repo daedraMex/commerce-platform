@@ -175,19 +175,19 @@ def test_a_category_rejects_overlapping_sku_suffixes_when_saved():
     home = make_store("home", "Home")
     make_category(
         home,
-        name="Almohada dona",
-        slug="almohada-dona",
+        name="Almohada de figura",
+        slug="almohada-de-figura",
         sku_code="ALM",
-        option_schema=size_schema("DON-80"),
+        option_schema=size_schema("FIG-80"),
     )
 
     with pytest.raises(ValidationError):
         make_category(
             home,
-            name="Almohada dona again",
-            slug="almohada-dona-again",
+            name="Almohada de figura again",
+            slug="almohada-de-figura-again",
             sku_code="alm",
-            option_schema=size_schema("DON-80"),
+            option_schema=size_schema("FIG-80"),
         )
 
 
@@ -203,10 +203,10 @@ def test_inactive_categories_still_count_for_sku_overlap():
     home = make_store("home", "Home")
     first = make_category(
         home,
-        name="Almohada dona",
-        slug="almohada-dona",
+        name="Almohada de figura",
+        slug="almohada-de-figura",
         sku_code="ALM",
-        option_schema=size_schema("DON-80"),
+        option_schema=size_schema("FIG-80"),
     )
     first.is_active = False
     first.save()
@@ -214,10 +214,10 @@ def test_inactive_categories_still_count_for_sku_overlap():
     with pytest.raises(ValidationError):
         make_category(
             home,
-            name="Almohada dona again",
-            slug="almohada-dona-again",
+            name="Almohada de figura again",
+            slug="almohada-de-figura-again",
             sku_code="ALM",
-            option_schema=size_schema("DON-80"),
+            option_schema=size_schema("FIG-80"),
         )
 
 

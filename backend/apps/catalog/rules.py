@@ -80,7 +80,10 @@ def validate_attribute_schema(schema) -> None:
 
 
 def validate_option_schema(schema) -> None:
-    """Reject an option schema that does not match ADR-0024's format."""
+    """Reject an option schema that does not match ADR-0024's format.
+
+    Size dimensions are the value's bounding box and may be approximate.
+    """
     if not isinstance(schema, list):
         raise CatalogRuleError("The option schema must be a list.")
 

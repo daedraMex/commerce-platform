@@ -32,7 +32,7 @@ class Migration(migrations.Migration):
                 ('name', models.CharField(max_length=200)),
                 ('slug', models.SlugField(blank=True, max_length=100)),
                 ('sku_code', models.CharField(max_length=20)),
-                ('shape', models.CharField(choices=[('rectangle', 'Rectangle'), ('round', 'Round')], max_length=10)),
+                ('shape', models.CharField(choices=[('rectangle', 'Rectangle'), ('contour', 'Contour')], max_length=10)),
                 ('attribute_schema', models.JSONField(blank=True, default=list)),
                 ('option_schema', models.JSONField(blank=True, default=list)),
                 ('is_active', models.BooleanField(default=True)),

@@ -10,7 +10,7 @@ def test_slugs_remove_every_kind_of_accent():
 
 
 def test_slugs_join_words_with_single_hyphens():
-    assert slugify("  Almohada   dona  ") == "almohada-dona"
+    assert slugify("  Almohada   de figura  ") == "almohada-de-figura"
 
 
 def test_slugs_drop_punctuation():

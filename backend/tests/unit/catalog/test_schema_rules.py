@@ -252,6 +252,25 @@ def test_a_malformed_option_entry_is_rejected_naming_the_entry(broken, needle):
     assert needle in str(error.value)
 
 
+def test_a_size_label_may_be_approximate():
+    validate_option_schema(
+        [
+            {
+                "code": "size",
+                "label": "Size",
+                "values": [
+                    {
+                        "code": "FIG-80",
+                        "label": "aprox. 80 cm",
+                        "width_cm": 80,
+                        "height_cm": 80,
+                    }
+                ],
+            }
+        ]
+    )
+
+
 def test_a_non_size_option_needs_no_dimensions():
     validate_option_schema(
         [

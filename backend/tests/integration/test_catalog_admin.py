@@ -52,7 +52,7 @@ def make_category(store, *, name, slug, sku_code, option_schema):
         name=name,
         slug=slug,
         sku_code=sku_code,
-        shape=Category.Shape.ROUND,
+        shape=Category.Shape.CONTOUR,
         option_schema=option_schema,
     )
 
@@ -220,25 +220,25 @@ def test_admin_rejects_overlapping_option_value_codes_naming_the_other_category(
     home = make_store("home", "Home")
     make_category(
         home,
-        name="Almohada dona",
-        slug="almohada-dona",
+        name="Almohada de figura",
+        slug="almohada-de-figura",
         sku_code="ALM",
-        option_schema=size_schema(("DON-80", "Donut", 80, 80)),
+        option_schema=size_schema(("FIG-80", "Figure", 80, 80)),
     )
 
     response = admin_client_by_email.post(
         "/admin/catalog/category/add/",
         category_form(
             home,
-            name="Almohada dona nueva",
+            name="Almohada de figura nueva",
             sku_code="ALM",
-            option_schema=size_schema(("DON-80", "Donut", 80, 80)),
+            option_schema=size_schema(("FIG-80", "Figure", 80, 80)),
         ),
     )
 
     assert response.status_code == 200
-    assert b"Almohada dona" in response.content
-    assert b"DON-80" in response.content
+    assert b"Almohada de figura" in response.content
+    assert b"FIG-80" in response.content
     assert Category.objects.count() == 1
 
 
@@ -248,10 +248,10 @@ def test_admin_accepts_non_overlapping_suffixes_under_the_same_sku_code(
     home = make_store("home", "Home")
     make_category(
         home,
-        name="Almohada dona",
-        slug="almohada-dona",
+        name="Almohada de figura",
+        slug="almohada-de-figura",
         sku_code="ALM",
-        option_schema=size_schema(("DON-80", "Donut", 80, 80)),
+        option_schema=size_schema(("FIG-80", "Figure", 80, 80)),
     )
 
     response = admin_client_by_email.post(
@@ -276,19 +276,19 @@ def test_admin_accepts_overlapping_codes_in_another_store(admin_client_by_email)
     anime = make_store("anime", "Anime")
     make_category(
         home,
-        name="Almohada dona",
-        slug="almohada-dona",
+        name="Almohada de figura",
+        slug="almohada-de-figura",
         sku_code="ALM",
-        option_schema=size_schema(("DON-80", "Donut", 80, 80)),
+        option_schema=size_schema(("FIG-80", "Figure", 80, 80)),
     )
 
     response = admin_client_by_email.post(
         "/admin/catalog/category/add/",
         category_form(
             anime,
-            name="Almohada dona anime",
+            name="Almohada de figura anime",
             sku_code="ALM",
-            option_schema=size_schema(("DON-80", "Donut", 80, 80)),
+            option_schema=size_schema(("FIG-80", "Figure", 80, 80)),
         ),
     )
 

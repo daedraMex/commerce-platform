@@ -94,7 +94,8 @@ class Category(models.Model):
 
     class Shape(models.TextChoices):
         RECTANGLE = "rectangle", "Rectangle"
-        ROUND = "round", "Round"
+        # Contour is an irregular outline; Phase 4b cuts it out of the background.
+        CONTOUR = "contour", "Contour"
 
     store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="categories")
     name = models.CharField(max_length=200)

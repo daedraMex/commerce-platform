@@ -19,8 +19,8 @@ def size_option(*values):
     ]
 
 
-def donut():
-    return size_option(("DON-80", "Donut", 80, 80))
+def figure():
+    return size_option(("FIG-80", "Figure", 80, 80))
 
 
 def rectangular():
@@ -33,19 +33,19 @@ def rectangular():
 def test_different_suffixes_under_the_same_sku_code_are_accepted():
     others = [OtherCategory("Almohada rectangular", "ALM", rectangular())]
 
-    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=donut(), others=others)
+    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=figure(), others=others)
 
     assert conflicts == ()
 
 
 def test_a_value_code_repeated_under_the_same_sku_code_is_rejected():
-    others = [OtherCategory("Almohada dona", "ALM", donut())]
+    others = [OtherCategory("Almohada de figura", "ALM", figure())]
 
-    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=donut(), others=others)
+    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=figure(), others=others)
 
     assert len(conflicts) == 1
-    assert conflicts[0].category == "Almohada dona"
-    assert conflicts[0].codes == ("DON-80",)
+    assert conflicts[0].category == "Almohada de figura"
+    assert conflicts[0].codes == ("FIG-80",)
 
 
 def test_two_categories_without_options_under_the_same_sku_code_are_rejected():
@@ -59,18 +59,18 @@ def test_two_categories_without_options_under_the_same_sku_code_are_rejected():
 
 
 def test_sku_codes_are_compared_ignoring_case():
-    others = [OtherCategory("Almohada dona", "alm", donut())]
+    others = [OtherCategory("Almohada de figura", "alm", figure())]
 
-    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=donut(), others=others)
+    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=figure(), others=others)
 
     assert len(conflicts) == 1
-    assert conflicts[0].category == "Almohada dona"
+    assert conflicts[0].category == "Almohada de figura"
 
 
 def test_the_same_value_codes_under_different_sku_codes_are_accepted():
-    others = [OtherCategory("Frazada", "FRZ", donut())]
+    others = [OtherCategory("Frazada", "FRZ", figure())]
 
-    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=donut(), others=others)
+    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=figure(), others=others)
 
     assert conflicts == ()
 
