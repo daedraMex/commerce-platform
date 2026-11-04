@@ -79,6 +79,14 @@ def category_form(
     }
 
 
+def test_the_category_admin_uses_the_correct_plural(admin_client_by_email):
+    response = admin_client_by_email.get("/admin/catalog/category/")
+
+    assert response.status_code == 200
+    assert b"categories" in response.content
+    assert b"categorys" not in response.content
+
+
 def test_admin_creates_a_supplier(admin_client_by_email):
     home = make_store("home", "Home")
 

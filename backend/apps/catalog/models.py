@@ -107,6 +107,7 @@ class Category(models.Model):
 
     class Meta:
         ordering = ("store", "name")
+        verbose_name_plural = "categories"
         constraints = [
             models.UniqueConstraint(
                 fields=("store", "slug"), name="catalog_category_store_slug_unique"
