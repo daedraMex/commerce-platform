@@ -23,6 +23,10 @@ from apps.catalog.rules import (
 from apps.stores.models import Store
 from apps.stores.services import lock_store
 
+DESIGNED_SKU_MESSAGE = (
+    "A product with a design generates its SKU; type a SKU only for a product without a design."
+)
+
 
 class Supplier(models.Model):
     """A business a store buys products from; deactivated and never deleted."""
@@ -327,6 +331,8 @@ class ProductVariant(models.Model):
         self.sku = normalize_sku(self.sku)
         if self._state.adding:
             if product.design_id:
+                if self.sku:
+                    raise ValidationError({"sku": DESIGNED_SKU_MESSAGE})
                 self.sku = build_sku(
                     category.sku_code,
                     product.design.number,

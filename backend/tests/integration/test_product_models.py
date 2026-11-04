@@ -243,16 +243,18 @@ def test_a_variant_keeps_a_multi_part_option_value_code():
     assert variant.sku == "ALM-00012-DON-80"
 
 
-def test_a_variant_sku_is_generated_even_when_a_hand_typed_one_is_given():
+def test_a_hand_typed_sku_is_rejected_for_a_product_with_a_design():
     home = make_store("home", "Home")
     supplier = make_supplier(home)
     design = make_design(home, supplier)
     category = make_category(home)
     product = make_product(home, category, design)
 
-    variant = make_variant(product, option_values={}, sku="hand-typed")
+    with pytest.raises(ValidationError) as error:
+        make_variant(product, option_values={}, sku="hand-typed")
 
-    assert variant.sku == "FRZ-00001"
+    assert "without a design" in str(error.value)
+    assert not ProductVariant.objects.exists()
 
 
 def test_a_product_without_a_design_accepts_a_hand_typed_sku():

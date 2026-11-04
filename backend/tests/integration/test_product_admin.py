@@ -141,6 +141,58 @@ def test_admin_shows_a_generated_sku_read_only(admin_client_by_email):
     assert b"disabled" in field.group(0)
 
 
+def sku_input(content, prefix):
+    field = re.search(rb'<input[^>]*name="' + prefix.encode() + rb'-sku"[^>]*>', content)
+    assert field is not None
+    return field.group(0)
+
+
+def test_admin_shows_the_sku_read_only_for_a_designed_product(admin_client_by_email):
+    home = make_store("home", "Home")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+
+    response = admin_client_by_email.get(f"/admin/catalog/product/{product.pk}/change/")
+
+    assert response.status_code == 200
+    assert b"disabled" in sku_input(response.content, "variants-__prefix__")
+
+
+def test_admin_keeps_the_sku_editable_without_a_design(admin_client_by_email):
+    home = make_store("home", "Home")
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category)
+
+    response = admin_client_by_email.get(f"/admin/catalog/product/{product.pk}/change/")
+
+    assert response.status_code == 200
+    assert b"disabled" not in sku_input(response.content, "variants-__prefix__")
+
+
+def test_admin_rejects_a_typed_sku_for_a_designed_product(admin_client_by_email):
+    home = make_store("home", "Home")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+
+    response = admin_client_by_email.post(
+        "/admin/catalog/product/add/",
+        {
+            **product_form(home, category, design),
+            **inline(
+                "variants",
+                [{**variant_row(), "sku": "typed-by-hand"}],
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    assert b"without a design" in response.content
+    assert not Product.objects.exists()
+
+
 def test_admin_shows_an_invalid_attribute_rule_message(admin_client_by_email):
     home = make_store("home", "Home")
     category = make_category(home)

@@ -5,7 +5,14 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.forms.models import BaseInlineFormSet
 
-from apps.catalog.models import Category, Design, Product, ProductVariant, Supplier
+from apps.catalog.models import (
+    DESIGNED_SKU_MESSAGE,
+    Category,
+    Design,
+    Product,
+    ProductVariant,
+    Supplier,
+)
 from apps.catalog.rules import (
     CatalogRuleError,
     normalize_sku,
@@ -100,13 +107,26 @@ class ProductVariantInlineFormSet(BaseInlineFormSet):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        generates_sku = bool(self.instance and self.instance.design_id)
+        generates_sku = self._parent_has_design()
         for form in self.forms:
             if form.instance.pk:
                 form.fields["sku"].disabled = True
                 form.fields["option_values"].disabled = True
             elif generates_sku:
                 form.fields["sku"].disabled = True
+
+    @property
+    def empty_form(self):
+        form = super().empty_form
+        if self._parent_has_design():
+            form.fields["sku"].disabled = True
+        return form
+
+    def _parent_has_design(self):
+        if self.instance and self.instance.design_id:
+            return True
+        # On the add page the parent is not saved yet, so read the submitted design.
+        return bool(self.data and self.data.get("design"))
 
     def clean(self):
         super().clean()
@@ -136,6 +156,10 @@ class ProductVariantInlineFormSet(BaseInlineFormSet):
 
             key = json.dumps(option_values, sort_keys=True)
             own_pk = form.instance.pk
+            raw_sku = (self.data.get(form.add_prefix("sku")) if self.data else "") or ""
+            if own_pk is None and product.design_id and raw_sku.strip():
+                form.add_error("sku", DESIGNED_SKU_MESSAGE)
+                continue
             if key in new_keys or (key in existing_keys and existing_keys[key] != own_pk):
                 form.add_error(
                     "option_values",
