@@ -145,6 +145,34 @@ def test_the_supplier_design_name_is_unique_per_supplier():
     assert make_design(home, other, "JACK TODOS").pk is not None
 
 
+def test_a_supplier_design_name_is_stripped_and_its_inner_whitespace_collapsed():
+    home = make_store("home", "Home")
+    supplier = make_supplier(home)
+
+    design = make_design(home, supplier, "  STRAYKIDS\t AZULCLARO  ")
+
+    assert design.supplier_design_name == "STRAYKIDS AZULCLARO"
+
+
+def test_supplier_design_names_differing_only_in_case_or_spacing_collide():
+    home = make_store("home", "Home")
+    supplier = make_supplier(home)
+    make_design(home, supplier, "STRAYKIDS AZULCLARO")
+
+    for spelling in ("Straykids Azulclaro", "STRAYKIDS  AZULCLARO"):
+        with pytest.raises(IntegrityError), transaction.atomic():
+            make_design(home, supplier, spelling)
+
+
+def test_supplier_design_names_differing_only_in_case_or_spacing_do_not_collide_across_suppliers():
+    home = make_store("home", "Home")
+    beka = make_supplier(home, "Beka")
+    other = make_supplier(home, "Other")
+    make_design(home, beka, "STRAYKIDS AZULCLARO")
+
+    assert make_design(home, other, "Straykids Azulclaro").pk is not None
+
+
 def test_a_category_slug_is_unique_per_store():
     home = make_store("home", "Home")
     anime = make_store("anime", "Anime")

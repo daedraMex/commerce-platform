@@ -1,6 +1,7 @@
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.db.models import Max
+from django.db.models.functions import Lower
 
 from apps.catalog.rules import (
     SLUG_MAX_LENGTH,
@@ -45,8 +46,10 @@ class Design(models.Model):
             models.UniqueConstraint(
                 fields=("store", "number"), name="catalog_design_store_number_unique"
             ),
+            # Case-insensitive per supplier, as ADR-0015 does for email; save() normalizes spacing.
             models.UniqueConstraint(
-                fields=("supplier", "supplier_design_name"),
+                "supplier",
+                Lower("supplier_design_name"),
                 name="catalog_design_supplier_name_unique",
             ),
         ]
@@ -55,6 +58,7 @@ class Design(models.Model):
         return f"{self.formatted_number} {self.name}"
 
     def save(self, *args, **kwargs):
+        self._normalize_supplier_design_name()
         self._validate_supplier_store()
 
         if self._state.adding:
@@ -80,7 +84,12 @@ class Design(models.Model):
         return f"{self.number:05d}"
 
     def clean(self):
+        self._normalize_supplier_design_name()
         self._validate_supplier_store()
+
+    def _normalize_supplier_design_name(self):
+        # Trim the ends and collapse inner runs, keeping the text otherwise as typed.
+        self.supplier_design_name = " ".join((self.supplier_design_name or "").split())
 
     def _validate_supplier_store(self):
         if not self.store_id or not self.supplier_id:
