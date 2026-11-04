@@ -278,83 +278,36 @@ class VariantInUse:
     option_values: Mapping[str, str]
 
 
-def _schema_by_code(schema):
-    return {entry["code"]: entry for entry in schema}
-
-
 def validate_attribute_schema_change(old_schema, new_schema, active_products) -> None:
     """Reject an attribute schema change that would invalidate an active product."""
-    old_by_code = _schema_by_code(old_schema)
-    new_by_code = _schema_by_code(new_schema)
+    if old_schema == new_schema:
+        return
 
     for active_product in active_products:
-        attributes = active_product.attributes or {}
-        for code, new_entry in new_by_code.items():
-            if new_entry["required"] and attributes.get(code) in (None, ""):
-                raise CatalogRuleError(
-                    f"Active product '{active_product.name}' lacks the required attribute '{code}'."
-                )
-
-        for code, value in attributes.items():
-            if value is None:
-                continue
-
-            new_entry = new_by_code.get(code)
-            if new_entry is None:
-                raise CatalogRuleError(
-                    f"Active product '{active_product.name}' uses attribute '{code}', "
-                    "which the new schema removes or renames."
-                )
-
-            old_entry = old_by_code.get(code)
-            if old_entry is not None and old_entry["type"] != new_entry["type"]:
-                raise CatalogRuleError(
-                    f"Active product '{active_product.name}' uses attribute '{code}', "
-                    "whose type the new schema changes."
-                )
-
-            if new_entry["type"] == "choice" and value not in new_entry["choices"]:
-                raise CatalogRuleError(
-                    f"Active product '{active_product.name}' uses the choice '{value}' of "
-                    f"attribute '{code}', which the new schema removes."
-                )
+        try:
+            validate_product_attributes(active_product.attributes or {}, new_schema)
+        except CatalogRuleError as error:
+            raise CatalogRuleError(
+                f"Active product '{active_product.name}' would no longer match the "
+                f"attribute schema: {error}"
+            ) from error
 
 
 def validate_option_schema_change(old_schema, new_schema, variants) -> None:
-    """Reject an option schema change that would invalidate, remove or rename a variant's codes."""
-    old_by_code = _schema_by_code(old_schema)
-    new_by_code = _schema_by_code(new_schema)
+    """Reject an option schema change that would invalidate a variant's option values."""
+    if old_schema == new_schema:
+        return
 
     for variant in variants:
-        option_values = variant.option_values or {}
-        for code, value in option_values.items():
-            old_option = old_by_code.get(code)
-            new_option = new_by_code.get(code)
-
-            if old_option is not None and new_option is None:
-                raise CatalogRuleError(
-                    f"Variant '{variant.sku}' uses option '{code}', which the new schema removes."
-                )
-            if old_option is None or new_option is None:
-                continue
-
-            old_value_codes = {entry["code"] for entry in old_option["values"]}
-            new_value_codes = {entry["code"] for entry in new_option["values"]}
-            if value in old_value_codes and value not in new_value_codes:
-                raise CatalogRuleError(
-                    f"Variant '{variant.sku}' uses value '{value}' of option '{code}', "
-                    "which the new schema removes or renames."
-                )
-
         try:
-            validate_option_values(option_values, new_schema)
+            validate_option_values(variant.option_values or {}, new_schema)
         except CatalogRuleError as error:
             raise CatalogRuleError(
                 f"Variant '{variant.sku}' would no longer match the option schema: {error}"
             ) from error
 
 
-def validate_sku_code_change(old_sku_code, new_sku_code, variants) -> None:
+def validate_category_sku_code_change(old_sku_code, new_sku_code, variants) -> None:
     """A category's SKU code is fixed once a variant's SKU was generated from it."""
     old_code = str(old_sku_code).strip().upper()
     new_code = str(new_sku_code).strip().upper()

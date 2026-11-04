@@ -96,6 +96,20 @@ def test_adding_an_option_value_and_relabelling_an_attribute_is_saved():
     assert category.attribute_schema[0]["label"] == "Coating"
 
 
+def test_a_schema_change_ignores_another_stores_variants():
+    home = make_store("home", "Home")
+    anime = make_store("anime", "Anime")
+    home_category = make_category(home, option_schema=size_schema("IND", "MAX"))
+    anime_category = make_category(anime, option_schema=size_schema("IND", "MAX"))
+    make_variant(make_product(anime, anime_category), {"size": "IND"})
+
+    home_category.option_schema = size_schema("MAX")
+    home_category.save()
+
+    home_category.refresh_from_db()
+    assert [value["code"] for value in home_category.option_schema[0]["values"]] == ["MAX"]
+
+
 def test_saving_a_new_required_attribute_with_an_active_product_is_rejected():
     home = make_store("home", "Home")
     category = make_category(home)
@@ -125,7 +139,7 @@ def test_saving_a_removed_choice_in_use_is_rejected():
     with pytest.raises(ValidationError) as error:
         category.save()
 
-    assert "Matte" in str(error.value)
+    assert "finish" in str(error.value)
     category.refresh_from_db()
     assert category.attribute_schema == old_schema
 

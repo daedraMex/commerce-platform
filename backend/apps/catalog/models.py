@@ -18,12 +18,12 @@ from apps.catalog.rules import (
     slugify,
     validate_attribute_schema,
     validate_attribute_schema_change,
+    validate_category_sku_code_change,
     validate_option_schema,
     validate_option_schema_change,
     validate_option_values,
     validate_prices,
     validate_product_attributes,
-    validate_sku_code_change,
 )
 from apps.stores.models import Store
 from apps.stores.services import lock_store
@@ -189,7 +189,7 @@ class Category(models.Model):
         ]
 
         try:
-            validate_sku_code_change(stored["sku_code"], self.sku_code, variants)
+            validate_category_sku_code_change(stored["sku_code"], self.sku_code, variants)
         except CatalogRuleError as error:
             raise ValidationError({"sku_code": str(error)}) from error
 

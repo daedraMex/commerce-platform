@@ -335,7 +335,7 @@ def test_admin_rejects_a_removed_choice_in_use_naming_the_active_product(
 
     assert response.status_code == 200
     assert b"Frazada Jack Todos" in response.content
-    assert b"Matte" in response.content
+    assert b"finish" in response.content
     category.refresh_from_db()
     assert category.attribute_schema == old_schema
 

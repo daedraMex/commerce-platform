@@ -5,8 +5,8 @@ from apps.catalog.rules import (
     CatalogRuleError,
     VariantInUse,
     validate_attribute_schema_change,
+    validate_category_sku_code_change,
     validate_option_schema_change,
-    validate_sku_code_change,
 )
 
 ATTRIBUTE_SCHEMA = [
@@ -177,7 +177,7 @@ def test_removing_a_choice_in_use_is_rejected():
         )
 
     assert "Frazada Jack Todos" in str(error.value)
-    assert "Matte" in str(error.value)
+    assert "finish" in str(error.value)
 
 
 def test_changing_an_attribute_type_in_use_is_rejected():
@@ -205,6 +205,18 @@ def test_removing_an_attribute_in_use_is_rejected():
 
     assert "Frazada Jack Todos" in str(error.value)
     assert "material" in str(error.value)
+
+
+def test_removing_an_attribute_with_a_null_value_in_use_is_rejected():
+    new_schema = [ATTRIBUTE_SCHEMA[0]]
+
+    with pytest.raises(CatalogRuleError) as error:
+        validate_attribute_schema_change(
+            ATTRIBUTE_SCHEMA, new_schema, [product(material="Flannel", finish=None)]
+        )
+
+    assert "Frazada Jack Todos" in str(error.value)
+    assert "finish" in str(error.value)
 
 
 def test_removing_an_unused_option_value_is_allowed():
@@ -264,14 +276,14 @@ def test_removing_an_option_in_use_is_rejected():
 
 def test_changing_the_sku_code_is_rejected_when_variants_exist():
     with pytest.raises(CatalogRuleError) as error:
-        validate_sku_code_change("FRZ", "FRZD", [variant(size="IND")])
+        validate_category_sku_code_change("FRZ", "FRZD", [variant(size="IND")])
 
     assert "FRZ-00012-IND" in str(error.value)
 
 
 def test_changing_the_sku_code_is_allowed_without_variants():
-    validate_sku_code_change("FRZ", "FRZD", [])
+    validate_category_sku_code_change("FRZ", "FRZD", [])
 
 
 def test_the_same_sku_code_in_another_case_is_not_a_change():
-    validate_sku_code_change("FRZ", "frz", [variant(size="IND")])
+    validate_category_sku_code_change("FRZ", "frz", [variant(size="IND")])
