@@ -116,21 +116,20 @@ class Category(models.Model):
         return self.name
 
     def save(self, *args, **kwargs):
-        self._ensure_slug()
-        if not self.slug:
-            raise ValidationError({"slug": "Add a name that can produce a slug."})
+        self.clean()
         super().save(*args, **kwargs)
 
     def clean(self):
+        self.sku_code = (self.sku_code or "").strip().upper()
         self._ensure_slug()
-        if not self.slug:
-            raise ValidationError({"slug": "Add a name that can produce a slug."})
         self._validate_schema()
         self._validate_sku_overlap()
 
     def _ensure_slug(self):
         if not self.slug and self.name:
             self.slug = slugify(self.name)
+        if not self.slug:
+            raise ValidationError({"slug": "Add a name that can produce a slug."})
 
     def _validate_schema(self):
         try:
@@ -146,7 +145,7 @@ class Category(models.Model):
         if not self.store_id or not self.sku_code:
             return
         others = (
-            Category.objects.filter(store_id=self.store_id, sku_code=self.sku_code)
+            Category.objects.filter(store_id=self.store_id, sku_code__iexact=self.sku_code)
             .exclude(pk=self.pk)
             .only("name", "sku_code", "option_schema")
         )

@@ -52,4 +52,3 @@ class CategoryAdmin(NoDeleteAdmin):
     list_filter = ("store", "shape", "is_active")
     search_fields = ("name", "slug", "sku_code")
     ordering = ("store", "name")
-    readonly_fields = ("slug",)

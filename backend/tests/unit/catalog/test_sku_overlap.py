@@ -58,6 +58,15 @@ def test_two_categories_without_options_under_the_same_sku_code_are_rejected():
     assert conflicts[0].codes == ("",)
 
 
+def test_sku_codes_are_compared_ignoring_case():
+    others = [OtherCategory("Almohada dona", "alm", donut())]
+
+    conflicts = find_sku_conflicts(sku_code="ALM", option_schema=donut(), others=others)
+
+    assert len(conflicts) == 1
+    assert conflicts[0].category == "Almohada dona"
+
+
 def test_the_same_value_codes_under_different_sku_codes_are_accepted():
     others = [OtherCategory("Frazada", "FRZ", donut())]
 

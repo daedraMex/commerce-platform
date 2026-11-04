@@ -181,6 +181,31 @@ def test_admin_rejects_a_malformed_schema_naming_the_wrong_entry(admin_client_by
     assert not Category.objects.exists()
 
 
+def test_admin_rejects_a_duplicate_generated_slug(admin_client_by_email):
+    home = make_store("home", "Home")
+    make_category(
+        home,
+        name="Frazada Térmica",
+        slug="frazada-termica",
+        sku_code="FRZ",
+        option_schema=[],
+    )
+
+    response = admin_client_by_email.post(
+        "/admin/catalog/category/add/",
+        category_form(
+            home,
+            name="Frazada Termica",
+            sku_code="ALM",
+            option_schema=[],
+        ),
+    )
+
+    assert response.status_code == 200
+    assert b"already exists" in response.content
+    assert Category.objects.count() == 1
+
+
 def test_admin_rejects_overlapping_option_value_codes_naming_the_other_category(
     admin_client_by_email,
 ):

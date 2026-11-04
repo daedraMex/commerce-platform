@@ -28,14 +28,27 @@ def make_design(store, supplier, supplier_design_name):
     )
 
 
-def make_category(store, *, name="Frazada", slug="frazada", sku_code="FRZ"):
+def make_category(store, *, name="Frazada", slug="frazada", sku_code="FRZ", option_schema=None):
     return Category.objects.create(
         store=store,
         name=name,
         slug=slug,
         sku_code=sku_code,
         shape=Category.Shape.RECTANGLE,
+        option_schema=option_schema or [],
     )
+
+
+def size_schema(*codes):
+    return [
+        {
+            "code": "size",
+            "label": "Size",
+            "values": [
+                {"code": code, "label": code, "width_cm": 80, "height_cm": 80} for code in codes
+            ],
+        }
+    ]
 
 
 def test_design_numbers_start_at_one_and_increase_per_store():
@@ -138,9 +151,52 @@ def test_a_category_slug_is_unique_per_store():
     make_category(home)
 
     with pytest.raises(IntegrityError), transaction.atomic():
-        make_category(home, name="Frazada other")
+        make_category(home, name="Frazada other", sku_code="ALM")
 
     assert make_category(anime).pk is not None
+
+
+def test_a_category_rejects_a_malformed_schema_when_saved():
+    home = make_store("home", "Home")
+
+    with pytest.raises(ValidationError):
+        Category.objects.create(
+            store=home,
+            name="Frazada",
+            sku_code="FRZ",
+            shape=Category.Shape.RECTANGLE,
+            attribute_schema=[{"code": "material"}],
+        )
+
+    assert not Category.objects.exists()
+
+
+def test_a_category_rejects_overlapping_sku_suffixes_when_saved():
+    home = make_store("home", "Home")
+    make_category(
+        home,
+        name="Almohada dona",
+        slug="almohada-dona",
+        sku_code="ALM",
+        option_schema=size_schema("DON-80"),
+    )
+
+    with pytest.raises(ValidationError):
+        make_category(
+            home,
+            name="Almohada dona again",
+            slug="almohada-dona-again",
+            sku_code="alm",
+            option_schema=size_schema("DON-80"),
+        )
+
+
+def test_a_category_stores_its_sku_code_uppercase():
+    home = make_store("home", "Home")
+
+    category = make_category(home, sku_code="frz")
+
+    assert category.sku_code == "FRZ"
 
 
 def test_a_category_generates_its_slug_from_the_name():

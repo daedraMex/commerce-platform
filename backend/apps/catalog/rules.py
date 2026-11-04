@@ -141,11 +141,6 @@ def validate_option_schema(schema) -> None:
                         )
 
 
-def validate_category_schema(attribute_schema, option_schema) -> None:
-    validate_attribute_schema(attribute_schema)
-    validate_option_schema(option_schema)
-
-
 def sku_suffixes(option_schema) -> frozenset[str]:
     """Every SKU suffix a category can generate, including "" when it has no options."""
     values_by_option = [[value["code"] for value in option["values"]] for option in option_schema]
@@ -173,8 +168,9 @@ def find_sku_conflicts(
     """Report other categories with the same SKU code that can generate the same suffix."""
     own_suffixes = sku_suffixes(option_schema)
     conflicts = []
+    normalised_code = sku_code.strip().upper()
     for other in others:
-        if other.sku_code != sku_code:
+        if other.sku_code.strip().upper() != normalised_code:
             continue
         shared = own_suffixes & sku_suffixes(other.option_schema)
         if shared:
