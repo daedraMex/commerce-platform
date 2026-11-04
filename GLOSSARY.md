@@ -60,20 +60,40 @@ _Avoid_: Assignment, employment
 ### Catalog
 
 **Product**:
-Something a store sells, described once and offered in one or more variants.
+Something one store sells, described once and offered in one or more variants. The same design sold in two stores is two products, with separate stock.
 _Avoid_: Item, article, listing
 
 **Variant**:
-One purchasable version of a product (size, color, design), identified by its SKU.
-_Avoid_: Option, SKU (as the name of the thing)
+One purchasable version of a product, distinguished from its siblings by its option values and identified by its SKU.
+_Avoid_: SKU (as the name of the thing)
+
+**Option**:
+A dimension the variants of a product differ on, such as size or color; each variant has one value per option.
+_Avoid_: Variation, attribute (for this)
+
+**Attribute**:
+A characteristic of a product that its category says it must or may have, such as material or care instructions; it is the same for every variant.
+_Avoid_: Property, feature, spec
 
 **SKU**:
-The code that identifies a variant.
+The code that identifies a variant within its store, the same whatever its letter case.
 _Avoid_: Barcode, reference
 
 **Category**:
-A grouping of products that also defines which attributes its products have.
-_Avoid_: Collection, department
+The type of a product, such as blankets or donut pillows, which defines the attributes and options its products have. Every product has exactly one.
+_Avoid_: Product type, department
+
+**Design**:
+One artwork a store sells, identified by a design number that is never reused, and shared by every product made with it, such as the blanket and the pillow of the same artwork.
+_Avoid_: Pattern, print, model
+
+**Collection**:
+A hand-picked group of a store's products that cuts across categories, such as a season or a theme; a product may be in several or none.
+_Avoid_: Catalog, season, campaign
+
+**Supplier**:
+A business a store buys products from, such as a manufacturer whose designs the store resells.
+_Avoid_: Vendor, provider, manufacturer (as the name of the thing)
 
 ### Inventory
 
