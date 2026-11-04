@@ -11,6 +11,7 @@ from apps.catalog.rules import (
     build_sku,
     default_product_name,
     find_sku_conflicts,
+    format_design_number,
     normalize_sku,
     slugify,
     validate_attribute_schema,
@@ -88,7 +89,7 @@ class Design(models.Model):
     def formatted_number(self):
         if self.number is None:
             return "Assigned on save"
-        return f"{self.number:05d}"
+        return format_design_number(self.number)
 
     def clean(self):
         self._normalize_supplier_design_name()

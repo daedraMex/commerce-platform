@@ -24,11 +24,13 @@ def make_supplier(store, name="Beka"):
     return Supplier.objects.create(store=store, name=name)
 
 
-def make_design(store, supplier, supplier_design_name="JACK TODOS", *, number=None):
+def make_design(
+    store, supplier, supplier_design_name="JACK TODOS", *, number=None, name="Jack Todos"
+):
     design = Design.objects.create(
         store=store,
         supplier=supplier,
-        name="Jack Todos",
+        name=name,
         supplier_design_name=supplier_design_name,
     )
     if number is not None:
@@ -233,6 +235,29 @@ def test_admin_finds_a_product_by_sku_design_number_name_and_supplier_design_nam
 
     assert response.status_code == 200
     assert b"Frazada Jack Todos" in response.content
+
+
+def test_a_design_number_search_keeps_the_active_store_filter(admin_client_by_email):
+    home = make_store("home", "Home")
+    anime = make_store("anime", "Anime")
+    home_design = make_design(home, make_supplier(home), number=12)
+    anime_design = make_design(
+        anime, make_supplier(anime, "Kawaii"), "NEKO", number=12, name="Neko"
+    )
+    Product.objects.create(store=home, category=make_category(home), design=home_design)
+    Product.objects.create(
+        store=anime,
+        category=make_category(anime, name="Frazada anime", slug="frazada-anime"),
+        design=anime_design,
+    )
+
+    response = admin_client_by_email.get(
+        "/admin/catalog/product/", {"q": "00012", "store__id__exact": str(anime.pk)}
+    )
+
+    assert response.status_code == 200
+    assert b"Frazada anime Neko" in response.content
+    assert b"Frazada Jack Todos" not in response.content
 
 
 def test_an_admin_edit_is_written_to_the_admin_log(admin_client_by_email):

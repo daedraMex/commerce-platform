@@ -210,10 +210,11 @@ class ProductAdmin(NoDeleteAdmin):
         return readonly
 
     def get_search_results(self, request, queryset, search_term):
-        queryset, may_have_duplicates = super().get_search_results(request, queryset, search_term)
+        results, may_have_duplicates = super().get_search_results(request, queryset, search_term)
         # Design numbers are integers, so let "00012" find design number 12.
+        # Both sides keep the changelist filters (store, is_active) already applied.
         term = (search_term or "").strip()
         if term.isdigit():
-            queryset = queryset | self.model.objects.filter(design__number=int(term))
+            results = results | queryset.filter(design__number=int(term))
             may_have_duplicates = True
-        return queryset.distinct(), may_have_duplicates
+        return results.distinct(), may_have_duplicates

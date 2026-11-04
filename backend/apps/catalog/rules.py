@@ -193,6 +193,11 @@ def slugify(name: str) -> str:
     return slug[:SLUG_MAX_LENGTH].rstrip("-")
 
 
+def format_design_number(number: int) -> str:
+    """Show a design number with the five digits that its SKUs use."""
+    return f"{int(number):05d}"
+
+
 def default_product_name(category_name: str, design_name: str | None) -> str:
     """Build the name a product gets before the operator edits it."""
     parts = [part.strip() for part in (category_name, design_name) if part and part.strip()]
@@ -268,7 +273,7 @@ def build_sku(
     option_values: Mapping[str, str],
 ) -> str:
     """Build a variant SKU: <category code>-<five-digit design number>-<option codes>."""
-    parts = [str(sku_code).strip().upper(), f"{int(design_number):05d}"]
+    parts = [str(sku_code).strip().upper(), format_design_number(design_number)]
     value_codes = []
     for option in option_schema:
         code = option["code"]
