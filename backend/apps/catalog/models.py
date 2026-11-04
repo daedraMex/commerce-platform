@@ -12,6 +12,7 @@ from apps.catalog.rules import (
     validate_option_schema,
 )
 from apps.stores.models import Store
+from apps.stores.services import lock_store
 
 
 class Supplier(models.Model):
@@ -59,7 +60,7 @@ class Design(models.Model):
         if self._state.adding:
             # The store row is the lock that serializes number assignment for one store.
             with transaction.atomic():
-                Store.objects.select_for_update().only("pk").get(pk=self.store_id)
+                lock_store(self.store_id)
                 last_number = Design.objects.filter(store_id=self.store_id).aggregate(
                     Max("number")
                 )["number__max"]
@@ -126,8 +127,7 @@ class Category(models.Model):
         self._validate_sku_overlap()
 
     def _ensure_slug(self):
-        if not self.slug and self.name:
-            self.slug = slugify(self.name)
+        self.slug = slugify(self.slug or self.name)
         if not self.slug:
             raise ValidationError({"slug": "Add a name that can produce a slug."})
 

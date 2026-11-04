@@ -199,6 +199,36 @@ def test_a_category_stores_its_sku_code_uppercase():
     assert category.sku_code == "FRZ"
 
 
+def test_inactive_categories_still_count_for_sku_overlap():
+    home = make_store("home", "Home")
+    first = make_category(
+        home,
+        name="Almohada dona",
+        slug="almohada-dona",
+        sku_code="ALM",
+        option_schema=size_schema("DON-80"),
+    )
+    first.is_active = False
+    first.save()
+
+    with pytest.raises(ValidationError):
+        make_category(
+            home,
+            name="Almohada dona again",
+            slug="almohada-dona-again",
+            sku_code="ALM",
+            option_schema=size_schema("DON-80"),
+        )
+
+
+def test_a_category_normalizes_a_manually_entered_slug():
+    home = make_store("home", "Home")
+
+    category = make_category(home, name="Frazada", slug="Frazada Térmica")
+
+    assert category.slug == "frazada-termica"
+
+
 def test_a_category_generates_its_slug_from_the_name():
     home = make_store("home", "Home")
 

@@ -85,6 +85,18 @@ def test_a_category_without_options_passes():
         (
             [
                 {
+                    "code": "material",
+                    "label": "Material",
+                    "type": ["text"],
+                    "choices": [],
+                    "required": True,
+                }
+            ],
+            "material",
+        ),
+        (
+            [
+                {
                     "code": "finish",
                     "label": "Finish",
                     "type": "choice",
@@ -189,6 +201,18 @@ def test_a_malformed_attribute_entry_is_rejected_naming_the_entry(broken, needle
                 }
             ],
             "IND",
+        ),
+        (
+            [
+                {
+                    "code": "color",
+                    "label": "Color",
+                    "values": [
+                        {"code": "RED", "label": "Red", "width_cm": 10},
+                    ],
+                }
+            ],
+            "RED",
         ),
         (
             [

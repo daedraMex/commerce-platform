@@ -64,7 +64,7 @@ def validate_attribute_schema(schema) -> None:
         _require_string(entry, "label", name)
 
         attribute_type = entry["type"]
-        if attribute_type not in ATTRIBUTE_TYPES:
+        if not isinstance(attribute_type, str) or attribute_type not in ATTRIBUTE_TYPES:
             raise CatalogRuleError(f"{_capitalized(name)} has the unknown type '{attribute_type}'.")
 
         choices = entry["choices"]
@@ -104,6 +104,7 @@ def validate_option_schema(schema) -> None:
         if not isinstance(values, list) or not values:
             raise CatalogRuleError(f"{_capitalized(name)} needs a non-empty list of 'values'.")
 
+        # ADR-0024 has no size flag; Phase 4 categories call their size option "size".
         is_size = code.strip().lower() == SIZE_OPTION_CODE
         seen_value_codes = set()
         for value_index, value in enumerate(values):
@@ -135,9 +136,10 @@ def validate_option_schema(schema) -> None:
                         )
             else:
                 for dimension in ("width_cm", "height_cm"):
-                    if dimension in value and not _positive_number(value[dimension]):
+                    if dimension in value:
                         raise CatalogRuleError(
-                            f"{_capitalized(value_name)} needs a positive '{dimension}'."
+                            f"{_capitalized(value_name)} has a '{dimension}' but "
+                            f"option '{code}' is not a size."
                         )
 
 
