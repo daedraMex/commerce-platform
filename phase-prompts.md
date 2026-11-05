@@ -286,13 +286,22 @@ apps/orders
 - application: PlaceOrder (reserves stock through StockService, snapshots sku, name,
   unit_price and unit_cost into each item, computes totals), CancelOrder (releases stock).
 - infrastructure: Order (UUID id, human number like AN-000123 per store, store, customer,
-  channel: web, app, tiktok, whatsapp; external_id unique per channel when present,
+  channel: web, app, tiktok, whatsapp, in_person; external_id unique per channel when present,
   status, currency MXN, subtotal, discount_total, shipping_total, tax_total, total,
   shipping_address JSON, placed_at) and OrderItem, with DjangoOrderRepository.
 - interfaces: POST /api/v1/orders/ (customer), GET own orders, staff endpoints for
   status changes guarded by the Authorizer.
 - PlaceOrder runs in one database transaction: all or nothing.
 - Map OutOfStock and InvalidTransition to 409 in the domain exception handler.
+
+Analytics readiness (issue #1, analytics): later reports read orders directly, so from
+this phase on:
+- Every order records its sales channel (storefront, WhatsApp, TikTok Shop, in person).
+- Every order item snapshots price, cost and product data at sale time; reports never
+  join back to the current catalog for them.
+- Every business row has created_at in UTC; reports group by the store's timezone.
+- TikTok Shop orders (Phase 8) are stored as our own orders, so analytics reads one
+  source.
 
 Open for the grilling (issue #1): selling a variant with zero stock when it is made to
 order from its supplier (Phase 5b builds purchasing on top), the supplier's availability
@@ -398,6 +407,9 @@ Goal: the blankets store live at its own domain.
   and a sitemap. Images through next/image.
 - Mobile-first layout: most buyers arrive from TikTok and Instagram on their phones.
 - Deployed on Vercel with a preview per pull request; CI runs lint, type check and build.
+- Product analytics (issue #1, analytics): storefront events (views, cart, funnel,
+  traffic sources) go to a dedicated tool such as PostHog, never into our PostgreSQL,
+  because event volume grows fast. Business analytics stays in PostgreSQL.
 ```
 
 **Done when:** someone buys a blanket on your domain.
@@ -420,6 +432,11 @@ Goal: the anime store and the external channels.
   - Server-side conversion events (Meta Conversions API, TikTok Events API) sent by Celery
     when an order is paid.
 - Storefront pixels per store; UTM parameters stored on the order.
+- Analytics readiness (issue #1, analytics), as in Phase 5: every order records its
+  sales channel (storefront, WhatsApp, TikTok Shop, in person); every order item
+  snapshots price, cost and product data at sale time; every business row has
+  created_at in UTC and reports use the store's timezone; TikTok Shop orders are stored
+  as our own orders, so analytics reads one source.
 ```
 
 **Done when:** a sale on TikTok Shop reduces stock in the platform and appears as an order.
