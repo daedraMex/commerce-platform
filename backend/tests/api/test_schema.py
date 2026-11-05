@@ -199,3 +199,67 @@ def test_schema_documents_staff_me_requires_the_store_header(schema):
         parameter["name"] == "X-Store" and parameter["in"] == "header" and parameter["required"]
         for parameter in parameters
     )
+
+
+def _parameter_names(operation):
+    return {(parameter["name"], parameter["in"]) for parameter in operation["parameters"]}
+
+
+def _success_example(operation):
+    media = operation["responses"]["200"]["content"]["application/json"]
+    return next(iter(media["examples"].values()))["value"]
+
+
+def test_schema_documents_catalog_categories(schema):
+    operation = schema["paths"]["/api/v1/catalog/categories/"]["get"]
+
+    assert ("X-Store", "header") in _parameter_names(operation)
+    assert _success_example(operation)[0]["slug"] == "frazada"
+    assert _example_codes(operation, "400") == {
+        "store_header_missing",
+        "store_header_invalid",
+        "store_not_found",
+    }
+
+
+def test_schema_documents_the_catalog_product_list(schema):
+    operation = schema["paths"]["/api/v1/catalog/products/"]["get"]
+
+    assert {("X-Store", "header"), ("category", "query"), ("search", "query")} <= (
+        _parameter_names(operation)
+    )
+    example = _success_example(operation)
+    assert example["results"][0]["slug"] == "frazada-termica"
+    assert _example_codes(operation, "400") == {
+        "store_header_missing",
+        "store_header_invalid",
+        "store_not_found",
+    }
+
+
+def test_schema_documents_catalog_product_detail(schema):
+    operation = schema["paths"]["/api/v1/catalog/products/{slug}/"]["get"]
+
+    assert {("X-Store", "header"), ("slug", "path")} <= _parameter_names(operation)
+    assert _success_example(operation)["description"]
+    assert _example_codes(operation, "404") == {"not_found"}
+    assert _example_codes(operation, "400") == {
+        "store_header_missing",
+        "store_header_invalid",
+        "store_not_found",
+    }
+
+
+def test_schema_documents_the_catalog_variant_lookup(schema):
+    operation = schema["paths"]["/api/v1/catalog/variants/{sku}/"]["get"]
+
+    assert {("X-Store", "header"), ("sku", "path")} <= _parameter_names(operation)
+    example = _success_example(operation)
+    assert example["sku"] == "FRZ-00012-MAT"
+    assert example["product"]["slug"] == "frazada-termica"
+    assert _example_codes(operation, "404") == {"not_found"}
+    assert _example_codes(operation, "400") == {
+        "store_header_missing",
+        "store_header_invalid",
+        "store_not_found",
+    }

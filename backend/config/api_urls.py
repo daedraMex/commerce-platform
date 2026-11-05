@@ -24,6 +24,7 @@ urlpatterns = [
         SpectacularSwaggerView.as_view(permission_classes=[AllowAny]),
         name="docs",
     ),
+    path("catalog/", include("apps.catalog.urls")),
     path("health/", include("apps.health.urls")),
     path("auth/", include("apps.accounts.urls")),
     path("staff/", include("apps.accounts.staff_urls")),
