@@ -1,5 +1,3 @@
-import unicodedata
-
 from django.db.models import Prefetch
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics
@@ -140,16 +138,10 @@ PRODUCT_PAGE_EXAMPLE = OpenApiExample(
 )
 
 
-def _without_accents(value):
-    decomposed = unicodedata.normalize("NFKD", value)
-    return decomposed.encode("ascii", "ignore").decode("ascii")
-
-
-def active_variants(queryset=None):
+def active_variants():
     """The active variants a product response returns, with their product loaded."""
-    queryset = ProductVariant.objects if queryset is None else queryset
     return (
-        queryset.filter(is_active=True)
+        ProductVariant.objects.filter(is_active=True)
         .select_related("product", "product__category")
         .order_by("sku")
     )
@@ -165,7 +157,7 @@ def visible_products(store_id):
             variants__is_active=True,
         )
         .select_related("category")
-        .prefetch_related(Prefetch("variants", queryset=active_variants(ProductVariant.objects)))
+        .prefetch_related(Prefetch("variants", queryset=active_variants()))
         .distinct()
     )
 
@@ -195,7 +187,7 @@ class ProductListView(StoreScopedMixin, generics.ListAPIView):
 
         search = self.request.query_params.get("search")
         if search:
-            queryset = queryset.filter(name__unaccent__icontains=_without_accents(search))
+            queryset = queryset.filter(name__unaccent__icontains=search)
 
         return queryset.order_by("-created_at", "-id")
 
@@ -227,6 +219,12 @@ class ProductDetailView(StoreScopedMixin, generics.RetrieveAPIView):
 
     def get_queryset(self):
         return visible_products(self.request.store.id)
+
+    def get_object(self):
+        product = self.get_queryset().filter(slug=self.kwargs["slug"]).first()
+        if product is None:
+            raise NotFound("No visible product matches this slug.")
+        return product
 
 
 SKU_PARAMETER = OpenApiParameter(
@@ -268,7 +266,7 @@ class VariantLookupView(StoreScopedMixin, generics.RetrieveAPIView):
     queryset = ProductVariant.objects.none()
 
     def get_queryset(self):
-        return active_variants(ProductVariant.objects).filter(
+        return active_variants().filter(
             store_id=self.request.store.id,
             product__is_active=True,
             product__category__is_active=True,

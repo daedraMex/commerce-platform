@@ -9,9 +9,12 @@ def _option_values(variant):
     for option in category.option_schema:
         code = option["code"]
         value_code = selected.get(code)
-        definition = next(
-            (value for value in option["values"] if value["code"] == value_code),
-            None,
+        definition = (
+            next(
+                (value for value in option["values"] if value["code"] == value_code),
+                None,
+            )
+            or {}
         )
         values.append(
             {
@@ -19,9 +22,9 @@ def _option_values(variant):
                 "label": option["label"],
                 "value": {
                     "code": value_code,
-                    "label": definition["label"] if definition else None,
-                    "width_cm": definition.get("width_cm") if definition else None,
-                    "height_cm": definition.get("height_cm") if definition else None,
+                    "label": definition.get("label"),
+                    "width_cm": definition.get("width_cm"),
+                    "height_cm": definition.get("height_cm"),
                 },
             }
         )

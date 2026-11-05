@@ -329,6 +329,10 @@ def test_product_list_searches_names_ignoring_case_and_accents(client, home):
 
     assert [item["slug"] for item in response.json()["results"]] == [product.slug]
 
+    response = client.get(PRODUCTS_URL, {"search": "FRAZADA TÉRMICA"}, HTTP_X_STORE="home")
+
+    assert [item["slug"] for item in response.json()["results"]] == [product.slug]
+
 
 def test_product_list_is_ordered_newest_first(client, home):
     first = make_product(home, name="First")
