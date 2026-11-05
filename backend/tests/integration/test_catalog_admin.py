@@ -1,11 +1,12 @@
 import json
+from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.urls import reverse
 
-from apps.catalog.models import Category, Design, Supplier
+from apps.catalog.models import Category, Design, Product, ProductVariant, Supplier
 from apps.stores.models import Store
 
 pytestmark = pytest.mark.django_db
@@ -294,6 +295,121 @@ def test_admin_accepts_overlapping_codes_in_another_store(admin_client_by_email)
 
     assert response.status_code == 302
     assert Category.objects.filter(store=anime).count() == 1
+
+
+def test_admin_rejects_a_removed_choice_in_use_naming_the_active_product(
+    admin_client_by_email,
+):
+    home = make_store("home", "Home")
+    old_schema = [
+        {
+            "code": "finish",
+            "label": "Finish",
+            "type": "choice",
+            "choices": ["Matte", "Gloss"],
+            "required": False,
+        }
+    ]
+    category = Category.objects.create(
+        store=home,
+        name="Frazada",
+        slug="frazada",
+        sku_code="FRZ",
+        shape=Category.Shape.RECTANGLE,
+        attribute_schema=old_schema,
+    )
+    Product.objects.create(
+        store=home, category=category, attributes={"finish": "Matte"}, name="Frazada Jack Todos"
+    )
+
+    response = admin_client_by_email.post(
+        f"/admin/catalog/category/{category.pk}/change/",
+        category_form(
+            home,
+            name="Frazada",
+            sku_code="FRZ",
+            option_schema=[],
+            attribute_schema=[{**old_schema[0], "choices": ["Gloss"]}],
+        ),
+    )
+
+    assert response.status_code == 200
+    assert b"Frazada Jack Todos" in response.content
+    assert b"finish" in response.content
+    category.refresh_from_db()
+    assert category.attribute_schema == old_schema
+
+
+def test_admin_rejects_a_removed_option_value_in_use_naming_the_variant_sku(
+    admin_client_by_email,
+):
+    home = make_store("home", "Home")
+    old_schema = size_schema(("IND", "Individual", 110, 160), ("MAX", "Maxi", 175, 160))
+    category = make_category(
+        home,
+        name="Frazada",
+        slug="frazada",
+        sku_code="FRZ",
+        option_schema=old_schema,
+    )
+    product = Product.objects.create(store=home, category=category)
+    variant = ProductVariant.objects.create(
+        product=product,
+        option_values={"size": "IND"},
+        sku="FRZ-00001-IND",
+        price=Decimal("199.00"),
+        cost=Decimal("80.00"),
+    )
+
+    response = admin_client_by_email.post(
+        f"/admin/catalog/category/{category.pk}/change/",
+        category_form(
+            home,
+            name="Frazada",
+            sku_code="FRZ",
+            option_schema=size_schema(("MAX", "Maxi", 175, 160)),
+        ),
+    )
+
+    assert response.status_code == 200
+    assert variant.sku.encode() in response.content
+    category.refresh_from_db()
+    assert category.option_schema == old_schema
+
+
+def test_admin_rejects_changing_the_sku_code_once_a_variant_exists(admin_client_by_email):
+    home = make_store("home", "Home")
+    old_schema = size_schema(("IND", "Individual", 110, 160))
+    category = make_category(
+        home,
+        name="Frazada",
+        slug="frazada",
+        sku_code="FRZ",
+        option_schema=old_schema,
+    )
+    product = Product.objects.create(store=home, category=category)
+    variant = ProductVariant.objects.create(
+        product=product,
+        option_values={"size": "IND"},
+        sku="FRZ-00001-IND",
+        price=Decimal("199.00"),
+        cost=Decimal("80.00"),
+    )
+
+    response = admin_client_by_email.post(
+        f"/admin/catalog/category/{category.pk}/change/",
+        category_form(
+            home,
+            name="Frazada",
+            sku_code="FRZD",
+            option_schema=old_schema,
+        ),
+    )
+
+    assert response.status_code == 200
+    assert variant.sku.encode() in response.content
+    category.refresh_from_db()
+    assert category.sku_code == "FRZ"
 
 
 @pytest.mark.parametrize(

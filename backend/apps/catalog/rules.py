@@ -266,6 +266,62 @@ def validate_option_values(option_values, option_schema: Sequence[Mapping[str, o
             raise CatalogRuleError(f"Unknown value '{value}' for option '{code}'.")
 
 
+@dataclass(frozen=True, slots=True)
+class ActiveProduct:
+    name: str
+    attributes: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class VariantInUse:
+    sku: str
+    option_values: Mapping[str, str]
+
+
+def validate_attribute_schema_change(old_schema, new_schema, active_products) -> None:
+    """Reject an attribute schema change that would invalidate an active product."""
+    if old_schema == new_schema:
+        return
+
+    for active_product in active_products:
+        try:
+            validate_product_attributes(active_product.attributes or {}, new_schema)
+        except CatalogRuleError as error:
+            raise CatalogRuleError(
+                f"Active product '{active_product.name}' would no longer match the "
+                f"attribute schema: {error}"
+            ) from error
+
+
+def validate_option_schema_change(old_schema, new_schema, variants) -> None:
+    """Reject an option schema change that would invalidate a variant's option values."""
+    if old_schema == new_schema:
+        return
+
+    for variant in variants:
+        try:
+            validate_option_values(variant.option_values or {}, new_schema)
+        except CatalogRuleError as error:
+            raise CatalogRuleError(
+                f"Variant '{variant.sku}' would no longer match the option schema: {error}"
+            ) from error
+
+
+def validate_category_sku_code_change(old_sku_code, new_sku_code, variants) -> None:
+    """A category's SKU code is fixed once a variant's SKU was generated from it."""
+    old_code = str(old_sku_code).strip().upper()
+    new_code = str(new_sku_code).strip().upper()
+    if old_code == new_code:
+        return
+
+    variant = next(iter(variants), None)
+    if variant is not None:
+        raise CatalogRuleError(
+            f"The category's SKU code cannot change: variant '{variant.sku}' was "
+            f"generated with '{old_code}'."
+        )
+
+
 def build_sku(
     sku_code: str,
     design_number: int,
