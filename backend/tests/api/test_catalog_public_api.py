@@ -425,6 +425,7 @@ def test_product_detail_shows_attributes_with_labels_and_active_variants(client,
         "slug": "frazada-termica",
         "description": "Warm.",
         "category": {"name": "Frazada", "slug": "frazada"},
+        "collections": [],
         "attributes": [
             {
                 "code": "material",
@@ -685,7 +686,7 @@ def test_product_detail_query_count_does_not_grow_with_variants(
     make_variant(product, option_values={"size": "MAT"})
     make_variant(product, option_values={"size": "IND"})
 
-    with django_assert_max_num_queries(3):
+    with django_assert_max_num_queries(4):
         response = client.get(detail_url(product), HTTP_X_STORE="home")
 
     assert len(response.json()["variants"]) == 2

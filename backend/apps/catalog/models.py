@@ -322,6 +322,84 @@ class Product(models.Model):
             )
 
 
+class Collection(models.Model):
+    """A hand-picked, ordered group of products that cuts across categories."""
+
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="collections")
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(max_length=SLUG_MAX_LENGTH, blank=True)
+    description = models.TextField(blank=True)
+    supplier = models.ForeignKey(
+        Supplier,
+        on_delete=models.PROTECT,
+        related_name="collections",
+        null=True,
+        blank=True,
+    )
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        ordering = ("store", "name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("store", "slug"), name="catalog_collection_store_slug_unique"
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        self.slug = slugify(self.slug or self.name)
+        if not self.slug:
+            raise ValidationError({"slug": "Add a name that can produce a slug."})
+        self._validate_supplier_store()
+
+    def _validate_supplier_store(self):
+        if not self.store_id or not self.supplier_id:
+            return
+        if self.supplier.store_id != self.store_id:
+            raise ValidationError(
+                {"supplier": "The supplier must belong to the collection's store."}
+            )
+
+
+class CollectionProduct(models.Model):
+    """One product's ordered place inside a collection."""
+
+    collection = models.ForeignKey(Collection, on_delete=models.PROTECT, related_name="memberships")
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT, related_name="collection_memberships"
+    )
+    position = models.PositiveIntegerField()
+
+    class Meta:
+        ordering = ("collection", "position", "pk")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("collection", "product"),
+                name="catalog_collectionproduct_collection_product_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.collection} / {self.product}"
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        if not self.collection_id or not self.product_id:
+            return
+        if self.product.store_id != self.collection.store_id:
+            raise ValidationError({"product": "The product must belong to the collection's store."})
+
+
 class ProductVariant(models.Model):
     """A purchasable version of a product with an immutable SKU and its prices."""
 

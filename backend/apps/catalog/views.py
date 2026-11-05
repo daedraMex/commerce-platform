@@ -1,12 +1,13 @@
-from django.db.models import Prefetch
+from django.db.models import IntegerField, OuterRef, Prefetch, Subquery
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
 
-from apps.catalog.models import Category, Product, ProductVariant
+from apps.catalog.models import Category, Collection, CollectionProduct, Product, ProductVariant
 from apps.catalog.serializers import (
     CategorySerializer,
+    CollectionSummarySerializer,
     ProductDetailSerializer,
     ProductSerializer,
     VariantLookupSerializer,
@@ -60,6 +61,41 @@ STORE_ERRORS = problem_response(
 )
 
 
+COLLECTION_EXAMPLE = OpenApiExample(
+    "Halloween 2026",
+    value={
+        "name": "Halloween 2026",
+        "slug": "halloween-2026",
+        "description": "Blankets and pillows for the season.",
+    },
+    response_only=True,
+)
+
+
+@extend_schema(
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=CollectionSummarySerializer(many=True),
+            description="The store's active collections in name order.",
+            examples=[COLLECTION_EXAMPLE],
+        ),
+        **STORE_ERRORS,
+    },
+)
+class CollectionListView(StoreScopedMixin, generics.ListAPIView):
+    permission_classes = [AllowAny]
+    pagination_class = None
+    serializer_class = CollectionSummarySerializer
+    queryset = Collection.objects.none()
+
+    def get_queryset(self):
+        return Collection.objects.filter(
+            store_id=self.request.store.id,
+            is_active=True,
+        ).order_by("name")
+
+
 @extend_schema(
     parameters=[STORE_HEADER_PARAMETER],
     responses={
@@ -96,6 +132,15 @@ SEARCH_PARAMETER = OpenApiParameter(
     location=OpenApiParameter.QUERY,
     required=False,
     description="Only products whose name contains this text, ignoring case and accents.",
+)
+
+COLLECTION_PARAMETER = OpenApiParameter(
+    "collection",
+    location=OpenApiParameter.QUERY,
+    required=False,
+    description=(
+        "Only products in the active collection with this slug, in the collection's curated order."
+    ),
 )
 
 PRODUCT_EXAMPLE = {
@@ -162,12 +207,30 @@ def visible_products(store_id):
     )
 
 
+def with_active_collections(queryset):
+    """Prefetch the active collections a product detail returns."""
+    memberships = (
+        CollectionProduct.objects.filter(collection__is_active=True)
+        .select_related("collection")
+        .order_by("position", "pk")
+    )
+    return queryset.prefetch_related(Prefetch("collection_memberships", queryset=memberships))
+
+
 @extend_schema(
-    parameters=[STORE_HEADER_PARAMETER, CATEGORY_PARAMETER, SEARCH_PARAMETER],
+    parameters=[
+        STORE_HEADER_PARAMETER,
+        CATEGORY_PARAMETER,
+        COLLECTION_PARAMETER,
+        SEARCH_PARAMETER,
+    ],
     responses={
         200: OpenApiResponse(
             response=ProductSerializer(many=True),
-            description="A page of the store's visible products, newest first.",
+            description=(
+                "A page of the store's visible products, newest first or in the "
+                "collection's curated order."
+            ),
             examples=[PRODUCT_PAGE_EXAMPLE],
         ),
         **STORE_ERRORS,
@@ -179,7 +242,8 @@ class ProductListView(StoreScopedMixin, generics.ListAPIView):
     queryset = Product.objects.none()
 
     def get_queryset(self):
-        queryset = visible_products(self.request.store.id)
+        store_id = self.request.store.id
+        queryset = visible_products(store_id)
 
         category = self.request.query_params.get("category")
         if category:
@@ -189,12 +253,39 @@ class ProductListView(StoreScopedMixin, generics.ListAPIView):
         if search:
             queryset = queryset.filter(name__unaccent__icontains=search)
 
+        collection = self.request.query_params.get("collection")
+        if collection:
+            positions = CollectionProduct.objects.filter(
+                product_id=OuterRef("pk"),
+                collection__store_id=store_id,
+                collection__slug=collection,
+                collection__is_active=True,
+            ).values("position")[:1]
+            queryset = (
+                queryset.annotate(
+                    collection_position=Subquery(positions, output_field=IntegerField())
+                )
+                .filter(collection_position__isnull=False)
+                .order_by("collection_position", "id")
+            )
+            return queryset
+
         return queryset.order_by("-created_at", "-id")
 
 
 PRODUCT_DETAIL_EXAMPLE = OpenApiExample(
     "Product detail",
-    value={**PRODUCT_EXAMPLE, "description": "Sublimated flannel blanket."},
+    value={
+        **PRODUCT_EXAMPLE,
+        "description": "Sublimated flannel blanket.",
+        "collections": [
+            {
+                "name": "Halloween 2026",
+                "slug": "halloween-2026",
+                "description": "Blankets and pillows for the season.",
+            }
+        ],
+    },
     response_only=True,
 )
 
@@ -204,7 +295,9 @@ PRODUCT_DETAIL_EXAMPLE = OpenApiExample(
     responses={
         200: OpenApiResponse(
             response=ProductDetailSerializer,
-            description="One visible product with its attributes and active variants.",
+            description=(
+                "One visible product with its attributes, active collections and active variants."
+            ),
             examples=[PRODUCT_DETAIL_EXAMPLE],
         ),
         **STORE_ERRORS,
@@ -218,7 +311,7 @@ class ProductDetailView(StoreScopedMixin, generics.RetrieveAPIView):
     queryset = Product.objects.none()
 
     def get_queryset(self):
-        return visible_products(self.request.store.id)
+        return with_active_collections(visible_products(self.request.store.id))
 
     def get_object(self):
         product = self.get_queryset().filter(slug=self.kwargs["slug"]).first()

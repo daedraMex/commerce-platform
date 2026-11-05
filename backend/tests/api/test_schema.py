@@ -222,12 +222,27 @@ def test_schema_documents_catalog_categories(schema):
     }
 
 
+def test_schema_documents_catalog_collections(schema):
+    operation = schema["paths"]["/api/v1/catalog/collections/"]["get"]
+
+    assert ("X-Store", "header") in _parameter_names(operation)
+    assert _success_example(operation)[0]["slug"] == "halloween-2026"
+    assert _example_codes(operation, "400") == {
+        "store_header_missing",
+        "store_header_invalid",
+        "store_not_found",
+    }
+
+
 def test_schema_documents_the_catalog_product_list(schema):
     operation = schema["paths"]["/api/v1/catalog/products/"]["get"]
 
-    assert {("X-Store", "header"), ("category", "query"), ("search", "query")} <= (
-        _parameter_names(operation)
-    )
+    assert {
+        ("X-Store", "header"),
+        ("category", "query"),
+        ("collection", "query"),
+        ("search", "query"),
+    } <= _parameter_names(operation)
     example = _success_example(operation)
     assert example["results"][0]["slug"] == "frazada-termica"
     assert _example_codes(operation, "400") == {
@@ -242,6 +257,7 @@ def test_schema_documents_catalog_product_detail(schema):
 
     assert {("X-Store", "header"), ("slug", "path")} <= _parameter_names(operation)
     assert _success_example(operation)["description"]
+    assert _success_example(operation)["collections"][0]["slug"] == "halloween-2026"
     assert _example_codes(operation, "404") == {"not_found"}
     assert _example_codes(operation, "400") == {
         "store_header_missing",
