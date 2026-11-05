@@ -279,3 +279,12 @@ def test_schema_documents_the_catalog_variant_lookup(schema):
         "store_header_invalid",
         "store_not_found",
     }
+
+
+def test_schema_documents_the_collection_filter_with_an_example(schema):
+    operation = schema["paths"]["/api/v1/catalog/products/"]["get"]
+    parameter = next(
+        parameter for parameter in operation["parameters"] if parameter["name"] == "collection"
+    )
+
+    assert any(example["value"] == "halloween-2026" for example in parameter["examples"].values())

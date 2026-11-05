@@ -276,3 +276,15 @@ def test_product_detail_query_count_does_not_grow_with_collections(
         response = client.get(detail_url(product), HTTP_X_STORE="home")
 
     assert len(response.json()["collections"]) == 5
+
+
+def test_product_detail_ignores_a_collection_that_moved_to_another_store(client, home, anime):
+    product = make_product(home)
+    collection = Collection.objects.create(store=home, name="Halloween 2026")
+    CollectionProduct.objects.create(collection=collection, product=product, position=1)
+    Collection.objects.filter(pk=collection.pk).update(store=anime)
+
+    response = client.get(detail_url(product), HTTP_X_STORE="home")
+
+    assert response.status_code == 200
+    assert response.json()["collections"] == []

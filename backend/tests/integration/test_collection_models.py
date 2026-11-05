@@ -73,6 +73,22 @@ def test_a_collection_supplier_is_optional():
     assert Collection.objects.create(store=home, name="Halloween 2026").supplier is None
 
 
+def test_a_collection_store_cannot_change_once_it_has_products():
+    home = make_store("home")
+    anime = make_store("anime")
+    product = make_product(home)
+    collection = Collection.objects.create(store=home, name="Halloween 2026")
+    CollectionProduct.objects.create(collection=collection, product=product, position=1)
+
+    collection.store = anime
+
+    with pytest.raises(ValidationError):
+        collection.save()
+
+    collection.refresh_from_db()
+    assert collection.store_id == home.pk
+
+
 def test_a_product_of_another_store_cannot_join_a_collection():
     home = make_store("home")
     anime = make_store("anime")

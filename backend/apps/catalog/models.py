@@ -358,6 +358,7 @@ class Collection(models.Model):
         if not self.slug:
             raise ValidationError({"slug": "Add a name that can produce a slug."})
         self._validate_supplier_store()
+        self._validate_store_change()
 
     def _validate_supplier_store(self):
         if not self.store_id or not self.supplier_id:
@@ -365,6 +366,19 @@ class Collection(models.Model):
         if self.supplier.store_id != self.store_id:
             raise ValidationError(
                 {"supplier": "The supplier must belong to the collection's store."}
+            )
+
+    def _validate_store_change(self):
+        if self._state.adding or not self.pk:
+            return
+        stored_store_id = (
+            Collection.objects.filter(pk=self.pk).values_list("store_id", flat=True).first()
+        )
+        if stored_store_id is None or stored_store_id == self.store_id:
+            return
+        if self.memberships.exists():
+            raise ValidationError(
+                {"store": "A collection's store cannot change once it has products."}
             )
 
 

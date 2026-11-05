@@ -146,3 +146,54 @@ def test_the_collection_admin_lists_its_ordered_products(admin_client_by_email):
 
     assert response.status_code == 200
     assert product.name.encode() in response.content
+
+
+def test_admin_removes_a_product_from_a_collection(admin_client_by_email):
+    home = make_store("home")
+    product = make_product(home)
+    collection = Collection.objects.create(store=home, name="Halloween 2026")
+    membership = CollectionProduct.objects.create(
+        collection=collection, product=product, position=1
+    )
+
+    response = admin_client_by_email.post(
+        f"/admin/catalog/collection/{collection.pk}/change/",
+        {
+            **collection_form(home),
+            **inline(
+                "memberships",
+                [
+                    {
+                        "id": str(membership.pk),
+                        "product": str(product.pk),
+                        "position": "1",
+                        "DELETE": "on",
+                    }
+                ],
+                initial=1,
+            ),
+        },
+    )
+
+    assert response.status_code == 302
+    assert not CollectionProduct.objects.exists()
+
+
+@pytest.mark.parametrize(
+    "url_name",
+    [
+        "admin:catalog_collection_changelist",
+        "admin:catalog_collection_add",
+    ],
+)
+def test_collection_admin_denies_inactive_users(client, url_name):
+    staff = get_user_model().objects.create_user(
+        email="inactive@example.com", is_staff=True, is_active=False
+    )
+    staff.user_permissions.set(Permission.objects.all())
+    client.force_login(staff)
+
+    response = client.get(reverse(url_name))
+
+    assert response.status_code == 302
+    assert response.url.startswith(reverse("admin:login"))

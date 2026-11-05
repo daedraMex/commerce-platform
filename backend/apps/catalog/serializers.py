@@ -146,6 +146,7 @@ class ProductDetailSerializer(ProductSerializer):
                 membership
                 for membership in product.collection_memberships.all()
                 if membership.collection.is_active
+                and membership.collection.store_id == product.store_id
             ),
             key=lambda membership: (membership.position, membership.pk),
         )

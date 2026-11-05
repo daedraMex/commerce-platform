@@ -229,10 +229,6 @@ class CollectionProductInline(admin.TabularInline):
     extra = 0
     fields = ("product", "position")
     ordering = ("position",)
-    can_delete = False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
 
 
 @admin.register(Collection)

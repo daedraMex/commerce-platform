@@ -141,6 +141,13 @@ COLLECTION_PARAMETER = OpenApiParameter(
     description=(
         "Only products in the active collection with this slug, in the collection's curated order."
     ),
+    examples=[
+        OpenApiExample(
+            "Halloween 2026",
+            value="halloween-2026",
+            request_only=True,
+        )
+    ],
 )
 
 PRODUCT_EXAMPLE = {
@@ -207,10 +214,13 @@ def visible_products(store_id):
     )
 
 
-def with_active_collections(queryset):
-    """Prefetch the active collections a product detail returns."""
+def with_active_collections(queryset, store_id):
+    """Prefetch the store's active collections that a product detail returns."""
     memberships = (
-        CollectionProduct.objects.filter(collection__is_active=True)
+        CollectionProduct.objects.filter(
+            collection__store_id=store_id,
+            collection__is_active=True,
+        )
         .select_related("collection")
         .order_by("position", "pk")
     )
@@ -311,7 +321,8 @@ class ProductDetailView(StoreScopedMixin, generics.RetrieveAPIView):
     queryset = Product.objects.none()
 
     def get_queryset(self):
-        return with_active_collections(visible_products(self.request.store.id))
+        store_id = self.request.store.id
+        return with_active_collections(visible_products(store_id), store_id)
 
     def get_object(self):
         product = self.get_queryset().filter(slug=self.kwargs["slug"]).first()
