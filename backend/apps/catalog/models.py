@@ -382,6 +382,16 @@ class Collection(models.Model):
             )
 
 
+class CollectionProductQuerySet(models.QuerySet):
+    def visible_in_store(self, store_id):
+        """The active collections of one store, with their memberships in order."""
+        return (
+            self.filter(collection__store_id=store_id, collection__is_active=True)
+            .select_related("collection")
+            .order_by("collection__name", "position", "pk")
+        )
+
+
 class CollectionProduct(models.Model):
     """One product's ordered place inside a collection."""
 
@@ -390,6 +400,8 @@ class CollectionProduct(models.Model):
         Product, on_delete=models.PROTECT, related_name="collection_memberships"
     )
     position = models.PositiveIntegerField()
+
+    objects = CollectionProductQuerySet.as_manager()
 
     class Meta:
         ordering = ("collection", "position", "pk")

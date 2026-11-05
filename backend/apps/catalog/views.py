@@ -216,14 +216,7 @@ def visible_products(store_id):
 
 def with_active_collections(queryset, store_id):
     """Prefetch the store's active collections that a product detail returns."""
-    memberships = (
-        CollectionProduct.objects.filter(
-            collection__store_id=store_id,
-            collection__is_active=True,
-        )
-        .select_related("collection")
-        .order_by("position", "pk")
-    )
+    memberships = CollectionProduct.objects.visible_in_store(store_id)
     return queryset.prefetch_related(Prefetch("collection_memberships", queryset=memberships))
 
 

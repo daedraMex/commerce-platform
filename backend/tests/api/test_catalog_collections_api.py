@@ -167,14 +167,19 @@ def test_product_list_filters_by_collection_in_its_curated_order(client, home):
 def test_product_list_ignores_collections_of_another_store(client, home, anime):
     home_product = make_product(home, name="Home product")
     anime_product = make_product(anime, name="Anime product")
+    home_collection = Collection.objects.create(store=home, name="Halloween 2026")
     anime_collection = Collection.objects.create(store=anime, name="Halloween 2026")
+    CollectionProduct.objects.create(collection=home_collection, product=home_product, position=1)
     CollectionProduct.objects.create(collection=anime_collection, product=anime_product, position=1)
 
     response = client.get(PRODUCTS_URL, {"collection": "halloween-2026"}, HTTP_X_STORE="home")
 
     assert response.status_code == 200
-    assert response.json()["results"] == []
-    assert home_product.slug not in response.content.decode()
+    assert [item["slug"] for item in response.json()["results"]] == [home_product.slug]
+
+    response = client.get(PRODUCTS_URL, {"collection": "halloween-2026"}, HTTP_X_STORE="anime")
+
+    assert [item["slug"] for item in response.json()["results"]] == [anime_product.slug]
 
 
 def test_filtering_by_an_inactive_collection_returns_no_products(client, home):
@@ -268,14 +273,14 @@ def test_product_detail_query_count_does_not_grow_with_collections(
     client, home, django_assert_max_num_queries
 ):
     product = make_product(home)
-    for index in range(5):
+    for index in range(50):
         collection = Collection.objects.create(store=home, name=f"Collection {index}")
         CollectionProduct.objects.create(collection=collection, product=product, position=index)
 
     with django_assert_max_num_queries(4):
         response = client.get(detail_url(product), HTTP_X_STORE="home")
 
-    assert len(response.json()["collections"]) == 5
+    assert len(response.json()["collections"]) == 50
 
 
 def test_product_detail_ignores_a_collection_that_moved_to_another_store(client, home, anime):

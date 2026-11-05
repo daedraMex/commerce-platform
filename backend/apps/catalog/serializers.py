@@ -141,15 +141,7 @@ class ProductDetailSerializer(ProductSerializer):
 
     @extend_schema_field(CollectionSummarySerializer(many=True))
     def get_collections(self, product):
-        memberships = sorted(
-            (
-                membership
-                for membership in product.collection_memberships.all()
-                if membership.collection.is_active
-                and membership.collection.store_id == product.store_id
-            ),
-            key=lambda membership: (membership.position, membership.pk),
-        )
+        memberships = product.collection_memberships.all()
         return CollectionSummarySerializer(
             [membership.collection for membership in memberships], many=True
         ).data
