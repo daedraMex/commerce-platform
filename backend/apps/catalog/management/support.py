@@ -21,7 +21,7 @@ def resolve_operator(email: str):
     return user
 
 
-def snapshot(variant, fields=PRICE_FIELDS):
+def snapshot(variant, fields):
     """Capture the values an audit entry compares against, before they change."""
     return {field: getattr(variant, field) for field in fields}
 
@@ -35,7 +35,10 @@ def record_variant_change(operator, variant, old_values):
             changes[field] = {"old": _serialise(old), "new": _serialise(new)}
     if not changes:
         return
-    LogEntry.objects.log_actions(operator.pk, [variant], CHANGE, [{"changed": changes}])
+
+    # The admin's get_change_message() reads "fields"; the values keep the detail it omits.
+    detail = {"fields": list(changes), **changes}
+    LogEntry.objects.log_actions(operator.pk, [variant], CHANGE, [{"changed": detail}])
 
 
 def _serialise(value):

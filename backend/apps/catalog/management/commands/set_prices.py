@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.catalog.management.support import (
+    PRICE_FIELDS,
     record_variant_change,
     resolve_operator,
     snapshot,
@@ -13,14 +14,14 @@ from apps.catalog.models import Category, ProductVariant
 from apps.catalog.rules import CatalogRuleError, validate_prices
 from apps.stores.models import Store
 
-UNCHANGED = object()
-
 
 @dataclass(frozen=True)
 class Targets:
     price: Decimal
-    compare_at_price: Decimal | None | object
-    cost: Decimal | object
+    compare_at_price: Decimal | None = None
+    set_compare_at_price: bool = False
+    cost: Decimal = Decimal("0")
+    set_cost: bool = False
 
 
 class Command(BaseCommand):
@@ -57,9 +58,12 @@ class Command(BaseCommand):
 
 def _get_store(slug):
     try:
-        return Store.objects.get(slug=slug)
+        store = Store.objects.get(slug=slug)
     except Store.DoesNotExist as error:
         raise CommandError(f"No store with slug {slug!r}.") from error
+    if not store.is_active:
+        raise CommandError(f"Store {slug!r} is inactive.")
+    return store
 
 
 def _get_category(store, slug):
@@ -90,20 +94,22 @@ def _matching_variants(category, option_value):
 
 
 def _targets(options):
-    compare_at_price = UNCHANGED
-    if options["clear_compare_at_price"]:
-        compare_at_price = None
-    elif options["compare_at_price"] is not None:
+    set_compare_at_price = (
+        options["clear_compare_at_price"] or options["compare_at_price"] is not None
+    )
+    compare_at_price = None
+    if not options["clear_compare_at_price"] and options["compare_at_price"] is not None:
         compare_at_price = _decimal(options["compare_at_price"], "compare-at price")
 
-    cost = UNCHANGED
-    if options["cost"] is not None:
-        cost = _decimal(options["cost"], "cost")
+    set_cost = options["cost"] is not None
+    cost = _decimal(options["cost"], "cost") if set_cost else Decimal("0")
 
     return Targets(
         price=_decimal(options["price"], "price"),
         compare_at_price=compare_at_price,
+        set_compare_at_price=set_compare_at_price,
         cost=cost,
+        set_cost=set_cost,
     )
 
 
@@ -114,13 +120,18 @@ def _decimal(value, name):
         raise CommandError(f"The {name} must be a number, not {value!r}.") from error
     if not number.is_finite():
         raise CommandError(f"The {name} must be a finite number, not {value!r}.")
+    try:
+        if number != number.quantize(Decimal("0.01")):
+            raise CommandError(f"The {name} must have at most two decimal places.")
+    except InvalidOperation as error:
+        raise CommandError(f"The {name} is out of range.") from error
     return number
 
 
 def _validate_targets(targets):
     # Validate the price once even when nothing matches; the per-variant check adds the rest.
-    compare_at_price = None if targets.compare_at_price is UNCHANGED else targets.compare_at_price
-    cost = Decimal("0") if targets.cost is UNCHANGED else targets.cost
+    compare_at_price = targets.compare_at_price if targets.set_compare_at_price else None
+    cost = targets.cost if targets.set_cost else Decimal("0")
     _check_prices(targets.price, compare_at_price, cost)
 
 
@@ -134,12 +145,8 @@ def _check_prices(price, compare_at_price, cost):
 def _apply(matches, targets, *, operator, dry_run):
     changed = []
     for variant in matches:
-        compare_at_price = (
-            variant.compare_at_price
-            if targets.compare_at_price is UNCHANGED
-            else targets.compare_at_price
-        )
-        cost = variant.cost if targets.cost is UNCHANGED else targets.cost
+        compare_at_price = _compare_for(variant, targets)
+        cost = _cost_for(variant, targets)
         _check_prices(targets.price, compare_at_price, cost)
 
         if _already_at(variant, targets):
@@ -148,13 +155,13 @@ def _apply(matches, targets, *, operator, dry_run):
         if dry_run:
             continue
 
-        old_values = snapshot(variant)
+        old_values = snapshot(variant, PRICE_FIELDS)
         variant.price = targets.price
         fields = ["price"]
-        if targets.compare_at_price is not UNCHANGED:
+        if targets.set_compare_at_price:
             variant.compare_at_price = compare_at_price
             fields.append("compare_at_price")
-        if targets.cost is not UNCHANGED:
+        if targets.set_cost:
             variant.cost = cost
             fields.append("cost")
         variant.save(update_fields=fields)
@@ -162,15 +169,24 @@ def _apply(matches, targets, *, operator, dry_run):
     return changed
 
 
+def _compare_for(variant, targets):
+    if targets.set_compare_at_price:
+        return targets.compare_at_price
+    return variant.compare_at_price
+
+
+def _cost_for(variant, targets):
+    if targets.set_cost:
+        return targets.cost
+    return variant.cost
+
+
 def _already_at(variant, targets):
     if variant.price != targets.price:
         return False
-    if (
-        targets.compare_at_price is not UNCHANGED
-        and variant.compare_at_price != targets.compare_at_price
-    ):
+    if targets.set_compare_at_price and variant.compare_at_price != targets.compare_at_price:
         return False
-    if targets.cost is not UNCHANGED and variant.cost != targets.cost:
+    if targets.set_cost and variant.cost != targets.cost:
         return False
     return True
 

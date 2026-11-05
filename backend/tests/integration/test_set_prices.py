@@ -17,8 +17,8 @@ pytestmark = pytest.mark.django_db
 _numbers = count(1)
 
 
-def make_store(slug, name=None):
-    return Store.objects.create(slug=slug, name=name or slug.title())
+def make_store(slug, name=None, *, is_active=True):
+    return Store.objects.create(slug=slug, name=name or slug.title(), is_active=is_active)
 
 
 def make_superuser(email="operator@example.com", *, is_active=True, is_superuser=True):
@@ -109,6 +109,7 @@ def test_reprices_only_the_category_and_option_value_of_one_store():
     mat_active = make_variant(home, frazada, option_values={"size": "MAT"})
     mat_inactive = make_variant(home, frazada, option_values={"size": "MAT"}, is_active=False)
     ind = make_variant(home, frazada, option_values={"size": "IND"})
+    ind_inactive = make_variant(home, frazada, option_values={"size": "IND"}, is_active=False)
     other_category = make_variant(home, almohada, option_values={"size": "MAT"})
     other_store = make_variant(anime, anime_frazada, option_values={"size": "MAT"})
 
@@ -123,7 +124,7 @@ def test_reprices_only_the_category_and_option_value_of_one_store():
     for variant in (mat_active, mat_inactive):
         variant.refresh_from_db()
         assert variant.price == Decimal("249.00")
-    for variant in (ind, other_category, other_store):
+    for variant in (ind, ind_inactive, other_category, other_store):
         variant.refresh_from_db()
         assert variant.price == Decimal("199.00")
 
@@ -335,7 +336,7 @@ def test_raising_the_price_above_the_existing_compare_at_price_fails_and_changes
     assert variant.compare_at_price == Decimal("249.00")
 
 
-@pytest.mark.parametrize("price", ["0", "-1", "abc", "NaN", "Infinity"])
+@pytest.mark.parametrize("price", ["0", "-1", "abc", "NaN", "Infinity", "249.999"])
 def test_an_invalid_price_fails_and_changes_nothing(price):
     home = make_store("home", "Home")
     make_superuser()
@@ -443,10 +444,12 @@ def test_one_admin_log_entry_per_changed_variant_with_old_and_new_prices():
     assert entry.object_repr == changed.sku
 
     changed_fields = json.loads(entry.change_message)[0]["changed"]
+    assert changed_fields["fields"] == ["price", "compare_at_price", "cost"]
     assert changed_fields["price"] == {"old": "199.00", "new": "249.00"}
     assert changed_fields["compare_at_price"] == {"old": None, "new": "299.00"}
     assert changed_fields["cost"] == {"old": "80.00", "new": "90.00"}
     assert not LogEntry.objects.filter(object_id=str(already.pk)).exists()
+    assert "price" in entry.get_change_message()
 
 
 def test_clearing_the_compare_at_price_is_logged_with_the_old_value():
@@ -467,6 +470,26 @@ def test_clearing_the_compare_at_price_is_logged_with_the_old_value():
     entry = LogEntry.objects.get(object_id=str(variant.pk))
     changed_fields = json.loads(entry.change_message)[0]["changed"]
     assert changed_fields["compare_at_price"] == {"old": "299.00", "new": None}
+
+
+def test_dry_run_still_rejects_an_invalid_price():
+    home = make_store("home", "Home")
+    make_superuser()
+    frazada = make_category(home, option_schema=size_schema("MAT"))
+    variant = make_variant(home, frazada, option_values={"size": "MAT"})
+
+    with pytest.raises(CommandError):
+        run_set_prices(
+            store="home",
+            category="frazada",
+            option_value="MAT",
+            price="0",
+            operator="operator@example.com",
+            dry_run=True,
+        )
+
+    variant.refresh_from_db()
+    assert variant.price == Decimal("199.00")
 
 
 def test_dry_run_writes_no_prices_and_no_log_entries():
@@ -569,6 +592,25 @@ def test_an_unknown_option_value_fails_and_changes_nothing():
             store="home",
             category="frazada",
             option_value="NOPE",
+            price="249.00",
+            operator="operator@example.com",
+        )
+
+    variant.refresh_from_db()
+    assert variant.price == Decimal("199.00")
+
+
+def test_an_inactive_store_fails_and_changes_nothing():
+    home = make_store("home", "Home", is_active=False)
+    make_superuser()
+    frazada = make_category(home, option_schema=size_schema("MAT"))
+    variant = make_variant(home, frazada, option_values={"size": "MAT"})
+
+    with pytest.raises(CommandError, match="inactive"):
+        run_set_prices(
+            store="home",
+            category="frazada",
+            option_value="MAT",
             price="249.00",
             operator="operator@example.com",
         )
