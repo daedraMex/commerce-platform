@@ -5,13 +5,20 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.forms.models import BaseInlineFormSet
 
+from apps.catalog.media import (
+    MediaRuleError,
+    prepare_for_store,
+    store_media,
+)
 from apps.catalog.models import (
     DESIGNED_SKU_MESSAGE,
     Category,
     Collection,
     CollectionProduct,
     Design,
+    Media,
     Product,
+    ProductMedia,
     ProductVariant,
     Supplier,
 )
@@ -241,6 +248,81 @@ class CollectionAdmin(NoDeleteAdmin):
     inlines = (CollectionProductInline,)
 
 
+class MediaAddForm(forms.ModelForm):
+    file = forms.FileField()
+
+    class Meta:
+        model = Media
+        fields = ("store", "alt_text", "metadata")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        store = cleaned_data.get("store")
+        upload = cleaned_data.get("file")
+        if store is not None and upload is not None:
+            try:
+                self.prepared_media = prepare_for_store(store, upload)
+            except MediaRuleError as error:
+                self.add_error("file", str(error))
+        return cleaned_data
+
+
+class MediaChangeForm(forms.ModelForm):
+    class Meta:
+        model = Media
+        fields = ("alt_text", "metadata")
+
+
+@admin.register(Media)
+class MediaAdmin(NoDeleteAdmin):
+    list_display = ("storage_key", "store", "mime_type", "width", "height", "alt_text")
+    list_filter = ("store", "mime_type")
+    search_fields = ("storage_key", "content_hash", "alt_text")
+    ordering = ("store", "storage_key")
+    readonly_fields = (
+        "store",
+        "storage_key",
+        "content_hash",
+        "mime_type",
+        "width",
+        "height",
+    )
+
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        return MediaChangeForm if obj is not None else MediaAddForm
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            super().save_model(request, obj, form, change)
+            return
+
+        media = store_media(
+            obj.store,
+            form.cleaned_data["file"],
+            alt_text=obj.alt_text,
+            prepared=form.prepared_media,
+        )
+        for field in (
+            "store",
+            "storage_key",
+            "content_hash",
+            "mime_type",
+            "alt_text",
+            "width",
+            "height",
+            "metadata",
+        ):
+            setattr(obj, field, getattr(media, field))
+        obj.pk = media.pk
+
+
+class ProductMediaInline(admin.TabularInline):
+    model = ProductMedia
+    extra = 0
+    fields = ("media", "variant", "role", "position")
+    ordering = ("position",)
+
+
 @admin.register(Product)
 class ProductAdmin(NoDeleteAdmin):
     list_display = ("name", "category", "design", "store", "is_active")
@@ -260,7 +342,7 @@ class ProductAdmin(NoDeleteAdmin):
         "created_at",
         "updated_at",
     )
-    inlines = (ProductVariantInline,)
+    inlines = (ProductVariantInline, ProductMediaInline)
 
     def get_readonly_fields(self, request, obj=None):
         readonly = list(self.readonly_fields)

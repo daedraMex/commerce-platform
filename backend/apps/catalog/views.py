@@ -1,10 +1,17 @@
-from django.db.models import IntegerField, OuterRef, Prefetch, Subquery
+from django.db.models import Case, IntegerField, OuterRef, Prefetch, Subquery, Value, When
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
 
-from apps.catalog.models import Category, Collection, CollectionProduct, Product, ProductVariant
+from apps.catalog.models import (
+    Category,
+    Collection,
+    CollectionProduct,
+    Product,
+    ProductMedia,
+    ProductVariant,
+)
 from apps.catalog.serializers import (
     CategorySerializer,
     CollectionSummarySerializer,
@@ -190,6 +197,29 @@ PRODUCT_PAGE_EXAMPLE = OpenApiExample(
 )
 
 
+def product_images(store_id):
+    """The store's product images, with the main image first."""
+    return (
+        ProductMedia.objects.filter(media__store_id=store_id)
+        .select_related("media", "variant")
+        .annotate(
+            role_order=Case(
+                When(role=ProductMedia.Role.MAIN, then=Value(0)),
+                default=Value(1),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("product_id", "role_order", "position", "pk")
+    )
+
+
+def main_product_images():
+    """The main image of each product, for a summary that shows one."""
+    return ProductMedia.objects.filter(role=ProductMedia.Role.MAIN).select_related(
+        "media", "variant"
+    )
+
+
 def active_variants():
     """The active variants a product response returns, with their product loaded."""
     return (
@@ -218,6 +248,11 @@ def with_active_collections(queryset, store_id):
     """Prefetch the store's active collections that a product detail returns."""
     memberships = CollectionProduct.objects.visible_in_store(store_id)
     return queryset.prefetch_related(Prefetch("collection_memberships", queryset=memberships))
+
+
+def with_images(queryset, store_id):
+    """Prefetch the store's images that a product detail returns."""
+    return queryset.prefetch_related(Prefetch("product_media", queryset=product_images(store_id)))
 
 
 @extend_schema(
@@ -315,7 +350,7 @@ class ProductDetailView(StoreScopedMixin, generics.RetrieveAPIView):
 
     def get_queryset(self):
         store_id = self.request.store.id
-        return with_active_collections(visible_products(store_id), store_id)
+        return with_images(with_active_collections(visible_products(store_id), store_id), store_id)
 
     def get_object(self):
         product = self.get_queryset().filter(slug=self.kwargs["slug"]).first()
@@ -363,10 +398,14 @@ class VariantLookupView(StoreScopedMixin, generics.RetrieveAPIView):
     queryset = ProductVariant.objects.none()
 
     def get_queryset(self):
-        return active_variants().filter(
-            store_id=self.request.store.id,
-            product__is_active=True,
-            product__category__is_active=True,
+        return (
+            active_variants()
+            .filter(
+                store_id=self.request.store.id,
+                product__is_active=True,
+                product__category__is_active=True,
+            )
+            .prefetch_related(Prefetch("product__product_media", queryset=main_product_images()))
         )
 
     def get_object(self):

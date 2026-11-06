@@ -277,7 +277,7 @@ def test_product_detail_query_count_does_not_grow_with_collections(
         collection = Collection.objects.create(store=home, name=f"Collection {index}")
         CollectionProduct.objects.create(collection=collection, product=product, position=index)
 
-    with django_assert_max_num_queries(4):
+    with django_assert_max_num_queries(5):
         response = client.get(detail_url(product), HTTP_X_STORE="home")
 
     assert len(response.json()["collections"]) == 50

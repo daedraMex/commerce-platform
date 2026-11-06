@@ -1,6 +1,6 @@
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.db.models.functions import Lower
 
 from apps.catalog.rules import (
@@ -321,6 +321,10 @@ class Product(models.Model):
                 "A product's category and design cannot change once it has variants."
             )
 
+    @property
+    def images(self):
+        return self.product_media.all()
+
 
 class Collection(models.Model):
     """A hand-picked, ordered group of products that cuts across categories."""
@@ -560,3 +564,105 @@ class ProductVariant(models.Model):
             if duplicates.exists():
                 raise ValidationError({"sku": "A variant of this store already has this SKU."})
         super().validate_unique(exclude=exclude)
+
+
+class Media(models.Model):
+    """One public product image, stored once per store and reusable by its products."""
+
+    store = models.ForeignKey(Store, on_delete=models.PROTECT, related_name="media")
+    storage_key = models.CharField(max_length=255, unique=True)
+    content_hash = models.CharField(max_length=64)
+    mime_type = models.CharField(max_length=100)
+    alt_text = models.CharField(max_length=255, blank=True)
+    width = models.PositiveIntegerField()
+    height = models.PositiveIntegerField()
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ("store", "storage_key")
+        verbose_name_plural = "media"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("store", "content_hash"),
+                name="catalog_media_store_content_hash_unique",
+            ),
+        ]
+
+    def __str__(self):
+        return self.storage_key
+
+    @property
+    def public_url(self):
+        from apps.catalog.media import media_url
+
+        return media_url(self.storage_key)
+
+    @property
+    def url(self):
+        return self.public_url
+
+    @property
+    def sha256(self):
+        return self.content_hash
+
+
+class ProductMedia(models.Model):
+    """One image linked to a product, optionally for one of its variants."""
+
+    class Role(models.TextChoices):
+        MAIN = "main", "Main"
+        GALLERY = "gallery", "Gallery"
+
+    product = models.ForeignKey(Product, on_delete=models.PROTECT, related_name="product_media")
+    variant = models.ForeignKey(
+        ProductVariant,
+        on_delete=models.PROTECT,
+        related_name="product_media",
+        null=True,
+        blank=True,
+    )
+    media = models.ForeignKey(Media, on_delete=models.PROTECT, related_name="product_media")
+    role = models.CharField(max_length=10, choices=Role.choices, default=Role.MAIN)
+    position = models.PositiveIntegerField(blank=True)
+
+    class Meta:
+        ordering = ("product", "position", "pk")
+        verbose_name_plural = "product media"
+        constraints = [
+            models.UniqueConstraint(
+                fields=("product",),
+                condition=Q(role="main"),
+                name="catalog_productmedia_one_main_per_product",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.product} / {self.media}"
+
+    def save(self, *args, **kwargs):
+        self.clean()
+        if self.position is not None:
+            super().save(*args, **kwargs)
+            return
+
+        with transaction.atomic():
+            # The product row serializes position assignment for one product.
+            Product.objects.select_for_update().get(pk=self.product_id)
+            last_position = ProductMedia.objects.filter(product_id=self.product_id).aggregate(
+                Max("position")
+            )["position__max"]
+            self.position = (last_position or 0) + 1
+            super().save(*args, **kwargs)
+
+    def clean(self):
+        if not self.product_id or not self.media_id:
+            return
+
+        product = self.product
+        if self.media.store_id != product.store_id:
+            raise ValidationError({"media": "The media must belong to the product's store."})
+
+        if self.variant_id is not None and self.variant.product_id != product.pk:
+            raise ValidationError(
+                {"variant": "The variant must belong to the product shown in this image."}
+            )

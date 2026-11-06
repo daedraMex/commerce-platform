@@ -89,6 +89,48 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_BASE_URL = env("MEDIA_BASE_URL", default="http://localhost:8000/media")
+
+# Public product media. R2 in staging and production; local files in development and tests.
+R2_BUCKET_NAME = env("R2_BUCKET_NAME", default=env("AWS_STORAGE_BUCKET_NAME", default=""))
+R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default=env("AWS_ACCESS_KEY_ID", default=""))
+R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default=env("AWS_SECRET_ACCESS_KEY", default=""))
+R2_ENDPOINT_URL = env("R2_ENDPOINT_URL", default=env("AWS_S3_ENDPOINT_URL", default=""))
+
+if R2_BUCKET_NAME:
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "bucket_name": R2_BUCKET_NAME,
+                "access_key": R2_ACCESS_KEY_ID,
+                "secret_key": R2_SECRET_ACCESS_KEY,
+                "endpoint_url": R2_ENDPOINT_URL,
+                "region_name": env("R2_REGION_NAME", default="auto"),
+                "signature_version": "s3v4",
+                "default_acl": None,
+                "querystring_auth": False,
+                "object_parameters": {
+                    "CacheControl": "public, max-age=31536000, immutable",
+                },
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+else:
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Our own modules log at INFO so records such as create_store's survive without an acting user.
