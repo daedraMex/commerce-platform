@@ -311,6 +311,16 @@ class ProductListView(StoreScopedMixin, generics.ListAPIView):
         return queryset.order_by("-created_at", "-id")
 
 
+PRODUCT_IMAGE_EXAMPLE = {
+    "url": "https://media.example.com/stores/1/media/abc123.jpg",
+    "role": "main",
+    "position": 1,
+    "alt_text": "Blue flannel blanket with a moon pattern",
+    "width": 1200,
+    "height": 800,
+    "variant": None,
+}
+
 PRODUCT_DETAIL_EXAMPLE = OpenApiExample(
     "Product detail",
     value={
@@ -323,6 +333,7 @@ PRODUCT_DETAIL_EXAMPLE = OpenApiExample(
                 "description": "Blankets and pillows for the season.",
             }
         ],
+        "images": [PRODUCT_IMAGE_EXAMPLE],
     },
     response_only=True,
 )
@@ -373,7 +384,11 @@ VARIANT_LOOKUP_EXAMPLE = OpenApiExample(
         "options": PRODUCT_EXAMPLE["variants"][0]["options"],
         "price": "499.00",
         "compare_at_price": "699.00",
-        "product": {"name": "Frazada Térmica", "slug": "frazada-termica"},
+        "product": {
+            "name": "Frazada Térmica",
+            "slug": "frazada-termica",
+            "main_image": PRODUCT_IMAGE_EXAMPLE,
+        },
     },
     response_only=True,
 )

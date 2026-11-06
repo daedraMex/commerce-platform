@@ -202,14 +202,8 @@ def test_the_variant_lookup_returns_a_null_main_image_without_one(client, media_
     assert response.json()["product"]["main_image"] is None
 
 
-def test_product_detail_query_count_does_not_grow_with_images(
-    client, django_assert_max_num_queries
-):
-    home = make_store("home")
-    category = make_category(home)
-    product = make_product(home, category=category)
-    make_variant(product)
-    for index in range(5):
+def add_images(home, product, start, count):
+    for index in range(start, start + count):
         media = make_media(
             home,
             key=f"stores/1/media/{index}.jpg",
@@ -217,16 +211,31 @@ def test_product_detail_query_count_does_not_grow_with_images(
         )
         ProductMedia.objects.create(product=product, media=media, role=ProductMedia.Role.GALLERY)
 
+
+def test_product_detail_query_count_does_not_grow_with_images(
+    client, django_assert_max_num_queries
+):
+    home = make_store("home")
+    category = make_category(home)
+    product = make_product(home, category=category)
+    make_variant(product)
+    add_images(home, product, 0, 5)
+
     with django_assert_max_num_queries(5):
         response = client.get(detail_url(product), HTTP_X_STORE="home")
 
     assert len(response.json()["images"]) == 5
 
+    add_images(home, product, 5, 45)
 
-def test_product_list_query_count_does_not_grow_with_images(client, django_assert_max_num_queries):
-    home = make_store("home")
-    category = make_category(home)
-    for index in range(5):
+    with django_assert_max_num_queries(5):
+        response = client.get(detail_url(product), HTTP_X_STORE="home")
+
+    assert len(response.json()["images"]) == 50
+
+
+def make_products_with_images(home, category, start, count):
+    for index in range(start, start + count):
         product = make_product(home, category=category, name=f"Product {index}")
         make_variant(product)
         media = make_media(
@@ -236,7 +245,20 @@ def test_product_list_query_count_does_not_grow_with_images(client, django_asser
         )
         ProductMedia.objects.create(product=product, media=media, role=ProductMedia.Role.MAIN)
 
+
+def test_product_list_query_count_does_not_grow_with_images(client, django_assert_max_num_queries):
+    home = make_store("home")
+    category = make_category(home)
+    make_products_with_images(home, category, 0, 5)
+
     with django_assert_max_num_queries(4):
         response = client.get(PRODUCTS_URL, {"page_size": 5}, HTTP_X_STORE="home")
 
     assert response.json()["count"] == 5
+
+    make_products_with_images(home, category, 5, 45)
+
+    with django_assert_max_num_queries(4):
+        response = client.get(PRODUCTS_URL, {"page_size": 50}, HTTP_X_STORE="home")
+
+    assert response.json()["count"] == 50

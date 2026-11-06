@@ -253,7 +253,7 @@ class MediaAddForm(forms.ModelForm):
 
     class Meta:
         model = Media
-        fields = ("store", "alt_text", "metadata")
+        fields = ("store", "alt_text")
 
     def clean(self):
         cleaned_data = super().clean()

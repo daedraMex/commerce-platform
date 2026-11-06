@@ -2,9 +2,12 @@ from decimal import Decimal
 from io import BytesIO
 
 import pytest
+from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
+from django.urls import reverse
 from PIL import Image
 
 from apps.catalog.models import (
@@ -81,13 +84,9 @@ def media_root(settings, tmp_path):
     return settings.MEDIA_ROOT
 
 
-def upload_url(store):
-    return "/admin/catalog/media/add/"
-
-
 def upload(admin_client_by_email, store, *, name, content, content_type):
     return admin_client_by_email.post(
-        upload_url(store),
+        "/admin/catalog/media/add/",
         {
             "store": str(store.pk),
             "file": SimpleUploadedFile(name, content, content_type=content_type),
@@ -301,3 +300,15 @@ def test_deleting_a_product_media_leaves_the_media():
 
     assert not ProductMedia.objects.exists()
     assert Media.objects.filter(pk=media.pk).exists()
+
+
+@pytest.mark.parametrize("url_name", ["admin:catalog_media_changelist", "admin:catalog_media_add"])
+def test_media_admin_is_reachable_by_superusers_only(client, url_name):
+    staff = get_user_model().objects.create_user(email="staff@example.com", is_staff=True)
+    staff.user_permissions.set(Permission.objects.all())
+    client.force_login(staff)
+
+    response = client.get(reverse(url_name))
+
+    assert response.status_code == 302
+    assert response.url.startswith(reverse("admin:login"))

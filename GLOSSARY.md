@@ -95,6 +95,14 @@ _Avoid_: Catalog, season, campaign
 A business a store buys products from, such as a manufacturer whose designs the store resells.
 _Avoid_: Vendor, provider, manufacturer (as the name of the thing)
 
+**Media**:
+A public product image, stored once per store under a content-addressed key and reusable across that store's products.
+_Avoid_: Image, asset, attachment
+
+**Product image**:
+The link that gives a product, and optionally one of its variants, a Media with a role and a position.
+_Avoid_: Photo (when meaning the link)
+
 ### Inventory
 
 **Location**:
