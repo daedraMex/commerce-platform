@@ -6,13 +6,13 @@ from django.db import transaction
 
 from apps.catalog.management.support import (
     PRICE_FIELDS,
+    get_active_store,
     record_variant_change,
     resolve_operator,
     snapshot,
 )
 from apps.catalog.models import Category, ProductVariant
 from apps.catalog.rules import CatalogRuleError, validate_prices
-from apps.stores.models import Store
 
 
 @dataclass(frozen=True)
@@ -42,7 +42,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         operator = resolve_operator(options["operator"])
         with transaction.atomic():
-            store = _get_store(options["store"])
+            store = get_active_store(options["store"])
             category = _get_category(store, options["category"])
             option_value = _option_value(category, options.get("option_value"))
             matches = _matching_variants(category, option_value)
@@ -54,16 +54,6 @@ class Command(BaseCommand):
             if options["dry_run"]:
                 report += "Dry run: no prices or log entries were written.\n"
             self.stdout.write(report)
-
-
-def _get_store(slug):
-    try:
-        store = Store.objects.get(slug=slug)
-    except Store.DoesNotExist as error:
-        raise CommandError(f"No store with slug {slug!r}.") from error
-    if not store.is_active:
-        raise CommandError(f"Store {slug!r} is inactive.")
-    return store
 
 
 def _get_category(store, slug):
