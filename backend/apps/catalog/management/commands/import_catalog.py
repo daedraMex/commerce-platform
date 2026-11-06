@@ -61,6 +61,15 @@ PAIR_SEPARATOR = "="
 MAX_MONEY = Decimal("99999999.99")
 MAX_DIMENSION = Decimal("999999.99")
 MAX_WEIGHT_GRAMS = 2147483647
+VARIANT_VALUE_FIELDS = (
+    "price",
+    "compare_at_price",
+    "cost",
+    "weight_grams",
+    "package_length_cm",
+    "package_width_cm",
+    "package_height_cm",
+)
 
 
 class RowError(ValueError):
@@ -112,12 +121,14 @@ class RowPlan:
     product: Product
     variant: ProductVariant | None
     old_values: dict = field(default_factory=dict)
+    changed: bool = False
 
 
 @dataclass
 class Report:
     created: int
     updated: int
+    unchanged: int
     rejected: int
     rejections: list
     collections: list
@@ -127,6 +138,7 @@ class Report:
         lines = [
             f"Rows created: {self.created}",
             f"Rows updated: {self.updated}",
+            f"Rows unchanged: {self.unchanged}",
             f"Rows rejected: {self.rejected}",
             f"Collections created: {len(self.collections)}",
         ]
@@ -416,15 +428,18 @@ def _execute(store, rows, rejections, operator, *, dry_run):
     if plan.rejections:
         return _rejected_report(plan.rejections, dry_run)
 
-    created = sum(1 for row_plan in plan.rows if row_plan.variant is None)
-    updated = len(plan.rows) - created
+    existing = [row_plan for row_plan in plan.rows if row_plan.variant is not None]
+    created = len(plan.rows) - len(existing)
+    updated = sum(1 for row_plan in existing if row_plan.changed)
+    unchanged = len(existing) - updated
     if dry_run:
-        return Report(created, updated, 0, [], plan.new_collections, True)
+        return Report(created, updated, unchanged, 0, [], plan.new_collections, True)
 
     _write(plan, operator)
     return Report(
         created,
         updated,
+        unchanged,
         0,
         [],
         [collection.name for collection in plan.new_collections],
@@ -433,7 +448,7 @@ def _execute(store, rows, rejections, operator, *, dry_run):
 
 
 def _rejected_report(rejections, dry_run):
-    return Report(0, 0, len(rejections), rejections, [], dry_run)
+    return Report(0, 0, 0, len(rejections), rejections, [], dry_run)
 
 
 @dataclass
@@ -491,6 +506,7 @@ def _plan(store, rows, *, dry_run):
     product_errors = {}
     new_products = []
     changed_products = []
+    changed_product_keys = set()
     for row in rows:
         if row.product_key in products or row.product_key in product_errors:
             continue
@@ -519,6 +535,7 @@ def _plan(store, rows, *, dry_run):
             product.description = row.description
             product.updated_at = timezone.now()
             changed_products.append(product)
+            changed_product_keys.add(row.product_key)
         products[row.product_key] = product
 
     existing_variants = list(ProductVariant.objects.filter(store=store))
@@ -601,6 +618,14 @@ def _plan(store, rows, *, dry_run):
         (membership.collection_id, membership.product_id) for membership in memberships
     }
 
+    for row_plan in row_plans:
+        row_plan.changed = _row_changed(
+            row_plan,
+            changed_product_keys,
+            collections_by_name,
+            existing_memberships,
+        )
+
     return Plan(
         rows=row_plans,
         new_designs=new_designs,
@@ -614,6 +639,24 @@ def _plan(store, rows, *, dry_run):
     )
 
 
+def _row_changed(row_plan, changed_product_keys, collections_by_name, existing_memberships):
+    """Whether this row would change anything already stored."""
+    if row_plan.variant is None:
+        return False
+    if row_plan.row.product_key in changed_product_keys:
+        return True
+    if any(
+        getattr(row_plan.variant, field) != getattr(row_plan.row, field)
+        for field in VARIANT_VALUE_FIELDS
+    ):
+        return True
+    for name in row_plan.row.collection_names:
+        collection = collections_by_name[name]
+        if (collection.pk, row_plan.product.pk) not in existing_memberships:
+            return True
+    return False
+
+
 def _write(plan, operator):
     if plan.new_designs:
         Design.objects.bulk_create(plan.new_designs)
@@ -624,15 +667,6 @@ def _write(plan, operator):
             plan.changed_products, ["attributes", "description", "updated_at"]
         )
 
-    changed_fields = [
-        "price",
-        "compare_at_price",
-        "cost",
-        "weight_grams",
-        "package_length_cm",
-        "package_width_cm",
-        "package_height_cm",
-    ]
     variants_to_create = []
     variants_to_update = []
     log_entries = []
@@ -646,7 +680,7 @@ def _write(plan, operator):
 
         variant = row_plan.variant
         changed = False
-        for field_name in changed_fields:
+        for field_name in VARIANT_VALUE_FIELDS:
             value = getattr(row, field_name)
             if getattr(variant, field_name) != value:
                 setattr(variant, field_name, value)
@@ -664,7 +698,7 @@ def _write(plan, operator):
     if variants_to_create:
         ProductVariant.objects.bulk_create(variants_to_create)
     if variants_to_update:
-        ProductVariant.objects.bulk_update(variants_to_update, changed_fields)
+        ProductVariant.objects.bulk_update(variants_to_update, VARIANT_VALUE_FIELDS)
 
     if plan.new_collections:
         Collection.objects.bulk_create(plan.new_collections)

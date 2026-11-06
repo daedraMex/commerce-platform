@@ -213,7 +213,7 @@ def test_rows_create_the_collection_membership_in_file_order(tmp_path):
     assert ordered == ["First", "Second"]
 
 
-def test_rerunning_the_same_file_updates_instead_of_duplicating(tmp_path):
+def test_rerunning_the_same_file_reports_every_row_as_unchanged(tmp_path):
     home = make_store()
     make_superuser()
     make_category(home)
@@ -238,7 +238,77 @@ def test_rerunning_the_same_file_updates_instead_of_duplicating(tmp_path):
     assert Design.objects.get().number == design_number
     assert set(ProductVariant.objects.values_list("sku", flat=True)) == skus
     assert "Rows created: 0" in output
-    assert "Rows updated: 2" in output
+    assert "Rows updated: 0" in output
+    assert "Rows unchanged: 2" in output
+
+
+def test_a_rerun_reports_only_the_rows_whose_values_changed(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    first = write_csv(
+        tmp_path,
+        [
+            row(option_values="size=IND"),
+            row(option_values="size=MAT"),
+        ],
+        filename="first.csv",
+    )
+    run_import(store="home", csv=str(first), operator="operator@example.com")
+
+    second = write_csv(
+        tmp_path,
+        [
+            row(option_values="size=IND", price="249.00"),
+            row(option_values="size=MAT"),
+        ],
+        filename="second.csv",
+    )
+    output = run_import(store="home", csv=str(second), operator="operator@example.com")
+
+    assert "Rows created: 0" in output
+    assert "Rows updated: 1" in output
+    assert "Rows unchanged: 1" in output
+
+
+def test_a_rerun_reports_a_changed_product_attribute_as_an_updated_row(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    first = write_csv(tmp_path, [row(option_values="size=IND")], filename="first.csv")
+    run_import(store="home", csv=str(first), operator="operator@example.com")
+
+    second = write_csv(
+        tmp_path,
+        [row(option_values="size=IND", attributes="material=Sublimado HD")],
+        filename="second.csv",
+    )
+    output = run_import(store="home", csv=str(second), operator="operator@example.com")
+
+    assert "Rows updated: 1" in output
+    assert "Rows unchanged: 0" in output
+
+
+def test_a_rerun_reports_a_new_collection_membership_as_an_updated_row(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    first = write_csv(tmp_path, [row(option_values="size=IND")], filename="first.csv")
+    run_import(store="home", csv=str(first), operator="operator@example.com")
+
+    second = write_csv(
+        tmp_path,
+        [row(option_values="size=IND", collections="Halloween 2026")],
+        filename="second.csv",
+    )
+    output = run_import(store="home", csv=str(second), operator="operator@example.com")
+
+    assert "Rows updated: 1" in output
+    assert "Rows unchanged: 0" in output
+    assert CollectionProduct.objects.count() == 1
 
 
 def test_a_rerun_updates_the_prices_and_dimensions_of_existing_variants(tmp_path):
@@ -265,7 +335,7 @@ def test_a_rerun_updates_the_prices_and_dimensions_of_existing_variants(tmp_path
         ],
         filename="changed.csv",
     )
-    run_import(store="home", csv=str(changed), operator="operator@example.com")
+    output = run_import(store="home", csv=str(changed), operator="operator@example.com")
 
     variant = ProductVariant.objects.get()
     assert variant.price == Decimal("249.00")
@@ -274,6 +344,8 @@ def test_a_rerun_updates_the_prices_and_dimensions_of_existing_variants(tmp_path
     assert variant.weight_grams == 1200
     assert variant.package_length_cm == Decimal("40.00")
     assert variant.package_height_cm == Decimal("10.50")
+    assert "Rows updated: 1" in output
+    assert "Rows unchanged: 0" in output
 
 
 def run_import_expecting_error(*args, **options):
