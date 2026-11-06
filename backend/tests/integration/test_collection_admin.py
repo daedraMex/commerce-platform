@@ -197,3 +197,33 @@ def test_collection_admin_denies_inactive_users(client, url_name):
 
     assert response.status_code == 302
     assert response.url.startswith(reverse("admin:login"))
+
+
+def test_admin_assigns_the_next_position_when_it_is_left_empty(admin_client_by_email):
+    home = make_store("home")
+    first = make_product(home, name="First")
+    second = make_product(home, name="Second")
+    third = make_product(home, name="Third")
+
+    response = admin_client_by_email.post(
+        "/admin/catalog/collection/add/",
+        {
+            **collection_form(home),
+            **inline(
+                "memberships",
+                [
+                    {"product": str(first.pk), "position": ""},
+                    {"product": str(second.pk), "position": ""},
+                    {"product": str(third.pk), "position": ""},
+                ],
+            ),
+        },
+    )
+
+    assert response.status_code == 302
+    collection = Collection.objects.get()
+    assert list(collection.memberships.values_list("product__name", "position")) == [
+        ("First", 1),
+        ("Second", 2),
+        ("Third", 3),
+    ]

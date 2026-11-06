@@ -399,7 +399,7 @@ class CollectionProduct(models.Model):
     product = models.ForeignKey(
         Product, on_delete=models.PROTECT, related_name="collection_memberships"
     )
-    position = models.PositiveIntegerField()
+    position = models.PositiveIntegerField(blank=True)
 
     objects = CollectionProductQuerySet.as_manager()
 
@@ -417,7 +417,18 @@ class CollectionProduct(models.Model):
 
     def save(self, *args, **kwargs):
         self.clean()
-        super().save(*args, **kwargs)
+        if self.position is not None:
+            super().save(*args, **kwargs)
+            return
+
+        with transaction.atomic():
+            # The collection row serializes position assignment for one collection.
+            Collection.objects.select_for_update().get(pk=self.collection_id)
+            last_position = CollectionProduct.objects.filter(
+                collection_id=self.collection_id
+            ).aggregate(Max("position"))["position__max"]
+            self.position = (last_position or 0) + 1
+            super().save(*args, **kwargs)
 
     def clean(self):
         if not self.collection_id or not self.product_id:

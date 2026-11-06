@@ -136,3 +136,30 @@ def test_positions_order_the_products_of_a_collection():
     ordered = collection.memberships.values_list("product__name", flat=True)
 
     assert list(ordered) == ["Second", "Third", "First"]
+
+
+def test_the_model_assigns_the_next_position_when_it_is_left_empty():
+    home = make_store("home")
+    collection = Collection.objects.create(store=home, name="Halloween 2026")
+    products = [make_product(home, name=name) for name in ("First", "Second", "Third")]
+
+    for product in products:
+        CollectionProduct.objects.create(collection=collection, product=product)
+
+    assert list(collection.memberships.values_list("product__name", "position")) == [
+        ("First", 1),
+        ("Second", 2),
+        ("Third", 3),
+    ]
+
+
+def test_an_explicit_position_is_kept_and_the_next_follows_the_highest():
+    home = make_store("home")
+    collection = Collection.objects.create(store=home, name="Halloween 2026")
+    first = make_product(home, name="First")
+    second = make_product(home, name="Second")
+
+    CollectionProduct.objects.create(collection=collection, product=first, position=7)
+    membership = CollectionProduct.objects.create(collection=collection, product=second)
+
+    assert membership.position == 8
