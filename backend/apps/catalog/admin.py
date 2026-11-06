@@ -8,6 +8,8 @@ from django.forms.models import BaseInlineFormSet
 from apps.catalog.models import (
     DESIGNED_SKU_MESSAGE,
     Category,
+    Collection,
+    CollectionProduct,
     Design,
     Product,
     ProductVariant,
@@ -203,6 +205,40 @@ class ProductVariantInline(admin.TabularInline):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+class CollectionProductInlineFormSet(BaseInlineFormSet):
+    """Reject products of another store before the parent collection is saved."""
+
+    def clean(self):
+        super().clean()
+        collection = self.instance
+        if not collection.store_id:
+            return
+        for form in self.forms:
+            if not form.cleaned_data or form.cleaned_data.get("DELETE"):
+                continue
+            product = form.cleaned_data.get("product")
+            if product is not None and product.store_id != collection.store_id:
+                form.add_error("product", "The product must belong to the collection's store.")
+
+
+class CollectionProductInline(admin.TabularInline):
+    model = CollectionProduct
+    formset = CollectionProductInlineFormSet
+    extra = 0
+    fields = ("product", "position")
+    ordering = ("position",)
+
+
+@admin.register(Collection)
+class CollectionAdmin(NoDeleteAdmin):
+    list_display = ("name", "store", "slug", "supplier", "is_active")
+    list_filter = ("store", "is_active")
+    search_fields = ("name", "slug")
+    ordering = ("store", "name")
+    fields = ("store", "name", "slug", "description", "supplier", "is_active")
+    inlines = (CollectionProductInline,)
 
 
 @admin.register(Product)

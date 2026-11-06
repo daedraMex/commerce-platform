@@ -72,6 +72,12 @@ class CategorySummarySerializer(serializers.Serializer):
     slug = serializers.CharField()
 
 
+class CollectionSummarySerializer(serializers.Serializer):
+    name = serializers.CharField()
+    slug = serializers.CharField()
+    description = serializers.CharField()
+
+
 class VariantOptionSerializer(serializers.Serializer):
     code = serializers.CharField()
     label = serializers.CharField()
@@ -131,3 +137,11 @@ class ProductSerializer(serializers.Serializer):
 
 class ProductDetailSerializer(ProductSerializer):
     description = serializers.CharField()
+    collections = serializers.SerializerMethodField()
+
+    @extend_schema_field(CollectionSummarySerializer(many=True))
+    def get_collections(self, product):
+        memberships = product.collection_memberships.all()
+        return CollectionSummarySerializer(
+            [membership.collection for membership in memberships], many=True
+        ).data
