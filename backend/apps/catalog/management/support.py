@@ -6,7 +6,20 @@ from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth import get_user_model
 from django.core.management.base import CommandError
 
+from apps.stores.models import Store
+
 PRICE_FIELDS = ("price", "compare_at_price", "cost")
+
+
+def get_active_store(slug):
+    """Return the active store named by slug, or reject the command."""
+    try:
+        store = Store.objects.get(slug=slug)
+    except Store.DoesNotExist as error:
+        raise CommandError(f"No store with slug {slug!r}.") from error
+    if not store.is_active:
+        raise CommandError(f"Store {slug!r} is inactive.")
+    return store
 
 
 def resolve_operator(email: str):

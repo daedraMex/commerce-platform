@@ -758,3 +758,78 @@ def test_adding_variants_to_existing_products_stays_within_a_bounded_query_count
 
     assert "Rows created: 400" in output
     assert ProductVariant.objects.count() == 600
+
+
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"price": "100000000.00"}, "at most"),
+        ({"package_length_cm": "1000000.00"}, "at most"),
+        ({"weight_grams": "2147483648"}, "at most"),
+    ],
+)
+def test_out_of_range_values_reject_the_row_before_writing(tmp_path, overrides, reason):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    path = write_csv(tmp_path, [row(**overrides)])
+
+    output = run_import_expecting_error(
+        store="home", csv=str(path), operator="operator@example.com"
+    )
+
+    assert "Rows rejected: 1" in output
+    assert reason in output
+    assert not Design.objects.exists()
+    assert not Product.objects.exists()
+    assert not ProductVariant.objects.exists()
+
+
+def test_a_collection_name_that_cannot_become_a_slug_rejects_the_row(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    path = write_csv(tmp_path, [row(collections="***")])
+
+    output = run_import_expecting_error(
+        store="home", csv=str(path), operator="operator@example.com"
+    )
+
+    assert "Rows rejected: 1" in output
+    assert "Cannot build a collection slug" in output
+    assert not Collection.objects.exists()
+
+
+def test_a_product_name_that_cannot_become_a_slug_rejects_the_row(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(
+        home,
+        name="日本",
+        slug="nihon",
+        sku_code="NIH",
+        option_schema=[],
+    )
+    make_supplier(home)
+    path = write_csv(
+        tmp_path,
+        [
+            row(
+                category="nihon",
+                option_values="",
+                supplier_design_name="DESIGN 1",
+                design_name="デザイン",
+            )
+        ],
+    )
+
+    output = run_import_expecting_error(
+        store="home", csv=str(path), operator="operator@example.com"
+    )
+
+    assert "Rows rejected: 1" in output
+    assert "Cannot build a slug" in output
+    assert not Design.objects.exists()
+    assert not Product.objects.exists()

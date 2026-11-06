@@ -14,6 +14,7 @@ from django.utils import timezone
 from apps.catalog.management.support import (
     PRICE_FIELDS,
     build_variant_change_entry,
+    get_active_store,
     resolve_operator,
     snapshot,
 )
@@ -36,7 +37,6 @@ from apps.catalog.rules import (
     validate_prices,
     validate_product_attributes,
 )
-from apps.stores.models import Store
 from apps.stores.services import lock_store
 
 REQUIRED_COLUMNS = ("category", "supplier", "supplier_design_name", "design_name", "price", "cost")
@@ -55,6 +55,12 @@ FIXED_COLUMNS = frozenset(REQUIRED_COLUMNS) | {
 }
 LIST_SEPARATOR = ";"
 PAIR_SEPARATOR = "="
+# Mirrors the model fields: DecimalField(max_digits=10, decimal_places=2) for money,
+# DecimalField(max_digits=8, decimal_places=2) for package dimensions, and a 32-bit
+# PositiveIntegerField for weight.
+MAX_MONEY = Decimal("99999999.99")
+MAX_DIMENSION = Decimal("999999.99")
+MAX_WEIGHT_GRAMS = 2147483647
 
 
 class RowError(ValueError):
@@ -145,7 +151,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         # The operator is checked before the file, the store or any catalog row is read.
         operator = resolve_operator(options["operator"])
-        store = _get_store(options["store"])
+        store = get_active_store(options["store"])
         dry_run = options["dry_run"]
 
         rows, rejections = _read_rows(options["csv"], store)
@@ -159,16 +165,6 @@ class Command(BaseCommand):
         self.stdout.write(report.render())
         if report.rejected:
             raise CommandError(f"{report.rejected} row(s) rejected.")
-
-
-def _get_store(slug):
-    try:
-        store = Store.objects.get(slug=slug)
-    except Store.DoesNotExist as error:
-        raise CommandError(f"No store with slug {slug!r}.") from error
-    if not store.is_active:
-        raise CommandError(f"Store {slug!r} is inactive.")
-    return store
 
 
 def _read_rows(path, store):
@@ -245,13 +241,18 @@ def _parse_row(raw, line, categories, suppliers):
     except CatalogRuleError as error:
         raise RowError(str(error)) from error
 
-    price = _required_decimal(raw, "price")
-    cost = _required_decimal(raw, "cost")
-    compare_at_price = _optional_decimal(raw, "compare_at_price")
+    price = _required_decimal(raw, "price", max_value=MAX_MONEY)
+    cost = _required_decimal(raw, "cost", max_value=MAX_MONEY)
+    compare_at_price = _optional_decimal(raw, "compare_at_price", max_value=MAX_MONEY)
     try:
         validate_prices(price, compare_at_price, cost)
     except CatalogRuleError as error:
         raise RowError(str(error)) from error
+
+    collection_names = _collection_names(raw)
+    for name in collection_names:
+        if not slugify(name):
+            raise RowError(f"Cannot build a collection slug from {name!r}.")
 
     return ParsedRow(
         line=line,
@@ -263,11 +264,11 @@ def _parse_row(raw, line, categories, suppliers):
         price=price,
         compare_at_price=compare_at_price,
         cost=cost,
-        weight_grams=_optional_int(raw, "weight_grams"),
-        package_length_cm=_optional_decimal(raw, "package_length_cm"),
-        package_width_cm=_optional_decimal(raw, "package_width_cm"),
-        package_height_cm=_optional_decimal(raw, "package_height_cm"),
-        collection_names=_collection_names(raw),
+        weight_grams=_optional_int(raw, "weight_grams", max_value=MAX_WEIGHT_GRAMS),
+        package_length_cm=_optional_decimal(raw, "package_length_cm", max_value=MAX_DIMENSION),
+        package_width_cm=_optional_decimal(raw, "package_width_cm", max_value=MAX_DIMENSION),
+        package_height_cm=_optional_decimal(raw, "package_height_cm", max_value=MAX_DIMENSION),
+        collection_names=collection_names,
         attributes=attributes,
         description=_text(raw, "description"),
     )
@@ -358,24 +359,24 @@ def _collection_names(raw):
     return tuple(seen)
 
 
-def _required_decimal(raw, key):
+def _required_decimal(raw, key, *, max_value=None):
     value = _text(raw, key)
     if not value:
         raise RowError(f"The {key.replace('_', '-')} is required.")
-    return _as_decimal(value, key.replace("_", "-"))
+    return _as_decimal(value, key.replace("_", "-"), max_value=max_value)
 
 
-def _optional_decimal(raw, key):
+def _optional_decimal(raw, key, *, max_value=None):
     value = _text(raw, key)
     if not value:
         return None
-    number = _as_decimal(value, key.replace("_", "-"))
+    number = _as_decimal(value, key.replace("_", "-"), max_value=max_value)
     if number < 0:
         raise RowError(f"The {key.replace('_', '-')} must not be negative.")
     return number
 
 
-def _as_decimal(value, name):
+def _as_decimal(value, name, *, max_value=None):
     try:
         number = Decimal(value)
     except (InvalidOperation, TypeError, ValueError) as error:
@@ -387,10 +388,12 @@ def _as_decimal(value, name):
             raise RowError(f"The {name} must have at most two decimal places.")
     except InvalidOperation as error:
         raise RowError(f"The {name} is out of range.") from error
+    if max_value is not None and number > max_value:
+        raise RowError(f"The {name} must be at most {max_value}.")
     return number
 
 
-def _optional_int(raw, key):
+def _optional_int(raw, key, *, max_value=None):
     value = _text(raw, key)
     if not value:
         return None
@@ -400,17 +403,18 @@ def _optional_int(raw, key):
         raise RowError(f"The {key.replace('_', '-')} must be a whole number.") from error
     if number < 0:
         raise RowError(f"The {key.replace('_', '-')} must not be negative.")
+    if max_value is not None and number > max_value:
+        raise RowError(f"The {key.replace('_', '-')} must be at most {max_value}.")
     return number
 
 
 def _execute(store, rows, rejections, operator, *, dry_run):
     if rejections:
-        return Report(0, 0, len(rejections), rejections, [], dry_run)
+        return _rejected_report(rejections, dry_run)
 
     plan = _plan(store, rows, dry_run=dry_run)
-    rejections = plan.rejections
-    if rejections:
-        return Report(0, 0, len(rejections), rejections, [], dry_run)
+    if plan.rejections:
+        return _rejected_report(plan.rejections, dry_run)
 
     created = sum(1 for row_plan in plan.rows if row_plan.variant is None)
     updated = len(plan.rows) - created
@@ -426,6 +430,10 @@ def _execute(store, rows, rejections, operator, *, dry_run):
         [collection.name for collection in plan.new_collections],
         False,
     )
+
+
+def _rejected_report(rejections, dry_run):
+    return Report(0, 0, len(rejections), rejections, [], dry_run)
 
 
 @dataclass
@@ -480,21 +488,27 @@ def _plan(store, rows, *, dry_run):
     used_product_slugs = {product.slug for product in existing_products}
 
     products = {}
+    product_errors = {}
     new_products = []
     changed_products = []
     for row in rows:
-        if row.product_key in products:
+        if row.product_key in products or row.product_key in product_errors:
             continue
         design = designs[row.design_key]
         product = products_by_key.get((design.pk, row.category.pk)) if design.pk else None
         if product is None:
             name = default_product_name(row.category.name, design.name)
+            try:
+                slug = _unique_slug(name, used_product_slugs)
+            except RowError as error:
+                product_errors[row.product_key] = str(error)
+                continue
             product = Product(
                 store=store,
                 category=row.category,
                 design=design,
                 name=name,
-                slug=_unique_slug(name, used_product_slugs),
+                slug=slug,
                 attributes=row.attributes,
                 description=row.description,
                 is_active=True,
@@ -514,6 +528,10 @@ def _plan(store, rows, *, dry_run):
     rejections = []
     seen = {}
     for row in rows:
+        if row.product_key in product_errors:
+            rejections.append(Rejection(row.line, product_errors[row.product_key]))
+            continue
+
         design = designs[row.design_key]
         product = products[row.product_key]
 
