@@ -1,4 +1,9 @@
+import hashlib
+import math
+import struct
+import zlib
 from decimal import Decimal
+from fractions import Fraction
 from io import BytesIO
 
 import pytest
@@ -77,6 +82,37 @@ def image_bytes(image_format="JPEG", size=(12, 8), color=(20, 30, 40)):
     return buffer.getvalue()
 
 
+def jpeg_with_exif(*, size=(12, 8), orientation=None, gps=False):
+    image = Image.new("RGB", size, (20, 30, 40))
+    exif = Image.Exif()
+    if orientation is not None:
+        exif[0x0112] = orientation
+    if gps:
+        gps_ifd = exif.get_ifd(0x8825)
+        gps_ifd[1] = "N"
+        gps_ifd[2] = (Fraction(1, 1), Fraction(2, 1), Fraction(3, 1))
+        gps_ifd[3] = "E"
+        gps_ifd[4] = (Fraction(4, 1), Fraction(5, 1), Fraction(6, 1))
+        exif[0x8825] = gps_ifd
+    buffer = BytesIO()
+    image.save(buffer, format="JPEG", exif=exif)
+    return buffer.getvalue()
+
+
+def png_with_declared_size(width, height):
+    buffer = BytesIO()
+    Image.new("RGB", (4, 4), (1, 2, 3)).save(buffer, format="PNG")
+    content = bytearray(buffer.getvalue())
+    struct.pack_into(">II", content, 16, width, height)
+    struct.pack_into(">I", content, 29, zlib.crc32(content[12:29]) & 0xFFFFFFFF)
+    return bytes(content)
+
+
+def png_of_declared_pixels(pixels):
+    side = math.isqrt(pixels) + 1
+    return png_with_declared_size(side, side)
+
+
 @pytest.fixture
 def media_root(settings, tmp_path):
     settings.MEDIA_ROOT = tmp_path / "media"
@@ -142,6 +178,65 @@ def test_the_storage_key_is_content_addressed(admin_client_by_email, media_root)
 
     media = Media.objects.get()
     assert media.storage_key == f"stores/{home.pk}/media/{media.content_hash}.jpg"
+
+
+def test_uploading_a_jpeg_drops_its_gps_metadata(admin_client_by_email, media_root):
+    home = make_store("home")
+
+    response = upload(
+        admin_client_by_email,
+        home,
+        name="location.jpg",
+        content=jpeg_with_exif(gps=True),
+        content_type="image/jpeg",
+    )
+
+    assert response.status_code == 302
+    media = Media.objects.get()
+    stored_path = media_root / media.storage_key
+    with Image.open(stored_path) as stored:
+        assert 0x8825 not in stored.getexif()
+    assert media.content_hash == hashlib.sha256(stored_path.read_bytes()).hexdigest()
+    assert media.metadata["bytes"] == stored_path.stat().st_size
+
+
+def test_uploading_a_jpeg_applies_its_exif_orientation(admin_client_by_email, media_root):
+    home = make_store("home")
+
+    response = upload(
+        admin_client_by_email,
+        home,
+        name="sideways.jpg",
+        content=jpeg_with_exif(size=(400, 300), orientation=6),
+        content_type="image/jpeg",
+    )
+
+    assert response.status_code == 302
+    media = Media.objects.get()
+    assert (media.width, media.height) == (300, 400)
+    with Image.open(media_root / media.storage_key) as stored:
+        assert stored.size == (300, 400)
+        assert 0x0112 not in stored.getexif()
+
+
+@pytest.mark.parametrize(
+    "pixels",
+    [Image.MAX_IMAGE_PIXELS + 1, 2 * Image.MAX_IMAGE_PIXELS + 1],
+)
+def test_a_png_declaring_too_many_pixels_is_rejected(admin_client_by_email, media_root, pixels):
+    home = make_store("home")
+
+    response = upload(
+        admin_client_by_email,
+        home,
+        name="bomb.png",
+        content=png_of_declared_pixels(pixels),
+        content_type="image/png",
+    )
+
+    assert response.status_code == 200
+    assert b"JPEG, PNG or WebP" in response.content
+    assert not Media.objects.exists()
 
 
 def test_uploading_the_same_file_twice_reuses_one_media(admin_client_by_email, media_root):
@@ -242,6 +337,37 @@ def test_media_builds_its_public_url_from_the_storage_key(media_root):
     media = make_media(home, key="stores/1/media/abc.jpg")
 
     assert media.public_url == "https://media.example.com/stores/1/media/abc.jpg"
+
+
+def test_media_has_no_unused_url_or_sha256_aliases():
+    assert not hasattr(Media, "url")
+    assert not hasattr(Media, "sha256")
+
+
+def test_a_product_has_no_unused_images_alias():
+    assert not hasattr(Product, "images")
+
+
+def test_media_admin_shows_a_thumbnail_in_the_list(admin_client_by_email, media_root):
+    home = make_store("home")
+    media = make_media(home, key="stores/1/media/abc.jpg")
+
+    response = admin_client_by_email.get("/admin/catalog/media/")
+
+    assert response.status_code == 200
+    assert b"<img" in response.content
+    assert media.public_url.encode() in response.content
+
+
+def test_media_admin_shows_a_thumbnail_on_the_change_page(admin_client_by_email, media_root):
+    home = make_store("home")
+    media = make_media(home, key="stores/1/media/abc.jpg")
+
+    response = admin_client_by_email.get(f"/admin/catalog/media/{media.pk}/change/")
+
+    assert response.status_code == 200
+    assert b"<img" in response.content
+    assert media.public_url.encode() in response.content
 
 
 def test_a_product_has_at_most_one_main_image():

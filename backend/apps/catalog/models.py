@@ -321,10 +321,6 @@ class Product(models.Model):
                 "A product's category and design cannot change once it has variants."
             )
 
-    @property
-    def images(self):
-        return self.product_media.all()
-
 
 class Collection(models.Model):
     """A hand-picked, ordered group of products that cuts across categories."""
@@ -596,14 +592,6 @@ class Media(models.Model):
         from apps.catalog.media import media_url
 
         return media_url(self.storage_key)
-
-    @property
-    def url(self):
-        return self.public_url
-
-    @property
-    def sha256(self):
-        return self.content_hash
 
 
 class ProductMedia(models.Model):

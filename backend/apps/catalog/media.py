@@ -1,13 +1,14 @@
 """Store public product images and build their public URLs."""
 
 import hashlib
+import warnings
 from dataclasses import dataclass, replace
 from io import BytesIO
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage, storages
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from apps.catalog.models import Media
 
@@ -62,8 +63,29 @@ def media_url(storage_key):
     return f"{base}/{key}" if base else f"/{key}"
 
 
+def encode_image(image, image_format):
+    """Re-encode an image with no EXIF, XMP, ICC or text metadata."""
+    buffer = BytesIO()
+    if image_format == "JPEG":
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")
+        image.save(buffer, format="JPEG", quality=90, optimize=True, comment=b"", exif=b"")
+    elif image_format == "PNG":
+        image.save(buffer, format="PNG", optimize=True, icc_profile=None, exif=b"")
+    else:
+        image.save(
+            buffer,
+            format="WEBP",
+            quality=90,
+            exif=b"",
+            icc_profile=None,
+            xmp=b"",
+        )
+    return buffer.getvalue()
+
+
 def prepare_media(upload):
-    """Read and validate an uploaded image, returning its metadata."""
+    """Read, orient, strip and re-encode an uploaded image."""
     if upload.size and upload.size > MAX_IMAGE_BYTES:
         raise MediaRuleError(SIZE_ERROR)
 
@@ -72,26 +94,37 @@ def prepare_media(upload):
         raise MediaRuleError(SIZE_ERROR)
 
     try:
-        with Image.open(BytesIO(content)) as image:
-            image_format = image.format
-            width, height = image.size
-            image.verify()
-    except (UnidentifiedImageError, OSError, ValueError) as error:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(content)) as image:
+                image_format = image.format
+                if image_format not in FORMAT_TO_MIME:
+                    raise MediaRuleError(FORMAT_ERROR)
+                image.load()
+                oriented = ImageOps.exif_transpose(image)
+                width, height = oriented.size
+                encoded = encode_image(oriented, image_format)
+    except MediaRuleError:
+        raise
+    except (
+        UnidentifiedImageError,
+        OSError,
+        ValueError,
+        Image.DecompressionBombError,
+        Image.DecompressionBombWarning,
+    ) as error:
         raise MediaRuleError(FORMAT_ERROR) from error
 
-    if image_format not in FORMAT_TO_MIME:
-        raise MediaRuleError(FORMAT_ERROR)
-
-    content_hash = hashlib.sha256(content).hexdigest()
+    content_hash = hashlib.sha256(encoded).hexdigest()
     extension = FORMAT_TO_EXTENSION[image_format]
     return PreparedMedia(
-        content=content,
+        content=encoded,
         content_hash=content_hash,
         storage_key=f"{content_hash}.{extension}",
         mime_type=FORMAT_TO_MIME[image_format],
         width=width,
         height=height,
-        metadata={"format": image_format, "bytes": len(content)},
+        metadata={"format": image_format, "bytes": len(encoded)},
     )
 
 

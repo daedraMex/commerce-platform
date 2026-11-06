@@ -4,6 +4,7 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.admin.models import CHANGE, LogEntry
+from django.contrib.admin.widgets import AutocompleteSelect
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.contrib.contenttypes.models import ContentType
@@ -411,6 +412,45 @@ def test_admin_links_media_to_a_product(admin_client_by_email):
     assert link.product == product
     assert link.media == media
     assert link.role == ProductMedia.Role.MAIN
+
+
+def test_product_media_inline_offers_only_the_products_store_media(admin_client_by_email):
+    home = make_store("home", "Home")
+    anime = make_store("anime", "Anime")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+    home_media = Media.objects.create(
+        store=home,
+        storage_key="stores/1/media/home.jpg",
+        content_hash="home",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    Media.objects.create(
+        store=anime,
+        storage_key="stores/2/media/other.jpg",
+        content_hash="other",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    ProductMedia.objects.create(product=product, media=home_media)
+
+    response = admin_client_by_email.get(f"/admin/catalog/product/{product.pk}/change/")
+
+    assert response.status_code == 200
+    formsets = [
+        inline_formset.formset
+        for inline_formset in response.context["inline_admin_formsets"]
+        if inline_formset.formset.model is ProductMedia
+    ]
+    assert len(formsets) == 1
+    field = formsets[0].forms[0].fields["media"]
+    assert list(field.queryset) == [home_media]
+    assert isinstance(field.widget.widget, AutocompleteSelect)
 
 
 def test_admin_removes_the_link_but_not_the_media(admin_client_by_email):

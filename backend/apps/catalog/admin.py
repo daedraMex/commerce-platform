@@ -4,6 +4,7 @@ from django import forms
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.forms.models import BaseInlineFormSet
+from django.utils.html import format_html
 
 from apps.catalog.media import (
     MediaRuleError,
@@ -275,11 +276,20 @@ class MediaChangeForm(forms.ModelForm):
 
 @admin.register(Media)
 class MediaAdmin(NoDeleteAdmin):
-    list_display = ("storage_key", "store", "mime_type", "width", "height", "alt_text")
+    list_display = (
+        "thumbnail",
+        "storage_key",
+        "store",
+        "mime_type",
+        "width",
+        "height",
+        "alt_text",
+    )
     list_filter = ("store", "mime_type")
     search_fields = ("storage_key", "content_hash", "alt_text")
     ordering = ("store", "storage_key")
     readonly_fields = (
+        "thumbnail",
         "store",
         "storage_key",
         "content_hash",
@@ -287,6 +297,15 @@ class MediaAdmin(NoDeleteAdmin):
         "width",
         "height",
     )
+
+    @admin.display(description="Thumbnail")
+    def thumbnail(self, obj):
+        if obj is None or not obj.storage_key:
+            return ""
+        return format_html(
+            '<img src="{}" alt="" style="max-height: 48px; max-width: 48px;">',
+            obj.public_url,
+        )
 
     def get_form(self, request, obj=None, change=False, **kwargs):
         return MediaChangeForm if obj is not None else MediaAddForm
@@ -318,9 +337,19 @@ class MediaAdmin(NoDeleteAdmin):
 
 class ProductMediaInline(admin.TabularInline):
     model = ProductMedia
+    autocomplete_fields = ("media",)
     extra = 0
     fields = ("media", "variant", "role", "position")
     ordering = ("position",)
+
+    def get_formset(self, request, obj=None, **kwargs):
+        self._product = obj
+        return super().get_formset(request, obj, **kwargs)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "media" and getattr(self, "_product", None) is not None:
+            kwargs["queryset"] = Media.objects.filter(store_id=self._product.store_id)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
 
 @admin.register(Product)
