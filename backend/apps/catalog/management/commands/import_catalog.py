@@ -21,6 +21,7 @@ from apps.catalog.management.support import (
 from apps.catalog.media import (
     MediaRuleError,
     media_from_prepared,
+    prepare_media_file,
     prepare_path_for_store,
     save_prepared_media,
 )
@@ -147,7 +148,7 @@ class ProductImage:
 @dataclass
 class ProductImagePlan:
     new_media: list = field(default_factory=list)
-    prepared_media: dict = field(default_factory=dict)
+    new_media_files: dict = field(default_factory=dict)
     product_images: list = field(default_factory=list)
     link_updates: list = field(default_factory=list)
     changed_products: set = field(default_factory=set)
@@ -163,6 +164,9 @@ class Report:
     rejections: list
     collections: list
     dry_run: bool
+    images_stored: int = 0
+    images_linked: int = 0
+    show_images: bool = False
 
     def render(self):
         lines = [
@@ -174,6 +178,13 @@ class Report:
         ]
         for name in self.collections:
             lines.append(f"  - {name}")
+        if self.show_images:
+            if self.dry_run:
+                lines.append(f"Images would be stored: {self.images_stored}")
+                lines.append(f"Images would be linked: {self.images_linked}")
+            else:
+                lines.append(f"Images stored: {self.images_stored}")
+                lines.append(f"Images linked: {self.images_linked}")
         for rejection in self.rejections:
             lines.append(f"  Row {rejection.line}: {rejection.reason}")
         if self.dry_run:
@@ -199,15 +210,33 @@ class Command(BaseCommand):
         images_dir = _images_directory(options.get("images"))
 
         rows, rejections = _read_rows(options["csv"], store)
-        if dry_run:
+        show_images = images_dir is not None
+        prepared_images = {}
+        if images_dir is not None:
+            prepared_images, image_rejections = _prepare_images(store, rows, images_dir)
+            rejections = [*rejections, *image_rejections]
+
+        if rejections:
+            report = _rejected_report(rejections, dry_run, show_images=show_images)
+        elif dry_run:
             report = _execute(
-                store, rows, rejections, operator, dry_run=True, images_dir=images_dir
+                store,
+                rows,
+                operator,
+                dry_run=True,
+                prepared_images=prepared_images,
+                show_images=show_images,
             )
         else:
             with transaction.atomic():
                 lock_store(store.pk)
                 report = _execute(
-                    store, rows, rejections, operator, dry_run=False, images_dir=images_dir
+                    store,
+                    rows,
+                    operator,
+                    dry_run=False,
+                    prepared_images=prepared_images,
+                    show_images=show_images,
                 )
 
         self.stdout.write(report.render())
@@ -224,6 +253,41 @@ def _images_directory(value):
             f"The images folder {str(images_dir)!r} does not exist or is not a directory."
         )
     return images_dir
+
+
+def _prepare_images(store, rows, images_dir):
+    """Read and validate every distinct image once, before the transaction opens."""
+    prepared = {}
+    rejected_names = {}
+    rejections = []
+
+    for row in rows:
+        for name in _row_image_names(row):
+            if name in prepared:
+                continue
+            if name in rejected_names:
+                rejections.append(Rejection(row.line, rejected_names[name]))
+                break
+            try:
+                path = _media_file_path(images_dir, name)
+                prepared[name] = prepare_media_file(store, path)
+            except RowError as error:
+                rejected_names[name] = str(error)
+                rejections.append(Rejection(row.line, str(error)))
+                break
+            except MediaRuleError as error:
+                reason = f"The image file '{name}' is not valid: {error}"
+                rejected_names[name] = reason
+                rejections.append(Rejection(row.line, reason))
+                break
+
+    return prepared, rejections
+
+
+def _row_image_names(row):
+    if row.main_image:
+        yield row.main_image
+    yield from row.gallery_images
 
 
 def _read_rows(path, store):
@@ -469,20 +533,32 @@ def _optional_int(raw, key, *, max_value=None):
     return number
 
 
-def _execute(store, rows, rejections, operator, *, dry_run, images_dir=None):
-    plan = _plan(store, rows, dry_run=dry_run, images_dir=images_dir)
-    rejections = [*rejections, *plan.rejections]
-    if rejections:
-        return _rejected_report(rejections, dry_run)
+def _execute(store, rows, operator, *, dry_run, prepared_images=None, show_images=False):
+    plan = _plan(store, rows, dry_run=dry_run, prepared_images=prepared_images)
+    if plan.rejections:
+        return _rejected_report(plan.rejections, dry_run, show_images=show_images)
 
     existing = [row_plan for row_plan in plan.rows if row_plan.variant is not None]
     created = len(plan.rows) - len(existing)
     updated = sum(1 for row_plan in existing if row_plan.changed)
     unchanged = len(existing) - updated
+    images_stored = len(plan.new_media)
+    images_linked = len(plan.product_images) + len(plan.link_updates)
     if dry_run:
-        return Report(created, updated, unchanged, 0, [], plan.new_collections, True)
+        return Report(
+            created,
+            updated,
+            unchanged,
+            0,
+            [],
+            plan.new_collections,
+            True,
+            images_stored=images_stored,
+            images_linked=images_linked,
+            show_images=show_images,
+        )
 
-    _write(plan, operator)
+    _write(store, plan, operator)
     return Report(
         created,
         updated,
@@ -491,11 +567,14 @@ def _execute(store, rows, rejections, operator, *, dry_run, images_dir=None):
         [],
         [collection.name for collection in plan.new_collections],
         False,
+        images_stored=images_stored,
+        images_linked=images_linked,
+        show_images=show_images,
     )
 
 
-def _rejected_report(rejections, dry_run):
-    return Report(0, 0, 0, len(rejections), rejections, [], dry_run)
+def _rejected_report(rejections, dry_run, *, show_images=False):
+    return Report(0, 0, 0, len(rejections), rejections, [], dry_run, show_images=show_images)
 
 
 @dataclass
@@ -509,13 +588,13 @@ class Plan:
     memberships: list
     existing_memberships: set
     new_media: list
-    prepared_media: dict
+    new_media_files: dict
     product_images: list
     link_updates: list
     rejections: list
 
 
-def _plan(store, rows, *, dry_run, images_dir=None):
+def _plan(store, rows, *, dry_run, prepared_images=None):
     existing_designs = list(Design.objects.filter(store=store))
     designs_by_key = {
         (design.supplier_id, design.supplier_design_name.casefold()): design
@@ -646,7 +725,7 @@ def _plan(store, rows, *, dry_run, images_dir=None):
             )
         )
 
-    product_image_plan = _plan_product_images(store, row_plans, images_dir)
+    product_image_plan = _plan_product_images(store, row_plans, prepared_images or {})
     rejections.extend(product_image_plan.rejections)
 
     collections_by_name = {
@@ -691,19 +770,18 @@ def _plan(store, rows, *, dry_run, images_dir=None):
         memberships=memberships,
         existing_memberships=existing_memberships,
         new_media=product_image_plan.new_media,
-        prepared_media=product_image_plan.prepared_media,
+        new_media_files=product_image_plan.new_media_files,
         product_images=product_image_plan.product_images,
         link_updates=product_image_plan.link_updates,
         rejections=rejections,
     )
 
 
-def _plan_product_images(store, row_plans, images_dir):
+def _plan_product_images(store, row_plans, prepared_images):
     plan = ProductImagePlan()
-    if images_dir is None:
+    if not prepared_images:
         return plan
 
-    prepared_by_name = {}
     prepared_by_hash = {}
     requests_by_product = {}
 
@@ -717,27 +795,13 @@ def _plan_product_images(store, row_plans, images_dir):
             continue
 
         images = []
-        rejected = False
         for role, name in requested:
-            prepared = prepared_by_name.get(name)
+            prepared = prepared_images.get(name)
             if prepared is None:
-                try:
-                    path = _media_file_path(images_dir, name)
-                    prepared = prepare_path_for_store(store, path)
-                except RowError as error:
-                    plan.rejections.append(Rejection(row.line, str(error)))
-                    rejected = True
-                    break
-                except MediaRuleError as error:
-                    plan.rejections.append(
-                        Rejection(row.line, f"The image file '{name}' is not valid: {error}")
-                    )
-                    rejected = True
-                    break
-                prepared_by_name[name] = prepared
-                prepared_by_hash.setdefault(prepared.content_hash, prepared)
+                continue
+            prepared_by_hash.setdefault(prepared.content_hash, prepared)
             images.append((role, name, prepared))
-        if rejected:
+        if not images:
             continue
 
         requests_by_product.setdefault(row.product_key, []).append((row.line, images))
@@ -756,7 +820,7 @@ def _plan_product_images(store, row_plans, images_dir):
         media = media_from_prepared(store, prepared)
         media_by_hash[content_hash] = media
         plan.new_media.append(media)
-        plan.prepared_media[content_hash] = prepared
+        plan.new_media_files[content_hash] = prepared
 
     products_by_key = {row_plan.row.product_key: row_plan.product for row_plan in row_plans}
     product_ids = [
@@ -858,7 +922,12 @@ def _media_file_path(images_dir, name):
     candidate = Path(name)
     if candidate.is_absolute() or ".." in candidate.parts:
         raise RowError(f"The image file '{name}' is outside the images folder.")
-    path = images_dir / candidate
+    base = images_dir.resolve()
+    path = (base / candidate).resolve()
+    try:
+        path.relative_to(base)
+    except ValueError as error:
+        raise RowError(f"The image file '{name}' is outside the images folder.") from error
     if not path.is_file():
         raise RowError(f"The image file '{name}' was not found in the images folder.")
     return path
@@ -890,7 +959,7 @@ def _row_changed(
     return False
 
 
-def _write(plan, operator):
+def _write(store, plan, operator):
     if plan.new_designs:
         Design.objects.bulk_create(plan.new_designs)
     if plan.new_products:
@@ -942,7 +1011,14 @@ def _write(plan, operator):
 
     if plan.new_media:
         for media in plan.new_media:
-            save_prepared_media(plan.prepared_media[media.content_hash])
+            source = plan.new_media_files[media.content_hash]
+            prepared = prepare_path_for_store(store, source.path)
+            if prepared.content_hash != media.content_hash:
+                raise CommandError(
+                    f"The image file '{source.path.name}' changed while the catalog "
+                    "was being imported."
+                )
+            save_prepared_media(prepared)
         Media.objects.bulk_create(plan.new_media)
 
     if plan.link_updates:

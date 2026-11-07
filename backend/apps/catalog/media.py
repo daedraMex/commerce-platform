@@ -4,6 +4,7 @@ import hashlib
 import warnings
 from dataclasses import dataclass, replace
 from io import BytesIO
+from pathlib import Path
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -37,6 +38,19 @@ class PreparedMedia:
     """Everything read from one uploaded image, before it is stored."""
 
     content: bytes
+    content_hash: str
+    storage_key: str
+    mime_type: str
+    width: int
+    height: int
+    metadata: dict
+
+
+@dataclass(frozen=True)
+class PreparedMediaFile:
+    """What the first import pass keeps about a file: metadata, never its bytes."""
+
+    path: Path
     content_hash: str
     storage_key: str
     mime_type: str
@@ -206,3 +220,17 @@ def prepare_path_for_store(store, path):
     except OSError as error:
         raise MediaRuleError(f"Cannot read the file {path.name!r}.") from error
     return prepare_for_store(store, upload)
+
+
+def prepare_media_file(store, path):
+    """Read and validate an image file, keeping only the metadata the plan needs."""
+    prepared = prepare_path_for_store(store, path)
+    return PreparedMediaFile(
+        path=path,
+        content_hash=prepared.content_hash,
+        storage_key=prepared.storage_key,
+        mime_type=prepared.mime_type,
+        width=prepared.width,
+        height=prepared.height,
+        metadata=prepared.metadata,
+    )

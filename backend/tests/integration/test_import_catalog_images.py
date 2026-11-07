@@ -457,6 +457,7 @@ def test_reimport_applies_a_changed_gallery_order(tmp_path, media_root):
         ("gallery", 2, (10, 20)),
     ]
     assert "Rows updated: 1" in output
+    assert "Images linked: 2" in output
 
 
 def test_reimport_moves_an_existing_gallery_file_to_main(tmp_path, media_root):
@@ -512,3 +513,172 @@ def test_a_large_import_with_images_runs_a_bounded_number_of_queries(
     assert "Rows created: 500" in output
     assert Media.objects.count() == 2
     assert ProductMedia.objects.count() == 1000
+
+
+def image_bytes(*, size=(30, 40), image_format="JPEG", color=(1, 2, 3)):
+    buffer = BytesIO()
+    Image.new("RGB", size, color).save(buffer, format=image_format)
+    return buffer.getvalue()
+
+
+def test_the_first_pass_keeps_media_metadata_without_image_bytes(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_image(images, "main.jpg", size=(10, 20))
+    csv_path = write_csv(tmp_path, [row(main_image="main.jpg")])
+
+    from apps.catalog.management.commands import import_catalog
+    from apps.catalog.media import PreparedMedia
+
+    rows, rejections = import_catalog._read_rows(str(csv_path), home)
+    assert rejections == []
+
+    prepared, rejections = import_catalog._prepare_images(home, rows, images)
+
+    assert rejections == []
+    assert set(prepared) == {"main.jpg"}
+    entry = prepared["main.jpg"]
+    assert not isinstance(entry, PreparedMedia)
+    assert not hasattr(entry, "content")
+    assert (entry.width, entry.height) == (10, 20)
+    assert entry.mime_type == "image/jpeg"
+    assert entry.storage_key.startswith(f"stores/{home.pk}/media/")
+    assert entry.path == (images / "main.jpg").resolve()
+
+    plan = import_catalog._plan(home, rows, dry_run=True, prepared_images=prepared)
+    assert plan.rejections == []
+    assert plan.new_media_files
+    assert all(not hasattr(item, "content") for item in plan.new_media_files.values())
+
+
+def test_a_file_changed_between_the_two_passes_fails_and_writes_nothing(
+    tmp_path, media_root, monkeypatch
+):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    image_path = write_image(images, "main.jpg", size=(10, 20))
+    csv_path = write_csv(tmp_path, [row(main_image="main.jpg")])
+
+    from apps.catalog.management.commands import import_catalog
+
+    original = import_catalog.prepare_media_file
+    calls = {"count": 0}
+
+    def changing_prepare(store, path):
+        prepared = original(store, path)
+        calls["count"] += 1
+        if calls["count"] == 1:
+            image_path.write_bytes(image_bytes())
+        return prepared
+
+    monkeypatch.setattr(import_catalog, "prepare_media_file", changing_prepare)
+
+    with pytest.raises(CommandError, match="changed"):
+        call_command(
+            "import_catalog",
+            store="home",
+            csv=str(csv_path),
+            operator="operator@example.com",
+            images=str(images),
+            stdout=StringIO(),
+        )
+
+    assert calls["count"] == 1
+    assert not Media.objects.exists()
+    assert not ProductMedia.objects.exists()
+    assert not Design.objects.exists()
+    assert not Product.objects.exists()
+    assert not media_root.exists() or not any(path.is_file() for path in media_root.rglob("*"))
+
+
+def test_a_symlink_outside_the_images_folder_rejects_the_row(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    outside = tmp_path / "outside"
+    write_image(outside, "outside.jpg")
+    images = tmp_path / "images"
+    images.mkdir()
+    (images / "linked.jpg").symlink_to(outside / "outside.jpg")
+    csv_path = write_csv(tmp_path, [row(main_image="linked.jpg")])
+
+    output = run_import_expecting_error(
+        store="home",
+        csv=str(csv_path),
+        operator="operator@example.com",
+        images=str(images),
+    )
+
+    assert "outside the images folder" in output
+    assert not Media.objects.exists()
+    assert not Product.objects.exists()
+
+
+def test_the_report_counts_stored_media_and_linked_product_images(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_image(images, "main.jpg", size=(10, 20))
+    write_image(images, "gallery.jpg", size=(30, 40))
+    csv_path = write_csv(tmp_path, [row(main_image="main.jpg", gallery_images="gallery.jpg")])
+
+    output = run_import(
+        store="home", csv=str(csv_path), operator="operator@example.com", images=str(images)
+    )
+
+    assert "Images stored: 2" in output
+    assert "Images linked: 2" in output
+    assert "would be" not in output
+
+    rerun = run_import(
+        store="home", csv=str(csv_path), operator="operator@example.com", images=str(images)
+    )
+
+    assert "Images stored: 0" in rerun
+    assert "Images linked: 0" in rerun
+
+
+def test_the_dry_run_report_says_images_would_be_stored_and_linked(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_image(images, "main.jpg", size=(10, 20))
+    write_image(images, "gallery.jpg", size=(30, 40))
+    csv_path = write_csv(tmp_path, [row(main_image="main.jpg", gallery_images="gallery.jpg")])
+
+    output = run_import(
+        store="home",
+        csv=str(csv_path),
+        operator="operator@example.com",
+        images=str(images),
+        dry_run=True,
+    )
+
+    assert "Images would be stored: 2" in output
+    assert "Images would be linked: 2" in output
+    assert "Images stored:" not in output
+    assert "Images linked:" not in output
+
+
+def test_the_report_has_no_image_lines_without_images(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    csv_path = write_csv(tmp_path, [row()])
+
+    output = run_import(store="home", csv=str(csv_path), operator="operator@example.com")
+
+    assert "Images stored" not in output
+    assert "Images would be" not in output
