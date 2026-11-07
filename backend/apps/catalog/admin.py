@@ -310,6 +310,9 @@ class MediaAdmin(NoDeleteAdmin):
     def get_form(self, request, obj=None, change=False, **kwargs):
         return MediaChangeForm if obj is not None else MediaAddForm
 
+    def get_readonly_fields(self, request, obj=None):
+        return self.readonly_fields if obj is not None else ()
+
     def save_model(self, request, obj, form, change):
         if change:
             super().save_model(request, obj, form, change)

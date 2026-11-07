@@ -4,6 +4,7 @@ import struct
 import zlib
 from decimal import Decimal
 from fractions import Fraction
+from html.parser import HTMLParser
 from io import BytesIO
 
 import pytest
@@ -158,6 +159,67 @@ def upload(admin_client_by_email, store, *, name, content, content_type):
             "alt_text": "A blanket",
         },
     )
+
+
+class FieldNameParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.names = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag in {"input", "select", "textarea"} and attributes.get("name"):
+            self.names.append(attributes["name"])
+
+
+def rendered_field_names(response):
+    parser = FieldNameParser()
+    parser.feed(response.content.decode())
+    return parser.names
+
+
+def test_the_media_add_page_lets_a_person_pick_a_store(admin_client_by_email):
+    make_store("home")
+
+    response = admin_client_by_email.get("/admin/catalog/media/add/")
+
+    assert response.status_code == 200
+    content = response.content.decode()
+    assert '<select name="store"' in content
+    assert 'type="file"' in content
+    assert content.count('for="id_store"') == 1
+    assert 'class="readonly"' not in content
+    assert {
+        "thumbnail",
+        "storage_key",
+        "content_hash",
+        "mime_type",
+        "width",
+        "height",
+    }.isdisjoint(rendered_field_names(response))
+
+
+def test_the_media_add_form_is_submitted_with_only_the_fields_it_renders(
+    admin_client_by_email, media_root
+):
+    home = make_store("home")
+    response = admin_client_by_email.get("/admin/catalog/media/add/")
+    rendered = rendered_field_names(response)
+    values = {
+        "store": str(home.pk),
+        "alt_text": "A blanket",
+        "file": SimpleUploadedFile("photo.jpg", image_bytes("JPEG"), content_type="image/jpeg"),
+    }
+
+    response = admin_client_by_email.post(
+        "/admin/catalog/media/add/",
+        {name: value for name, value in values.items() if name in rendered},
+    )
+
+    assert response.status_code == 302
+    media = Media.objects.get()
+    assert media.store == home
+    assert (media.width, media.height) == (12, 8)
 
 
 @pytest.mark.parametrize(
