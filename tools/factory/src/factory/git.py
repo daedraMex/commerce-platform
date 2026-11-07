@@ -1,0 +1,72 @@
+"""Git operations in the worktree, wrapped around ``git`` and faked in tests."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from .diff import DiffStats, build_diff_stats
+from .shell import RunCommand, run_command
+
+_CHECK_SCRIPT = "scripts/check.sh"
+
+
+class Git:
+    def __init__(self, run: RunCommand = run_command):
+        self._run = run
+
+    def fetch_main(self, repo_dir: Path) -> None:
+        self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
+
+    def create_worktree(self, repo_dir: Path, worktree: Path, branch: str) -> Path:
+        self._run(
+            ["git", "worktree", "add", "-b", branch, str(worktree), "origin/main"],
+            str(repo_dir),
+            timeout=300,
+        )
+        return worktree
+
+    def commit_all(self, worktree: Path, message: str) -> bool:
+        """Stage and commit everything; return False when there was nothing to commit."""
+        self._run(["git", "add", "-A"], str(worktree), timeout=120)
+        result = self._run(["git", "commit", "-m", message], str(worktree), timeout=120)
+        if result.exit_code != 0 and "nothing to commit" in result.stdout + result.stderr:
+            return False
+        if result.exit_code != 0:
+            raise RuntimeError(f"git commit failed: {result.stderr.strip()}")
+        return True
+
+    def push(self, worktree: Path, branch: str) -> None:
+        result = self._run(["git", "push", "-u", "origin", branch], str(worktree), timeout=300)
+        if result.exit_code != 0:
+            raise RuntimeError(f"git push failed: {result.stderr.strip()}")
+
+    def check_passed(self, worktree: Path) -> bool:
+        backend = worktree / "backend"
+        result = self._run([_CHECK_SCRIPT], str(backend), timeout=1800)
+        return result.exit_code == 0
+
+    def diff_stats(self, worktree: Path) -> DiffStats:
+        numstat = self._run(
+            ["git", "diff", "origin/main...HEAD", "--numstat"], str(worktree), timeout=120
+        ).stdout
+        new_files = self._run(
+            ["git", "diff", "origin/main...HEAD", "--diff-filter=A", "--name-only"],
+            str(worktree),
+            timeout=120,
+        ).stdout.splitlines()
+        return build_diff_stats(numstat, new_files)
+
+    def read_file(self, worktree: Path, relpath: str) -> str:
+        result = self._run(["cat", relpath], str(worktree), timeout=60)
+        return result.stdout
+
+    def write_file(self, worktree: Path, relpath: str, content: str) -> None:
+        path = worktree / relpath
+        path.write_text(content)
+
+    def remove_worktree(self, repo_dir: Path, worktree: Path) -> None:
+        self._run(
+            ["git", "worktree", "remove", "--force", str(worktree)],
+            str(repo_dir),
+            timeout=300,
+        )
