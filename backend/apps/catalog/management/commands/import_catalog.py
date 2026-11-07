@@ -113,7 +113,8 @@ class ParsedRow:
     description: str
     main_image: str
     gallery_images: tuple[str, ...]
-    warnings: list = field(default_factory=list)
+    unknown_option_codes: frozenset = frozenset()
+    unknown_columns: frozenset = frozenset()
 
     @property
     def design_key(self):
@@ -305,12 +306,42 @@ def _row_image_names(row):
 
 def _collect_warnings(rows, images_dir):
     warnings = []
-    for row in rows:
-        warnings.extend(f"Row {row.line}: {warning}" for warning in row.warnings)
+    warnings.extend(_unknown_option_warnings(rows))
+    warnings.extend(_unknown_column_warnings(rows))
     warnings.extend(_duplicate_design_warnings(rows))
     if images_dir is not None:
         warnings.extend(_non_image_file_warnings(images_dir))
     return warnings
+
+
+def _rows_label(count):
+    return "1 row" if count == 1 else f"{count} rows"
+
+
+def _unknown_option_warnings(rows):
+    counts = {}
+    for row in rows:
+        for code in row.unknown_option_codes:
+            key = (row.category.slug, code)
+            counts[key] = counts.get(key, 0) + 1
+    return [
+        f"Option code '{code}' is not defined for category '{category_slug}' "
+        f"and was ignored ({_rows_label(count)})."
+        for (category_slug, code), count in sorted(counts.items())
+    ]
+
+
+def _unknown_column_warnings(rows):
+    counts = {}
+    for row in rows:
+        for column in row.unknown_columns:
+            key = (row.category.slug, column)
+            counts[key] = counts.get(key, 0) + 1
+    return [
+        f"Column '{column}' is not an option or attribute of category "
+        f"'{category_slug}' and was ignored ({_rows_label(count)})."
+        for (category_slug, column), count in sorted(counts.items())
+    ]
 
 
 def _design_name_key(value):
@@ -408,23 +439,19 @@ def _parse_row(raw, line, categories, suppliers):
 
     known_option_codes = {option["code"] for option in category.option_schema}
     known_attribute_codes = {entry["code"] for entry in category.attribute_schema}
-    warnings = []
     option_values = _option_values(raw, category)
-    for code in sorted(set(option_values) - known_option_codes):
-        warnings.append(
-            f"Option code '{code}' is not defined for category '{category.slug}' and was ignored."
-        )
+    unknown_option_codes = frozenset(set(option_values) - known_option_codes)
     option_values = {
         code: value for code, value in option_values.items() if code in known_option_codes
     }
-    for key, value in raw.items():
-        if key in FIXED_COLUMNS or key in known_option_codes or key in known_attribute_codes:
-            continue
-        if (value or "").strip():
-            warnings.append(
-                f"Column '{key}' is not an option or attribute of category '{category.slug}' "
-                "and was ignored."
-            )
+    unknown_columns = frozenset(
+        key
+        for key, value in raw.items()
+        if key not in FIXED_COLUMNS
+        and key not in known_option_codes
+        and key not in known_attribute_codes
+        and (value or "").strip()
+    )
     try:
         validate_option_values(option_values, category.option_schema)
     except CatalogRuleError as error:
@@ -468,7 +495,8 @@ def _parse_row(raw, line, categories, suppliers):
         description=_text(raw, "description"),
         main_image=_text(raw, "main_image"),
         gallery_images=tuple(_split_list(raw.get("gallery_images"))),
-        warnings=warnings,
+        unknown_option_codes=unknown_option_codes,
+        unknown_columns=unknown_columns,
     )
 
 

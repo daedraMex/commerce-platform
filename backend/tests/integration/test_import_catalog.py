@@ -1005,3 +1005,61 @@ def test_a_real_catalog_dry_run_reports_warnings_without_rejecting_rows(tmp_path
     assert "Images would be stored: 2" in output
     assert "Dry run: nothing was written." in output
     assert not Design.objects.exists()
+
+
+def test_an_unknown_column_is_warned_once_with_its_row_count(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    path = write_csv(
+        tmp_path,
+        [
+            row(option_values="size=IND", review_note="see page 4"),
+            row(option_values="size=MAT", review_note="see page 5"),
+            row(supplier_design_name="DONA AZUL", design_name="Dona Azul"),
+        ],
+        fieldnames=[*FIELDNAMES, "review_note"],
+    )
+
+    output = run_import(
+        store="home",
+        csv=str(path),
+        operator="operator@example.com",
+        dry_run=True,
+    )
+
+    warning = (
+        "Column 'review_note' is not an option or attribute of category 'frazada' "
+        "and was ignored (2 rows)."
+    )
+    assert warning in output
+    assert output.count("review_note") == 1
+
+
+def test_an_unknown_option_code_is_warned_once_with_its_row_count(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    path = write_csv(
+        tmp_path,
+        [
+            row(option_values="size=IND;old_size=P"),
+            row(option_values="size=MAT;old_size=Q"),
+            row(supplier_design_name="DONA AZUL", design_name="Dona Azul"),
+        ],
+    )
+
+    output = run_import(
+        store="home",
+        csv=str(path),
+        operator="operator@example.com",
+        dry_run=True,
+    )
+
+    warning = (
+        "Option code 'old_size' is not defined for category 'frazada' and was ignored (2 rows)."
+    )
+    assert warning in output
+    assert output.count("old_size") == 1
