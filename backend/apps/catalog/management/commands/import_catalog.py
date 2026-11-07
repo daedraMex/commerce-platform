@@ -46,6 +46,7 @@ from apps.catalog.rules import (
     validate_prices,
     validate_product_attributes,
 )
+from apps.shared.domain.paths import safe_child_path
 from apps.stores.services import lock_store
 
 REQUIRED_COLUMNS = ("category", "supplier", "supplier_design_name", "design_name", "price", "cost")
@@ -919,13 +920,8 @@ def _plan_product_images(store, row_plans, prepared_images):
 
 
 def _media_file_path(images_dir, name):
-    candidate = Path(name)
-    if candidate.is_absolute() or ".." in candidate.parts:
-        raise RowError(f"The image file '{name}' is outside the images folder.")
-    base = images_dir.resolve()
-    path = (base / candidate).resolve()
     try:
-        path.relative_to(base)
+        path = safe_child_path(images_dir, name)
     except ValueError as error:
         raise RowError(f"The image file '{name}' is outside the images folder.") from error
     if not path.is_file():
