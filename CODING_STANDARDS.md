@@ -16,7 +16,8 @@ Any new permission, Authorizer or admin change needs a test for each case:
 
 ## Admin form tests
 
-Admin tests that POST forms build inline management data with
+Admin tests that POST forms submit only the fields the page renders. Use
+`rendered_form_data()` and build inline management data with
 `tests/integration/admin_forms.py`. A new inline goes there once, not into each
 test.
 

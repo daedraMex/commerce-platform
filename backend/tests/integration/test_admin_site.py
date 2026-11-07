@@ -45,3 +45,31 @@ def test_superuser_opens_the_index_and_every_changelist(client):
 
     for url in admin_page_urls(include_add_pages=False):
         assert client.get(url).status_code == 200, url
+
+
+def required_editable_model_fields(model):
+    return {
+        field.name
+        for field in model._meta.fields
+        if field.editable and not field.blank and not field.auto_created
+    }
+
+
+def test_superuser_add_pages_do_not_hide_required_model_fields(client):
+    operator = get_user_model().objects.create_superuser(
+        email="operator@example.com", password="s3cret-pass"
+    )
+    client.force_login(operator)
+
+    for model, model_admin in admin.site._registry.items():
+        prefix = f"admin:{model._meta.app_label}_{model._meta.model_name}"
+        url = reverse(f"{prefix}_add")
+        response = client.get(url)
+        request = response.wsgi_request
+        if not model_admin.has_add_permission(request):
+            continue
+
+        assert response.status_code == 200, url
+        readonly = set(model_admin.get_readonly_fields(request, None))
+        hidden = required_editable_model_fields(model) & readonly
+        assert not hidden, f"{url} makes required fields read-only: {sorted(hidden)}"

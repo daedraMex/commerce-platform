@@ -1,6 +1,5 @@
 import hashlib
 from decimal import Decimal
-from html.parser import HTMLParser
 
 import pytest
 from django.contrib.auth import get_user_model
@@ -28,6 +27,7 @@ from tests.images import (
     non_srgb_profile,
     png_of_declared_pixels,
 )
+from tests.integration.admin_forms import rendered_field_names, rendered_form_data
 
 pytestmark = pytest.mark.django_db
 
@@ -97,23 +97,6 @@ def upload(admin_client_by_email, store, *, name, content, content_type):
     )
 
 
-class FieldNameParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.names = []
-
-    def handle_starttag(self, tag, attrs):
-        attributes = dict(attrs)
-        if tag in {"input", "select", "textarea"} and attributes.get("name"):
-            self.names.append(attributes["name"])
-
-
-def rendered_field_names(response):
-    parser = FieldNameParser()
-    parser.feed(response.content.decode())
-    return parser.names
-
-
 def test_the_media_add_page_lets_a_person_pick_a_store(admin_client_by_email):
     make_store("home")
 
@@ -140,7 +123,6 @@ def test_the_media_add_form_is_submitted_with_only_the_fields_it_renders(
 ):
     home = make_store("home")
     response = admin_client_by_email.get("/admin/catalog/media/add/")
-    rendered = rendered_field_names(response)
     values = {
         "store": str(home.pk),
         "alt_text": "A blanket",
@@ -149,7 +131,7 @@ def test_the_media_add_form_is_submitted_with_only_the_fields_it_renders(
 
     response = admin_client_by_email.post(
         "/admin/catalog/media/add/",
-        {name: value for name, value in values.items() if name in rendered},
+        rendered_form_data(response, values),
     )
 
     assert response.status_code == 302
