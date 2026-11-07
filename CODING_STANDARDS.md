@@ -19,3 +19,9 @@ Any new permission, Authorizer or admin change needs a test for each case:
 Admin tests that POST forms build inline management data with
 `tests/integration/admin_forms.py`. A new inline goes there once, not into each
 test.
+
+## Media uploads
+
+Every uploaded image goes through the catalog media pipeline. Tests read the
+stored bytes and cover GPS EXIF, EXIF orientation, an embedded ICC profile and a
+decompression bomb, using the fixtures in `tests/images.py`.
