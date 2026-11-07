@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .cleanup import cleanup_old
 from .config import Settings
-from .decisions import DECISIONS_HEADER, extract_open_question
+from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .git import Git
 from .github import GitHub
 from .models import select_model
@@ -20,7 +20,6 @@ from .runner import AgentRunner
 from .tickets import Ticket, branch_name, select_tickets
 
 DECISIONS_FILE = "DECISIONS.md"
-SUMMARY_FILE = "SUMMARY.md"
 NEEDS_DECISION_LABEL = "needs-decision"
 MIGRATION_LABEL = "migration"
 LOG_TAIL_LINES = 30
@@ -133,9 +132,12 @@ class Factory:
         self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})")
         diff = self.git.diff_stats(worktree)
         self.git.push(worktree, branch)
-        summary = self.git.read_file(worktree, SUMMARY_FILE).strip() or ticket.title
+        summary = extract_summary(decisions) or ticket.title
         body = build_pr_body(
-            ticket_number=ticket.number, summary=summary, model=model, decisions=decisions
+            ticket_number=ticket.number,
+            summary=summary,
+            model=model,
+            decisions=extract_decisions(decisions),
         )
         pr_number = self.github.create_draft_pr(
             branch=branch, title=f"#{ticket.number}: {ticket.title}", body=body
@@ -171,7 +173,7 @@ class Factory:
     ) -> TicketResult:
         comment = build_issue_comment(
             open_question=open_question,
-            decisions=decisions,
+            decisions=extract_decisions(decisions),
             log_tail=_tail(log_path, LOG_TAIL_LINES),
             model=model,
             attempts=self.settings.attempts,

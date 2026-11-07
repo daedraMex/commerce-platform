@@ -24,8 +24,8 @@ ticket, in this worktree, on branch `{{BRANCH}}`. The model driving you is
    you chose, the alternative you rejected, and why. `DECISIONS.md` is
    git-ignored and never committed.
 
-4. Write a one-paragraph summary of what you built to `SUMMARY.md` at the
-   worktree root.
+4. Write a one-paragraph summary of what you built under the `# Summary`
+   heading of `DECISIONS.md`, above the `# Decisions` section.
 
 5. If a decision cannot be made safely — because it would contradict an ADR,
    AGENTS.md, or the ticket itself — stop. Write the open question as the very

@@ -6,12 +6,13 @@ from factory.tickets import Ticket
 
 TEMPLATE = "Implement ticket {{TICKET_NUMBER}} with {{MODEL}}."
 
+DECISIONS_DOC = "# Summary\nBuilt the thing.\n\n# Decisions\n\n- Chose A.\n"
+
 
 class FakeGit:
-    def __init__(self, *, check_passed=True, decisions="", summary="", diff=None):
+    def __init__(self, *, check_passed=True, decisions="", diff=None):
         self.check_result = check_passed
         self.decisions = decisions
-        self.summary = summary
         self.diff = diff or DiffStats()
         self.committed = []
         self.pushed = []
@@ -27,8 +28,6 @@ class FakeGit:
     def read_file(self, worktree, relpath):
         if relpath == "DECISIONS.md":
             return self.decisions
-        if relpath == "SUMMARY.md":
-            return self.summary
         return ""
 
     def check_passed(self, worktree):
@@ -131,7 +130,7 @@ def build_factory(tmp_path, *, git, github, runner, notifier, settings=None):
 
 
 def test_success_opens_draft_pr_and_notifies(tmp_path):
-    git = FakeGit(check_passed=True, decisions="- Chose A.", summary="Built the thing.")
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
     github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], pr_number=101)
     runner = FakeRunner()
     notifier = RecordingNotifier()
@@ -144,6 +143,7 @@ def test_success_opens_draft_pr_and_notifies(tmp_path):
     branch, title, body = github.created_prs[0]
     assert branch == "factory/7-ticket-7"
     assert "Closes #7" in body
+    assert "Built the thing." in body
     assert "Model: deepseek/deepseek-flash" in body
     assert "Chose A." in body
     assert git.pushed == ["factory/7-ticket-7"]
