@@ -368,10 +368,11 @@ def _duplicate_design_warnings(rows):
 def _non_image_file_warnings(images_dir):
     warnings = []
     for path in sorted(images_dir.rglob("*")):
+        relative = path.relative_to(images_dir)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
         if path.is_file() and path.suffix.casefold() not in IMAGE_SUFFIXES:
-            warnings.append(
-                f"Images folder: '{path.relative_to(images_dir)}' is not a JPEG, PNG or WebP file."
-            )
+            warnings.append(f"Images folder: '{relative}' is not a JPEG, PNG or WebP file.")
     return warnings
 
 

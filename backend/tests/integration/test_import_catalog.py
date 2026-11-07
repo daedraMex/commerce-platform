@@ -1063,3 +1063,30 @@ def test_an_unknown_option_code_is_warned_once_with_its_row_count(tmp_path):
     )
     assert warning in output
     assert output.count("old_size") == 1
+
+
+def test_hidden_files_in_the_images_folder_are_not_warned_about(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_catalog_image(images, "main.jpg", (10, 20, 30))
+    (images / ".DS_Store").write_bytes(b"junk")
+    hidden = images / ".cache"
+    hidden.mkdir()
+    (hidden / "notes.pdf").write_bytes(b"%PDF-1.4\n")
+    (images / "visible.pdf").write_bytes(b"%PDF-1.4\n")
+    path = write_csv(tmp_path, [row(main_image="main.jpg")])
+
+    output = run_import(
+        store="home",
+        csv=str(path),
+        operator="operator@example.com",
+        images=str(images),
+        dry_run=True,
+    )
+
+    assert "visible.pdf" in output
+    assert ".DS_Store" not in output
+    assert "notes.pdf" not in output
