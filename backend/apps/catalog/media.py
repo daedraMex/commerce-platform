@@ -8,7 +8,7 @@ from io import BytesIO
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage, storages
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 
 from apps.catalog.models import Media
 
@@ -63,8 +63,23 @@ def media_url(storage_key):
     return f"{base}/{key}" if base else f"/{key}"
 
 
+def convert_to_srgb(image):
+    """Convert an image with an embedded ICC profile to sRGB."""
+    profile = image.info.get("icc_profile")
+    if not profile:
+        return image
+    try:
+        source = ImageCms.ImageCmsProfile(BytesIO(profile))
+        target = ImageCms.createProfile("sRGB")
+        output_mode = "RGBA" if image.mode in ("RGBA", "LA") else "RGB"
+        return ImageCms.profileToProfile(image, source, target, outputMode=output_mode)
+    except (ImageCms.PyCMSError, OSError, ValueError, TypeError):
+        return image
+
+
 def encode_image(image, image_format):
     """Re-encode an image with no EXIF, XMP, ICC or text metadata."""
+    image = convert_to_srgb(image)
     buffer = BytesIO()
     if image_format == "JPEG":
         if image.mode not in ("RGB", "L"):

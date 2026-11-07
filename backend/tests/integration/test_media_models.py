@@ -13,7 +13,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError, transaction
 from django.urls import reverse
-from PIL import Image
+from PIL import Image, ImageCms
 
 from apps.catalog.models import (
     Category,
@@ -96,6 +96,35 @@ def jpeg_with_exif(*, size=(12, 8), orientation=None, gps=False):
         exif[0x8825] = gps_ifd
     buffer = BytesIO()
     image.save(buffer, format="JPEG", exif=exif)
+    return buffer.getvalue()
+
+
+def non_srgb_profile():
+    """An RGB ICC profile whose channels differ from sRGB."""
+    profile = ImageCms.ImageCmsProfile(ImageCms.createProfile("sRGB"))
+    content = bytearray(profile.tobytes())
+    tag_count = struct.unpack_from(">I", content, 128)[0]
+    scales = {b"rXYZ": 1.2, b"gXYZ": 0.8, b"bXYZ": 0.6}
+    for index in range(tag_count):
+        record = 132 + index * 12
+        tag = bytes(content[record : record + 4])
+        if tag in scales:
+            values = struct.unpack_from(">I", content, record + 4)[0] + 8
+            x, y, z = struct.unpack_from(">3i", content, values)
+            struct.pack_into(
+                ">3i",
+                content,
+                values,
+                int(x * scales[tag]),
+                int(y * scales[tag]),
+                int(z * scales[tag]),
+            )
+    return bytes(content)
+
+
+def jpeg_with_icc_profile(profile, *, size=(12, 8), color=(200, 100, 50)):
+    buffer = BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="JPEG", icc_profile=profile)
     return buffer.getvalue()
 
 
@@ -217,6 +246,51 @@ def test_uploading_a_jpeg_applies_its_exif_orientation(admin_client_by_email, me
     with Image.open(media_root / media.storage_key) as stored:
         assert stored.size == (300, 400)
         assert 0x0112 not in stored.getexif()
+
+
+def test_a_non_srgb_profile_is_converted_to_srgb_and_not_stored(admin_client_by_email, media_root):
+    home = make_store("home")
+    anime = make_store("anime")
+    color = (200, 100, 50)
+    upload(
+        admin_client_by_email,
+        home,
+        name="plain.jpg",
+        content=jpeg_with_icc_profile(None, color=color),
+        content_type="image/jpeg",
+    )
+    upload(
+        admin_client_by_email,
+        anime,
+        name="profiled.jpg",
+        content=jpeg_with_icc_profile(non_srgb_profile(), color=color),
+        content_type="image/jpeg",
+    )
+
+    plain = Media.objects.get(store=home)
+    profiled = Media.objects.get(store=anime)
+    with Image.open(media_root / plain.storage_key) as stored:
+        plain_pixel = stored.getpixel((0, 0))
+    with Image.open(media_root / profiled.storage_key) as stored:
+        assert "icc_profile" not in stored.info
+        assert stored.getpixel((0, 0)) != plain_pixel
+
+
+def test_a_broken_profile_still_accepts_the_upload(admin_client_by_email, media_root):
+    home = make_store("home")
+
+    response = upload(
+        admin_client_by_email,
+        home,
+        name="broken.jpg",
+        content=jpeg_with_icc_profile(b"not an ICC profile"),
+        content_type="image/jpeg",
+    )
+
+    assert response.status_code == 302
+    media = Media.objects.get()
+    with Image.open(media_root / media.storage_key) as stored:
+        assert "icc_profile" not in stored.info
 
 
 @pytest.mark.parametrize(
