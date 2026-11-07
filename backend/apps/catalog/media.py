@@ -155,15 +155,9 @@ def save_prepared_media(prepared):
     )
 
 
-def store_media(store, upload, *, alt_text="", prepared=None):
-    """Store an uploaded image for a store, reusing one already in it."""
-    prepared = prepared or prepare_for_store(store, upload)
-    existing = Media.objects.filter(store=store, content_hash=prepared.content_hash).first()
-    if existing is not None:
-        return existing
-
-    save_prepared_media(prepared)
-    return Media.objects.create(
+def media_from_prepared(store, prepared, *, alt_text=""):
+    """Build, but do not save, the Media a prepared image describes."""
+    return Media(
         store=store,
         storage_key=prepared.storage_key,
         content_hash=prepared.content_hash,
@@ -173,6 +167,19 @@ def store_media(store, upload, *, alt_text="", prepared=None):
         height=prepared.height,
         metadata=prepared.metadata,
     )
+
+
+def store_media(store, upload, *, alt_text="", prepared=None):
+    """Store an uploaded image for a store, reusing one already in it."""
+    prepared = prepared or prepare_for_store(store, upload)
+    existing = Media.objects.filter(store=store, content_hash=prepared.content_hash).first()
+    if existing is not None:
+        return existing
+
+    save_prepared_media(prepared)
+    media = media_from_prepared(store, prepared, alt_text=alt_text)
+    media.save()
+    return media
 
 
 def prepare_for_store(store, upload):

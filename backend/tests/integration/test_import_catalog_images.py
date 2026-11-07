@@ -405,6 +405,80 @@ def test_an_images_folder_that_does_not_exist_rejects_the_command(tmp_path, medi
     assert not Design.objects.exists()
 
 
+def test_importing_images_in_one_store_never_touches_another(tmp_path, media_root):
+    home = make_store("home")
+    anime = make_store("anime")
+    make_superuser()
+    for store in (home, anime):
+        make_category(store)
+        make_supplier(store)
+    images = tmp_path / "images"
+    write_image(images, "main.jpg")
+    home_csv = write_csv(tmp_path, [row(main_image="main.jpg")], filename="home.csv")
+    anime_csv = write_csv(tmp_path, [row(main_image="main.jpg")], filename="anime.csv")
+
+    run_import(store="home", csv=str(home_csv), operator="operator@example.com", images=str(images))
+    run_import(
+        store="anime", csv=str(anime_csv), operator="operator@example.com", images=str(images)
+    )
+
+    assert Media.objects.filter(store=home).count() == 1
+    assert Media.objects.filter(store=anime).count() == 1
+    assert Media.objects.get(store=home).storage_key.startswith(f"stores/{home.pk}/media/")
+    assert Media.objects.get(store=anime).storage_key.startswith(f"stores/{anime.pk}/media/")
+    for product in Product.objects.all():
+        for link in product.product_media.all():
+            assert link.media.store_id == product.store_id
+
+
+def test_reimport_applies_a_changed_gallery_order(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_image(images, "first.jpg", size=(10, 20))
+    write_image(images, "second.jpg", size=(30, 40))
+    first = write_csv(tmp_path, [row(gallery_images="first.jpg;second.jpg")], filename="first.csv")
+    run_import(store="home", csv=str(first), operator="operator@example.com", images=str(images))
+
+    second = write_csv(
+        tmp_path, [row(gallery_images="second.jpg;first.jpg")], filename="second.csv"
+    )
+    output = run_import(
+        store="home", csv=str(second), operator="operator@example.com", images=str(images)
+    )
+
+    links = ordered_links(Product.objects.get())
+    assert [
+        (link.role, link.position, (link.media.width, link.media.height)) for link in links
+    ] == [
+        ("gallery", 1, (30, 40)),
+        ("gallery", 2, (10, 20)),
+    ]
+    assert "Rows updated: 1" in output
+
+
+def test_reimport_moves_an_existing_gallery_file_to_main(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_image(images, "photo.jpg", size=(10, 20))
+    first = write_csv(tmp_path, [row(gallery_images="photo.jpg")], filename="first.csv")
+    run_import(store="home", csv=str(first), operator="operator@example.com", images=str(images))
+
+    second = write_csv(tmp_path, [row(main_image="photo.jpg")], filename="second.csv")
+    output = run_import(
+        store="home", csv=str(second), operator="operator@example.com", images=str(images)
+    )
+
+    links = ordered_links(Product.objects.get())
+    assert [(link.role, link.position) for link in links] == [("main", 1)]
+    assert "Rows updated: 1" in output
+
+
 def test_a_large_import_with_images_runs_a_bounded_number_of_queries(
     tmp_path, media_root, django_assert_max_num_queries
 ):
