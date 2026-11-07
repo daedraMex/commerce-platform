@@ -4,14 +4,22 @@ from django import forms
 from django.contrib import admin
 from django.core.exceptions import ValidationError
 from django.forms.models import BaseInlineFormSet
+from django.utils.html import format_html
 
+from apps.catalog.media import (
+    MediaRuleError,
+    prepare_for_store,
+    store_media,
+)
 from apps.catalog.models import (
     DESIGNED_SKU_MESSAGE,
     Category,
     Collection,
     CollectionProduct,
     Design,
+    Media,
     Product,
+    ProductMedia,
     ProductVariant,
     Supplier,
 )
@@ -241,6 +249,112 @@ class CollectionAdmin(NoDeleteAdmin):
     inlines = (CollectionProductInline,)
 
 
+class MediaAddForm(forms.ModelForm):
+    file = forms.FileField()
+
+    class Meta:
+        model = Media
+        fields = ("store", "alt_text")
+
+    def clean(self):
+        cleaned_data = super().clean()
+        store = cleaned_data.get("store")
+        upload = cleaned_data.get("file")
+        if store is not None and upload is not None:
+            try:
+                self.prepared_media = prepare_for_store(store, upload)
+            except MediaRuleError as error:
+                self.add_error("file", str(error))
+        return cleaned_data
+
+
+class MediaChangeForm(forms.ModelForm):
+    class Meta:
+        model = Media
+        fields = ("alt_text", "metadata")
+
+
+@admin.register(Media)
+class MediaAdmin(NoDeleteAdmin):
+    list_display = (
+        "thumbnail",
+        "storage_key",
+        "store",
+        "mime_type",
+        "width",
+        "height",
+        "alt_text",
+    )
+    list_filter = ("store", "mime_type")
+    search_fields = ("storage_key", "content_hash", "alt_text")
+    ordering = ("store", "storage_key")
+    readonly_fields = (
+        "thumbnail",
+        "store",
+        "storage_key",
+        "content_hash",
+        "mime_type",
+        "width",
+        "height",
+    )
+
+    @admin.display(description="Thumbnail")
+    def thumbnail(self, obj):
+        if obj is None or not obj.storage_key:
+            return ""
+        return format_html(
+            '<img src="{}" alt="" style="max-height: 48px; max-width: 48px;">',
+            obj.public_url,
+        )
+
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        return MediaChangeForm if obj is not None else MediaAddForm
+
+    def get_readonly_fields(self, request, obj=None):
+        return self.readonly_fields if obj is not None else ()
+
+    def save_model(self, request, obj, form, change):
+        if change:
+            super().save_model(request, obj, form, change)
+            return
+
+        media = store_media(
+            obj.store,
+            form.cleaned_data["file"],
+            alt_text=obj.alt_text,
+            prepared=form.prepared_media,
+        )
+        for field in (
+            "store",
+            "storage_key",
+            "content_hash",
+            "mime_type",
+            "alt_text",
+            "width",
+            "height",
+            "metadata",
+        ):
+            setattr(obj, field, getattr(media, field))
+        obj.pk = media.pk
+
+
+class ProductMediaInline(admin.TabularInline):
+    model = ProductMedia
+    autocomplete_fields = ("media",)
+    extra = 0
+    fields = ("media", "variant", "role", "position")
+    ordering = ("position",)
+
+    def get_formset(self, request, obj=None, **kwargs):
+        self._product = obj
+        return super().get_formset(request, obj, **kwargs)
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "media" and getattr(self, "_product", None) is not None:
+            kwargs["queryset"] = Media.objects.filter(store_id=self._product.store_id)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+
 @admin.register(Product)
 class ProductAdmin(NoDeleteAdmin):
     list_display = ("name", "category", "design", "store", "is_active")
@@ -260,7 +374,7 @@ class ProductAdmin(NoDeleteAdmin):
         "created_at",
         "updated_at",
     )
-    inlines = (ProductVariantInline,)
+    inlines = (ProductVariantInline, ProductMediaInline)
 
     def get_readonly_fields(self, request, obj=None):
         readonly = list(self.readonly_fields)

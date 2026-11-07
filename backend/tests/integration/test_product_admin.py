@@ -4,12 +4,21 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.admin.models import CHANGE, LogEntry
+from django.contrib.admin.widgets import AutocompleteSelect
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.contrib.contenttypes.models import ContentType
 from django.urls import reverse
 
-from apps.catalog.models import Category, Design, Product, ProductVariant, Supplier
+from apps.catalog.models import (
+    Category,
+    Design,
+    Media,
+    Product,
+    ProductMedia,
+    ProductVariant,
+    Supplier,
+)
 from apps.stores.models import Store
 from tests.integration.admin_forms import empty_inline, inline
 
@@ -81,6 +90,7 @@ def product_form(store, category, design=None, *, attributes=None, name="", slug
         "description": "",
         "attributes": json.dumps(attributes or {}),
         "is_active": "on",
+        **empty_inline("product_media"),
     }
 
 
@@ -368,3 +378,119 @@ def test_product_admin_is_reachable_by_superusers_only(client, url_name):
 
     assert response.status_code == 302
     assert response.url.startswith(reverse("admin:login"))
+
+
+def test_admin_links_media_to_a_product(admin_client_by_email):
+    home = make_store("home", "Home")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+    media = Media.objects.create(
+        store=home,
+        storage_key="stores/1/media/photo.jpg",
+        content_hash="photo",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+
+    response = admin_client_by_email.post(
+        f"/admin/catalog/product/{product.pk}/change/",
+        {
+            **product_form(home, category, design),
+            **empty_inline("variants"),
+            **inline(
+                "product_media",
+                [{"media": str(media.pk), "variant": "", "role": "main", "position": "1"}],
+            ),
+        },
+    )
+
+    assert response.status_code == 302
+    link = ProductMedia.objects.get()
+    assert link.product == product
+    assert link.media == media
+    assert link.role == ProductMedia.Role.MAIN
+
+
+def test_product_media_inline_offers_only_the_products_store_media(admin_client_by_email):
+    home = make_store("home", "Home")
+    anime = make_store("anime", "Anime")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+    home_media = Media.objects.create(
+        store=home,
+        storage_key="stores/1/media/home.jpg",
+        content_hash="home",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    Media.objects.create(
+        store=anime,
+        storage_key="stores/2/media/other.jpg",
+        content_hash="other",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    ProductMedia.objects.create(product=product, media=home_media)
+
+    response = admin_client_by_email.get(f"/admin/catalog/product/{product.pk}/change/")
+
+    assert response.status_code == 200
+    formsets = [
+        inline_formset.formset
+        for inline_formset in response.context["inline_admin_formsets"]
+        if inline_formset.formset.model is ProductMedia
+    ]
+    assert len(formsets) == 1
+    field = formsets[0].forms[0].fields["media"]
+    assert list(field.queryset) == [home_media]
+    assert isinstance(field.widget.widget, AutocompleteSelect)
+
+
+def test_admin_removes_the_link_but_not_the_media(admin_client_by_email):
+    home = make_store("home", "Home")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+    media = Media.objects.create(
+        store=home,
+        storage_key="stores/1/media/photo.jpg",
+        content_hash="photo",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    link = ProductMedia.objects.create(product=product, media=media)
+
+    response = admin_client_by_email.post(
+        f"/admin/catalog/product/{product.pk}/change/",
+        {
+            **product_form(home, category, design),
+            **empty_inline("variants"),
+            **inline(
+                "product_media",
+                [
+                    {
+                        "id": str(link.pk),
+                        "media": str(media.pk),
+                        "variant": "",
+                        "role": "main",
+                        "position": "1",
+                        "DELETE": "on",
+                    }
+                ],
+                initial=1,
+            ),
+        },
+    )
+
+    assert response.status_code == 302
+    assert not ProductMedia.objects.filter(pk=link.pk).exists()
+    assert Media.objects.filter(pk=media.pk).exists()

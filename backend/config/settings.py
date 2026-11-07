@@ -8,6 +8,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import environ
+from django.core.exceptions import ImproperlyConfigured
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -88,6 +89,51 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
+# Public product media. R2 in staging and production; local files in development and tests.
+R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="")
+R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
+R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
+R2_ENDPOINT_URL = env("R2_ENDPOINT_URL", default="")
+
+if R2_BUCKET_NAME:
+    MEDIA_BASE_URL = env("MEDIA_BASE_URL", default="")
+    if not MEDIA_BASE_URL:
+        raise ImproperlyConfigured("MEDIA_BASE_URL is required when R2_BUCKET_NAME is set.")
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3.S3Storage",
+            "OPTIONS": {
+                "bucket_name": R2_BUCKET_NAME,
+                "access_key": R2_ACCESS_KEY_ID,
+                "secret_key": R2_SECRET_ACCESS_KEY,
+                "endpoint_url": R2_ENDPOINT_URL,
+                "region_name": env("R2_REGION_NAME", default="auto"),
+                "signature_version": "s3v4",
+                "default_acl": None,
+                "querystring_auth": False,
+                "object_parameters": {
+                    "CacheControl": "public, max-age=31536000, immutable",
+                },
+            },
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
+else:
+    MEDIA_BASE_URL = env("MEDIA_BASE_URL", default=f"http://localhost:8000{MEDIA_URL}")
+    STORAGES = {
+        "default": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+        },
+        "staticfiles": {
+            "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+        },
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -426,6 +426,7 @@ def test_product_detail_shows_attributes_with_labels_and_active_variants(client,
         "description": "Warm.",
         "category": {"name": "Frazada", "slug": "frazada"},
         "collections": [],
+        "images": [],
         "attributes": [
             {
                 "code": "material",
@@ -537,7 +538,11 @@ def test_variant_lookup_returns_the_variant_and_its_product_summary(client, home
         ],
         "price": "499.00",
         "compare_at_price": "699.00",
-        "product": {"name": "Frazada Térmica", "slug": "frazada-termica"},
+        "product": {
+            "name": "Frazada Térmica",
+            "slug": "frazada-termica",
+            "main_image": None,
+        },
     }
 
 
@@ -686,7 +691,7 @@ def test_product_detail_query_count_does_not_grow_with_variants(
     make_variant(product, option_values={"size": "MAT"})
     make_variant(product, option_values={"size": "IND"})
 
-    with django_assert_max_num_queries(4):
+    with django_assert_max_num_queries(5):
         response = client.get(detail_url(product), HTTP_X_STORE="home")
 
     assert len(response.json()["variants"]) == 2

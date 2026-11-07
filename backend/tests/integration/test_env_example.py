@@ -4,6 +4,7 @@ import environ
 import pytest
 
 ENV_EXAMPLE = Path(__file__).resolve().parents[2] / ".env.example"
+ROOT_GITIGNORE = Path(__file__).resolve().parents[3] / ".gitignore"
 
 VALID_ENV = {
     "DATABASE_URL": "postgres://shop:shop@localhost:5432/shop",
@@ -35,6 +36,27 @@ def validate_service_urls(env: environ.Env) -> None:
 
 def test_env_example_uses_postgres_and_redis_urls(load_env):
     validate_service_urls(load_env(ENV_EXAMPLE))
+
+
+def test_env_example_only_documents_the_r2_media_names():
+    content = ENV_EXAMPLE.read_text(encoding="utf-8")
+
+    assert "AWS_" not in content
+    for name in (
+        "R2_BUCKET_NAME",
+        "R2_ACCESS_KEY_ID",
+        "R2_SECRET_ACCESS_KEY",
+        "R2_ENDPOINT_URL",
+        "R2_REGION_NAME",
+        "MEDIA_BASE_URL",
+    ):
+        assert name in content
+
+
+def test_the_local_media_directory_is_git_ignored():
+    content = ROOT_GITIGNORE.read_text(encoding="utf-8")
+
+    assert "backend/media/" in content
 
 
 @pytest.mark.parametrize(

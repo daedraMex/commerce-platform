@@ -106,9 +106,32 @@ class VariantSerializer(serializers.Serializer):
         return _option_values(variant)
 
 
+class ProductImageSerializer(serializers.Serializer):
+    url = serializers.CharField(source="media.public_url")
+    role = serializers.CharField()
+    position = serializers.IntegerField()
+    alt_text = serializers.CharField(source="media.alt_text")
+    width = serializers.IntegerField(source="media.width")
+    height = serializers.IntegerField(source="media.height")
+    variant = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.CharField(allow_null=True))
+    def get_variant(self, image):
+        return image.variant.sku if image.variant_id is not None else None
+
+
 class ProductSummarySerializer(serializers.Serializer):
     name = serializers.CharField()
     slug = serializers.CharField()
+    main_image = serializers.SerializerMethodField()
+
+    @extend_schema_field(ProductImageSerializer)
+    def get_main_image(self, product):
+        image = next(
+            (image for image in product.product_media.all() if image.role == "main"),
+            None,
+        )
+        return ProductImageSerializer(image).data if image is not None else None
 
 
 class VariantLookupSerializer(VariantSerializer):
@@ -138,6 +161,7 @@ class ProductSerializer(serializers.Serializer):
 class ProductDetailSerializer(ProductSerializer):
     description = serializers.CharField()
     collections = serializers.SerializerMethodField()
+    images = serializers.SerializerMethodField()
 
     @extend_schema_field(CollectionSummarySerializer(many=True))
     def get_collections(self, product):
@@ -145,3 +169,7 @@ class ProductDetailSerializer(ProductSerializer):
         return CollectionSummarySerializer(
             [membership.collection for membership in memberships], many=True
         ).data
+
+    @extend_schema_field(ProductImageSerializer(many=True))
+    def get_images(self, product):
+        return ProductImageSerializer(product.product_media.all(), many=True).data
