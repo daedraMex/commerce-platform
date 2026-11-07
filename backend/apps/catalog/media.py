@@ -8,6 +8,7 @@ from io import BytesIO
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage, storages
+from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 
 from apps.catalog.models import Media
@@ -143,6 +144,17 @@ def prepare_media(upload):
     )
 
 
+def save_prepared_media(prepared):
+    """Write a prepared image to storage once; its key is content-addressed."""
+    storage = get_media_storage()
+    if storage.exists(prepared.storage_key):
+        return
+    storage.save(
+        prepared.storage_key,
+        ContentFile(prepared.content, name=prepared.storage_key.rsplit("/", 1)[-1]),
+    )
+
+
 def store_media(store, upload, *, alt_text="", prepared=None):
     """Store an uploaded image for a store, reusing one already in it."""
     prepared = prepared or prepare_for_store(store, upload)
@@ -150,13 +162,7 @@ def store_media(store, upload, *, alt_text="", prepared=None):
     if existing is not None:
         return existing
 
-    storage = get_media_storage()
-    if not storage.exists(prepared.storage_key):
-        storage.save(
-            prepared.storage_key,
-            ContentFile(prepared.content, name=prepared.storage_key.rsplit("/", 1)[-1]),
-        )
-
+    save_prepared_media(prepared)
     return Media.objects.create(
         store=store,
         storage_key=prepared.storage_key,
@@ -176,3 +182,20 @@ def prepare_for_store(store, upload):
         prepared,
         storage_key=f"stores/{store.pk}/media/{prepared.storage_key}",
     )
+
+
+def prepare_path_for_store(store, path):
+    """Read, validate and re-encode an image file with the store's storage key."""
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise MediaRuleError(f"Cannot read the file {path.name!r}.") from error
+    if size > MAX_IMAGE_BYTES:
+        raise MediaRuleError(SIZE_ERROR)
+
+    try:
+        with path.open("rb") as image_file:
+            upload = SimpleUploadedFile(path.name, image_file.read())
+    except OSError as error:
+        raise MediaRuleError(f"Cannot read the file {path.name!r}.") from error
+    return prepare_for_store(store, upload)
