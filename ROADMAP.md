@@ -186,7 +186,8 @@ y una recepción parcial suma al stock lo recibido.
 **Objetivo:** cobrar de verdad y tener la plataforma en internet.
 **Entregables:** módulo `payments` con Mercado Pago (tarjeta y OXXO) y webhook idempotente;
 Celery con email de confirmación; Dockerfile; VPS con Dokploy; staging y producción con bases y
-credenciales separadas; respaldos a almacenamiento externo; logs y seguimiento de errores.
+credenciales separadas; respaldos a almacenamiento externo; logs y seguimiento de errores;
+`manage.py check --deploy` en CI con una configuración de producción.
 **Criterio de salida:** un pago de prueba en staging marca el pedido como pagado y envía el email.
 **Trámites que arrancan aquí:** revisión de la app de Meta (Instagram) y verificación de
 WhatsApp Business Platform.
