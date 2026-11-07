@@ -1,0 +1,10 @@
+[Unit]
+Description=Run the night factory every night at 23:00 local time
+
+[Timer]
+OnCalendar=*-*-* 23:00:00
+Persistent=true
+Unit=factory.service
+
+[Install]
+WantedBy=timers.target

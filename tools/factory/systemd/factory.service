@@ -1,0 +1,11 @@
+[Unit]
+Description=Night factory: implement agent-ready tickets and open draft PRs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/factory/secrets.env
+WorkingDirectory=%h/factory/repo/tools/factory
+ExecStart=%h/.local/bin/uv run factory
+TimeoutStartSec=4h
