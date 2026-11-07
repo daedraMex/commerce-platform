@@ -4,10 +4,12 @@ import hashlib
 import warnings
 from dataclasses import dataclass, replace
 from io import BytesIO
+from pathlib import Path
 
 from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage, storages
+from django.core.files.uploadedfile import SimpleUploadedFile
 from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 
 from apps.catalog.models import Media
@@ -36,6 +38,19 @@ class PreparedMedia:
     """Everything read from one uploaded image, before it is stored."""
 
     content: bytes
+    content_hash: str
+    storage_key: str
+    mime_type: str
+    width: int
+    height: int
+    metadata: dict
+
+
+@dataclass(frozen=True)
+class PreparedMediaFile:
+    """What the first import pass keeps about a file: metadata, never its bytes."""
+
+    path: Path
     content_hash: str
     storage_key: str
     mime_type: str
@@ -143,21 +158,20 @@ def prepare_media(upload):
     )
 
 
-def store_media(store, upload, *, alt_text="", prepared=None):
-    """Store an uploaded image for a store, reusing one already in it."""
-    prepared = prepared or prepare_for_store(store, upload)
-    existing = Media.objects.filter(store=store, content_hash=prepared.content_hash).first()
-    if existing is not None:
-        return existing
-
+def save_prepared_media(prepared):
+    """Write a prepared image to storage once; its key is content-addressed."""
     storage = get_media_storage()
-    if not storage.exists(prepared.storage_key):
-        storage.save(
-            prepared.storage_key,
-            ContentFile(prepared.content, name=prepared.storage_key.rsplit("/", 1)[-1]),
-        )
+    if storage.exists(prepared.storage_key):
+        return
+    storage.save(
+        prepared.storage_key,
+        ContentFile(prepared.content, name=prepared.storage_key.rsplit("/", 1)[-1]),
+    )
 
-    return Media.objects.create(
+
+def media_from_prepared(store, prepared, *, alt_text=""):
+    """Build, but do not save, the Media a prepared image describes."""
+    return Media(
         store=store,
         storage_key=prepared.storage_key,
         content_hash=prepared.content_hash,
@@ -169,10 +183,54 @@ def store_media(store, upload, *, alt_text="", prepared=None):
     )
 
 
+def store_media(store, upload, *, alt_text="", prepared=None):
+    """Store an uploaded image for a store, reusing one already in it."""
+    prepared = prepared or prepare_for_store(store, upload)
+    existing = Media.objects.filter(store=store, content_hash=prepared.content_hash).first()
+    if existing is not None:
+        return existing
+
+    save_prepared_media(prepared)
+    media = media_from_prepared(store, prepared, alt_text=alt_text)
+    media.save()
+    return media
+
+
 def prepare_for_store(store, upload):
     """Prepare an upload with a storage key under the store's id."""
     prepared = prepare_media(upload)
     return replace(
         prepared,
         storage_key=f"stores/{store.pk}/media/{prepared.storage_key}",
+    )
+
+
+def prepare_path_for_store(store, path):
+    """Read, validate and re-encode an image file with the store's storage key."""
+    try:
+        size = path.stat().st_size
+    except OSError as error:
+        raise MediaRuleError(f"Cannot read the file {path.name!r}.") from error
+    if size > MAX_IMAGE_BYTES:
+        raise MediaRuleError(SIZE_ERROR)
+
+    try:
+        with path.open("rb") as image_file:
+            upload = SimpleUploadedFile(path.name, image_file.read())
+    except OSError as error:
+        raise MediaRuleError(f"Cannot read the file {path.name!r}.") from error
+    return prepare_for_store(store, upload)
+
+
+def prepare_media_file(store, path):
+    """Read and validate an image file, keeping only the metadata the plan needs."""
+    prepared = prepare_path_for_store(store, path)
+    return PreparedMediaFile(
+        path=path,
+        content_hash=prepared.content_hash,
+        storage_key=prepared.storage_key,
+        mime_type=prepared.mime_type,
+        width=prepared.width,
+        height=prepared.height,
+        metadata=prepared.metadata,
     )

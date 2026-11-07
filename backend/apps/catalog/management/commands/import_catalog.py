@@ -18,12 +18,21 @@ from apps.catalog.management.support import (
     resolve_operator,
     snapshot,
 )
+from apps.catalog.media import (
+    MediaRuleError,
+    media_from_prepared,
+    prepare_media_file,
+    prepare_path_for_store,
+    save_prepared_media,
+)
 from apps.catalog.models import (
     Category,
     Collection,
     CollectionProduct,
     Design,
+    Media,
     Product,
+    ProductMedia,
     ProductVariant,
     Supplier,
 )
@@ -100,6 +109,8 @@ class ParsedRow:
     collection_names: tuple[str, ...]
     attributes: dict
     description: str
+    main_image: str
+    gallery_images: tuple[str, ...]
 
     @property
     def design_key(self):
@@ -125,6 +136,26 @@ class RowPlan:
 
 
 @dataclass
+class ProductImage:
+    """One ProductMedia link the import will create."""
+
+    product: Product
+    media: Media
+    role: str
+    position: int
+
+
+@dataclass
+class ProductImagePlan:
+    new_media: list = field(default_factory=list)
+    new_media_files: dict = field(default_factory=dict)
+    product_images: list = field(default_factory=list)
+    link_updates: list = field(default_factory=list)
+    changed_products: set = field(default_factory=set)
+    rejections: list = field(default_factory=list)
+
+
+@dataclass
 class Report:
     created: int
     updated: int
@@ -133,6 +164,9 @@ class Report:
     rejections: list
     collections: list
     dry_run: bool
+    images_stored: int = 0
+    images_linked: int = 0
+    show_images: bool = False
 
     def render(self):
         lines = [
@@ -144,6 +178,13 @@ class Report:
         ]
         for name in self.collections:
             lines.append(f"  - {name}")
+        if self.show_images:
+            if self.dry_run:
+                lines.append(f"Images would be stored: {self.images_stored}")
+                lines.append(f"Images would be linked: {self.images_linked}")
+            else:
+                lines.append(f"Images stored: {self.images_stored}")
+                lines.append(f"Images linked: {self.images_linked}")
         for rejection in self.rejections:
             lines.append(f"  Row {rejection.line}: {rejection.reason}")
         if self.dry_run:
@@ -159,24 +200,94 @@ class Command(BaseCommand):
         parser.add_argument("--csv", required=True, help="Path to the CSV file.")
         parser.add_argument("--operator", required=True, help="Email of an active superuser.")
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument("--images", help="Folder holding the image files named in the CSV.")
 
     def handle(self, *args, **options):
         # The operator is checked before the file, the store or any catalog row is read.
         operator = resolve_operator(options["operator"])
         store = get_active_store(options["store"])
         dry_run = options["dry_run"]
+        images_dir = _images_directory(options.get("images"))
 
         rows, rejections = _read_rows(options["csv"], store)
-        if dry_run:
-            report = _execute(store, rows, rejections, operator, dry_run=True)
+        show_images = images_dir is not None
+        prepared_images = {}
+        if images_dir is not None:
+            prepared_images, image_rejections = _prepare_images(store, rows, images_dir)
+            rejections = [*rejections, *image_rejections]
+
+        if rejections:
+            report = _rejected_report(rejections, dry_run, show_images=show_images)
+        elif dry_run:
+            report = _execute(
+                store,
+                rows,
+                operator,
+                dry_run=True,
+                prepared_images=prepared_images,
+                show_images=show_images,
+            )
         else:
             with transaction.atomic():
                 lock_store(store.pk)
-                report = _execute(store, rows, rejections, operator, dry_run=False)
+                report = _execute(
+                    store,
+                    rows,
+                    operator,
+                    dry_run=False,
+                    prepared_images=prepared_images,
+                    show_images=show_images,
+                )
 
         self.stdout.write(report.render())
         if report.rejected:
             raise CommandError(f"{report.rejected} row(s) rejected.")
+
+
+def _images_directory(value):
+    if not value:
+        return None
+    images_dir = Path(value).expanduser()
+    if not images_dir.is_dir():
+        raise CommandError(
+            f"The images folder {str(images_dir)!r} does not exist or is not a directory."
+        )
+    return images_dir
+
+
+def _prepare_images(store, rows, images_dir):
+    """Read and validate every distinct image once, before the transaction opens."""
+    prepared = {}
+    rejected_names = {}
+    rejections = []
+
+    for row in rows:
+        for name in _row_image_names(row):
+            if name in prepared:
+                continue
+            if name in rejected_names:
+                rejections.append(Rejection(row.line, rejected_names[name]))
+                break
+            try:
+                path = _media_file_path(images_dir, name)
+                prepared[name] = prepare_media_file(store, path)
+            except RowError as error:
+                rejected_names[name] = str(error)
+                rejections.append(Rejection(row.line, str(error)))
+                break
+            except MediaRuleError as error:
+                reason = f"The image file '{name}' is not valid: {error}"
+                rejected_names[name] = reason
+                rejections.append(Rejection(row.line, reason))
+                break
+
+    return prepared, rejections
+
+
+def _row_image_names(row):
+    if row.main_image:
+        yield row.main_image
+    yield from row.gallery_images
 
 
 def _read_rows(path, store):
@@ -283,6 +394,8 @@ def _parse_row(raw, line, categories, suppliers):
         collection_names=collection_names,
         attributes=attributes,
         description=_text(raw, "description"),
+        main_image=_text(raw, "main_image"),
+        gallery_images=tuple(_split_list(raw.get("gallery_images"))),
     )
 
 
@@ -420,22 +533,32 @@ def _optional_int(raw, key, *, max_value=None):
     return number
 
 
-def _execute(store, rows, rejections, operator, *, dry_run):
-    if rejections:
-        return _rejected_report(rejections, dry_run)
-
-    plan = _plan(store, rows, dry_run=dry_run)
+def _execute(store, rows, operator, *, dry_run, prepared_images=None, show_images=False):
+    plan = _plan(store, rows, dry_run=dry_run, prepared_images=prepared_images)
     if plan.rejections:
-        return _rejected_report(plan.rejections, dry_run)
+        return _rejected_report(plan.rejections, dry_run, show_images=show_images)
 
     existing = [row_plan for row_plan in plan.rows if row_plan.variant is not None]
     created = len(plan.rows) - len(existing)
     updated = sum(1 for row_plan in existing if row_plan.changed)
     unchanged = len(existing) - updated
+    images_stored = len(plan.new_media)
+    images_linked = len(plan.product_images) + len(plan.link_updates)
     if dry_run:
-        return Report(created, updated, unchanged, 0, [], plan.new_collections, True)
+        return Report(
+            created,
+            updated,
+            unchanged,
+            0,
+            [],
+            plan.new_collections,
+            True,
+            images_stored=images_stored,
+            images_linked=images_linked,
+            show_images=show_images,
+        )
 
-    _write(plan, operator)
+    _write(store, plan, operator)
     return Report(
         created,
         updated,
@@ -444,11 +567,14 @@ def _execute(store, rows, rejections, operator, *, dry_run):
         [],
         [collection.name for collection in plan.new_collections],
         False,
+        images_stored=images_stored,
+        images_linked=images_linked,
+        show_images=show_images,
     )
 
 
-def _rejected_report(rejections, dry_run):
-    return Report(0, 0, 0, len(rejections), rejections, [], dry_run)
+def _rejected_report(rejections, dry_run, *, show_images=False):
+    return Report(0, 0, 0, len(rejections), rejections, [], dry_run, show_images=show_images)
 
 
 @dataclass
@@ -461,10 +587,14 @@ class Plan:
     collections_by_name: dict
     memberships: list
     existing_memberships: set
+    new_media: list
+    new_media_files: dict
+    product_images: list
+    link_updates: list
     rejections: list
 
 
-def _plan(store, rows, *, dry_run):
+def _plan(store, rows, *, dry_run, prepared_images=None):
     existing_designs = list(Design.objects.filter(store=store))
     designs_by_key = {
         (design.supplier_id, design.supplier_design_name.casefold()): design
@@ -595,6 +725,9 @@ def _plan(store, rows, *, dry_run):
             )
         )
 
+    product_image_plan = _plan_product_images(store, row_plans, prepared_images or {})
+    rejections.extend(product_image_plan.rejections)
+
     collections_by_name = {
         collection.name: collection for collection in Collection.objects.filter(store=store)
     }
@@ -624,6 +757,7 @@ def _plan(store, rows, *, dry_run):
             changed_product_keys,
             collections_by_name,
             existing_memberships,
+            product_image_plan.changed_products,
         )
 
     return Plan(
@@ -635,15 +769,183 @@ def _plan(store, rows, *, dry_run):
         collections_by_name=collections_by_name,
         memberships=memberships,
         existing_memberships=existing_memberships,
+        new_media=product_image_plan.new_media,
+        new_media_files=product_image_plan.new_media_files,
+        product_images=product_image_plan.product_images,
+        link_updates=product_image_plan.link_updates,
         rejections=rejections,
     )
 
 
-def _row_changed(row_plan, changed_product_keys, collections_by_name, existing_memberships):
+def _plan_product_images(store, row_plans, prepared_images):
+    plan = ProductImagePlan()
+    if not prepared_images:
+        return plan
+
+    prepared_by_hash = {}
+    requests_by_product = {}
+
+    for row_plan in row_plans:
+        row = row_plan.row
+        requested = []
+        if row.main_image:
+            requested.append((ProductMedia.Role.MAIN, row.main_image))
+        requested.extend((ProductMedia.Role.GALLERY, name) for name in row.gallery_images)
+        if not requested:
+            continue
+
+        images = []
+        for role, name in requested:
+            prepared = prepared_images.get(name)
+            if prepared is None:
+                continue
+            prepared_by_hash.setdefault(prepared.content_hash, prepared)
+            images.append((role, name, prepared))
+        if not images:
+            continue
+
+        requests_by_product.setdefault(row.product_key, []).append((row.line, images))
+
+    if not requests_by_product:
+        return plan
+
+    existing_media = {
+        media.content_hash: media
+        for media in Media.objects.filter(store=store, content_hash__in=list(prepared_by_hash))
+    }
+    media_by_hash = dict(existing_media)
+    for content_hash, prepared in prepared_by_hash.items():
+        if content_hash in media_by_hash:
+            continue
+        media = media_from_prepared(store, prepared)
+        media_by_hash[content_hash] = media
+        plan.new_media.append(media)
+        plan.new_media_files[content_hash] = prepared
+
+    products_by_key = {row_plan.row.product_key: row_plan.product for row_plan in row_plans}
+    product_ids = [
+        product.pk
+        for key, product in products_by_key.items()
+        if key in requests_by_product and product.pk is not None
+    ]
+    existing_links = {}
+    existing_main = {}
+    if product_ids:
+        links = ProductMedia.objects.filter(product_id__in=product_ids).select_related("media")
+        for link in links:
+            existing_links.setdefault((link.product_id, link.media.content_hash), link)
+            if link.role == ProductMedia.Role.MAIN:
+                existing_main.setdefault(link.product_id, link.media.content_hash)
+
+    for product_key, groups in requests_by_product.items():
+        product = products_by_key[product_key]
+
+        main_hashes = []
+        main_names = {}
+        main_lines = {}
+        for line, images in groups:
+            for role, name, prepared in images:
+                if role != ProductMedia.Role.MAIN:
+                    continue
+                content_hash = prepared.content_hash
+                if content_hash in main_names:
+                    continue
+                main_names[content_hash] = name
+                main_lines[content_hash] = line
+                main_hashes.append(content_hash)
+
+        if len(main_hashes) > 1:
+            for content_hash in main_hashes[1:]:
+                plan.rejections.append(
+                    Rejection(
+                        main_lines[content_hash],
+                        f"The product already has a main image in this file "
+                        f"('{main_names[content_hash]}').",
+                    )
+                )
+            continue
+
+        if main_hashes and product.pk is not None:
+            existing_main_hash = existing_main.get(product.pk)
+            if existing_main_hash is not None and existing_main_hash != main_hashes[0]:
+                plan.rejections.append(
+                    Rejection(
+                        main_lines[main_hashes[0]],
+                        f"The product already has a main image; "
+                        f"'{main_names[main_hashes[0]]}' cannot be a second one.",
+                    )
+                )
+                continue
+
+        gallery_hashes = []
+        seen = set(main_hashes)
+        for _line, images in groups:
+            for role, _name, prepared in images:
+                if role != ProductMedia.Role.GALLERY:
+                    continue
+                content_hash = prepared.content_hash
+                if content_hash in seen:
+                    continue
+                seen.add(content_hash)
+                gallery_hashes.append(content_hash)
+
+        ordered = []
+        if main_hashes:
+            ordered.append((ProductMedia.Role.MAIN, main_hashes[0]))
+        ordered.extend((ProductMedia.Role.GALLERY, content_hash) for content_hash in gallery_hashes)
+
+        for position, (role, content_hash) in enumerate(ordered, start=1):
+            existing_link = None
+            if product.pk is not None:
+                existing_link = existing_links.get((product.pk, content_hash))
+            if existing_link is not None:
+                if existing_link.role != role or existing_link.position != position:
+                    existing_link.role = role
+                    existing_link.position = position
+                    plan.link_updates.append(existing_link)
+                    plan.changed_products.add(product_key)
+                continue
+            plan.product_images.append(
+                ProductImage(
+                    product=product,
+                    media=media_by_hash[content_hash],
+                    role=role,
+                    position=position,
+                )
+            )
+            plan.changed_products.add(product_key)
+
+    return plan
+
+
+def _media_file_path(images_dir, name):
+    candidate = Path(name)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise RowError(f"The image file '{name}' is outside the images folder.")
+    base = images_dir.resolve()
+    path = (base / candidate).resolve()
+    try:
+        path.relative_to(base)
+    except ValueError as error:
+        raise RowError(f"The image file '{name}' is outside the images folder.") from error
+    if not path.is_file():
+        raise RowError(f"The image file '{name}' was not found in the images folder.")
+    return path
+
+
+def _row_changed(
+    row_plan,
+    changed_product_keys,
+    collections_by_name,
+    existing_memberships,
+    product_image_changes,
+):
     """Whether this row would change anything already stored."""
     if row_plan.variant is None:
         return False
     if row_plan.row.product_key in changed_product_keys:
+        return True
+    if row_plan.row.product_key in product_image_changes:
         return True
     if any(
         getattr(row_plan.variant, field) != getattr(row_plan.row, field)
@@ -657,7 +959,7 @@ def _row_changed(row_plan, changed_product_keys, collections_by_name, existing_m
     return False
 
 
-def _write(plan, operator):
+def _write(store, plan, operator):
     if plan.new_designs:
         Design.objects.bulk_create(plan.new_designs)
     if plan.new_products:
@@ -706,6 +1008,34 @@ def _write(plan, operator):
     memberships_to_create = _build_memberships(plan)
     if memberships_to_create:
         CollectionProduct.objects.bulk_create(memberships_to_create)
+
+    if plan.new_media:
+        for media in plan.new_media:
+            source = plan.new_media_files[media.content_hash]
+            prepared = prepare_path_for_store(store, source.path)
+            if prepared.content_hash != media.content_hash:
+                raise CommandError(
+                    f"The image file '{source.path.name}' changed while the catalog "
+                    "was being imported."
+                )
+            save_prepared_media(prepared)
+        Media.objects.bulk_create(plan.new_media)
+
+    if plan.link_updates:
+        ProductMedia.objects.bulk_update(plan.link_updates, ["role", "position"])
+
+    if plan.product_images:
+        ProductMedia.objects.bulk_create(
+            [
+                ProductMedia(
+                    product=link.product,
+                    media=link.media,
+                    role=link.role,
+                    position=link.position,
+                )
+                for link in plan.product_images
+            ]
+        )
 
     if log_entries:
         LogEntry.objects.bulk_create(log_entries)
