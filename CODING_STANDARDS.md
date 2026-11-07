@@ -26,3 +26,8 @@ test.
 Every uploaded image goes through the catalog media pipeline. Tests read the
 stored bytes and cover GPS EXIF, EXIF orientation, an embedded ICC profile and a
 decompression bomb, using the fixtures in `tests/images.py`.
+
+## Public surface
+
+Do not add public aliases, properties, form fields or compatibility shims
+without a caller or a sentence in the spec. Name each concept once.
