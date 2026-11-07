@@ -2,6 +2,6 @@
 description: "Conduct a retrospective on a coding session."
 ---
 
-Call the Skill tool with "retro" and follow the loaded instructions.
+Read .agents/skills/retro/SKILL.md and follow it.
 
 $ARGUMENTS

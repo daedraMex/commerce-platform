@@ -2,6 +2,6 @@
 description: "A relentless interview to sharpen a plan or design."
 ---
 
-Call the Skill tool with "grill-me" and follow the loaded instructions.
+Read .agents/skills/grill-me/SKILL.md and follow it.
 
 $ARGUMENTS

@@ -2,6 +2,6 @@
 description: "Plan a huge chunk of work as a shared map of decision tickets."
 ---
 
-Call the Skill tool with "wayfinder" and follow the loaded instructions.
+Read .agents/skills/wayfinder/SKILL.md and follow it.
 
 $ARGUMENTS

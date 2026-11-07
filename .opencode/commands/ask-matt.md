@@ -2,6 +2,6 @@
 description: "Ask which skill or flow fits your situation."
 ---
 
-Call the Skill tool with "ask-matt" and follow the loaded instructions.
+Read .agents/skills/ask-matt/SKILL.md and follow it.
 
 $ARGUMENTS
