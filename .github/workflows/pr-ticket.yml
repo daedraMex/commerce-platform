@@ -1,0 +1,28 @@
+name: PR ticket
+
+"on":
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  ticket:
+    name: Ticket link
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a closing ticket for phase PRs
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          case "$HEAD_REF" in
+            phase-*) ;;
+            *) echo "Not a phase branch; skipping."; exit 0 ;;
+          esac
+          if ! printf '%s' "$PR_BODY" | grep -Eqi '(Closes|Part of) #[0-9]+'; then
+            echo "::error::The PR body must contain 'Closes #<ticket>' or 'Part of #<ticket>'."
+            exit 1
+          fi
