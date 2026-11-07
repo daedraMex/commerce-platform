@@ -46,6 +46,7 @@ from apps.catalog.rules import (
     validate_prices,
     validate_product_attributes,
 )
+from apps.shared.domain.paths import safe_child_path
 from apps.stores.services import lock_store
 
 REQUIRED_COLUMNS = ("category", "supplier", "supplier_design_name", "design_name", "price", "cost")
@@ -64,6 +65,7 @@ FIXED_COLUMNS = frozenset(REQUIRED_COLUMNS) | {
 }
 LIST_SEPARATOR = ";"
 PAIR_SEPARATOR = "="
+IMAGE_SUFFIXES = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 # Mirrors the model fields: DecimalField(max_digits=10, decimal_places=2) for money,
 # DecimalField(max_digits=8, decimal_places=2) for package dimensions, and a 32-bit
 # PositiveIntegerField for weight.
@@ -111,6 +113,8 @@ class ParsedRow:
     description: str
     main_image: str
     gallery_images: tuple[str, ...]
+    unknown_option_codes: frozenset = frozenset()
+    unknown_columns: frozenset = frozenset()
 
     @property
     def design_key(self):
@@ -167,6 +171,7 @@ class Report:
     images_stored: int = 0
     images_linked: int = 0
     show_images: bool = False
+    warnings: list = field(default_factory=list)
 
     def render(self):
         lines = [
@@ -185,6 +190,10 @@ class Report:
             else:
                 lines.append(f"Images stored: {self.images_stored}")
                 lines.append(f"Images linked: {self.images_linked}")
+        if self.warnings:
+            lines.append(f"Warnings: {len(self.warnings)}")
+            for warning in self.warnings:
+                lines.append(f"  {warning}")
         for rejection in self.rejections:
             lines.append(f"  Row {rejection.line}: {rejection.reason}")
         if self.dry_run:
@@ -210,6 +219,7 @@ class Command(BaseCommand):
         images_dir = _images_directory(options.get("images"))
 
         rows, rejections = _read_rows(options["csv"], store)
+        warnings = _collect_warnings(rows, images_dir)
         show_images = images_dir is not None
         prepared_images = {}
         if images_dir is not None:
@@ -217,7 +227,9 @@ class Command(BaseCommand):
             rejections = [*rejections, *image_rejections]
 
         if rejections:
-            report = _rejected_report(rejections, dry_run, show_images=show_images)
+            report = _rejected_report(
+                rejections, dry_run, show_images=show_images, warnings=warnings
+            )
         elif dry_run:
             report = _execute(
                 store,
@@ -226,6 +238,7 @@ class Command(BaseCommand):
                 dry_run=True,
                 prepared_images=prepared_images,
                 show_images=show_images,
+                warnings=warnings,
             )
         else:
             with transaction.atomic():
@@ -237,6 +250,7 @@ class Command(BaseCommand):
                     dry_run=False,
                     prepared_images=prepared_images,
                     show_images=show_images,
+                    warnings=warnings,
                 )
 
         self.stdout.write(report.render())
@@ -288,6 +302,78 @@ def _row_image_names(row):
     if row.main_image:
         yield row.main_image
     yield from row.gallery_images
+
+
+def _collect_warnings(rows, images_dir):
+    warnings = []
+    warnings.extend(_unknown_option_warnings(rows))
+    warnings.extend(_unknown_column_warnings(rows))
+    warnings.extend(_duplicate_design_warnings(rows))
+    if images_dir is not None:
+        warnings.extend(_non_image_file_warnings(images_dir))
+    return warnings
+
+
+def _rows_label(count):
+    return "1 row" if count == 1 else f"{count} rows"
+
+
+def _unknown_option_warnings(rows):
+    counts = {}
+    for row in rows:
+        for code in row.unknown_option_codes:
+            key = (row.category.slug, code)
+            counts[key] = counts.get(key, 0) + 1
+    return [
+        f"Option code '{code}' is not defined for category '{category_slug}' "
+        f"and was ignored ({_rows_label(count)})."
+        for (category_slug, code), count in sorted(counts.items())
+    ]
+
+
+def _unknown_column_warnings(rows):
+    counts = {}
+    for row in rows:
+        for column in row.unknown_columns:
+            key = (row.category.slug, column)
+            counts[key] = counts.get(key, 0) + 1
+    return [
+        f"Column '{column}' is not an option or attribute of category "
+        f"'{category_slug}' and was ignored ({_rows_label(count)})."
+        for (category_slug, column), count in sorted(counts.items())
+    ]
+
+
+def _design_name_key(value):
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _duplicate_design_warnings(rows):
+    groups = {}
+    for row in rows:
+        groups.setdefault((row.supplier.pk, _design_name_key(row.design_name)), []).append(row)
+
+    warnings = []
+    for group in groups.values():
+        supplier_design_names = sorted({row.supplier_design_name for row in group})
+        if len(supplier_design_names) > 1:
+            warnings.append(
+                f"Near-duplicate design name '{group[0].design_name}' for supplier "
+                f"'{group[0].supplier.name}' appears under: "
+                f"{', '.join(supplier_design_names)}."
+            )
+    return warnings
+
+
+def _non_image_file_warnings(images_dir):
+    warnings = []
+    for path in sorted(images_dir.rglob("*")):
+        relative = path.relative_to(images_dir)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+        if path.is_file() and path.suffix.casefold() not in IMAGE_SUFFIXES:
+            warnings.append(f"Images folder: '{relative}' is not a JPEG, PNG or WebP file.")
+    return warnings
 
 
 def _read_rows(path, store):
@@ -352,7 +438,21 @@ def _parse_row(raw, line, categories, suppliers):
     if not design_name:
         raise RowError("The row needs a design_name.")
 
+    known_option_codes = {option["code"] for option in category.option_schema}
+    known_attribute_codes = {entry["code"] for entry in category.attribute_schema}
     option_values = _option_values(raw, category)
+    unknown_option_codes = frozenset(set(option_values) - known_option_codes)
+    option_values = {
+        code: value for code, value in option_values.items() if code in known_option_codes
+    }
+    unknown_columns = frozenset(
+        key
+        for key, value in raw.items()
+        if key not in FIXED_COLUMNS
+        and key not in known_option_codes
+        and key not in known_attribute_codes
+        and (value or "").strip()
+    )
     try:
         validate_option_values(option_values, category.option_schema)
     except CatalogRuleError as error:
@@ -396,6 +496,8 @@ def _parse_row(raw, line, categories, suppliers):
         description=_text(raw, "description"),
         main_image=_text(raw, "main_image"),
         gallery_images=tuple(_split_list(raw.get("gallery_images"))),
+        unknown_option_codes=unknown_option_codes,
+        unknown_columns=unknown_columns,
     )
 
 
@@ -533,10 +635,15 @@ def _optional_int(raw, key, *, max_value=None):
     return number
 
 
-def _execute(store, rows, operator, *, dry_run, prepared_images=None, show_images=False):
+def _execute(
+    store, rows, operator, *, dry_run, prepared_images=None, show_images=False, warnings=None
+):
+    warnings = warnings or []
     plan = _plan(store, rows, dry_run=dry_run, prepared_images=prepared_images)
     if plan.rejections:
-        return _rejected_report(plan.rejections, dry_run, show_images=show_images)
+        return _rejected_report(
+            plan.rejections, dry_run, show_images=show_images, warnings=warnings
+        )
 
     existing = [row_plan for row_plan in plan.rows if row_plan.variant is not None]
     created = len(plan.rows) - len(existing)
@@ -556,6 +663,7 @@ def _execute(store, rows, operator, *, dry_run, prepared_images=None, show_image
             images_stored=images_stored,
             images_linked=images_linked,
             show_images=show_images,
+            warnings=warnings,
         )
 
     _write(store, plan, operator)
@@ -570,11 +678,22 @@ def _execute(store, rows, operator, *, dry_run, prepared_images=None, show_image
         images_stored=images_stored,
         images_linked=images_linked,
         show_images=show_images,
+        warnings=warnings,
     )
 
 
-def _rejected_report(rejections, dry_run, *, show_images=False):
-    return Report(0, 0, 0, len(rejections), rejections, [], dry_run, show_images=show_images)
+def _rejected_report(rejections, dry_run, *, show_images=False, warnings=None):
+    return Report(
+        0,
+        0,
+        0,
+        len(rejections),
+        rejections,
+        [],
+        dry_run,
+        show_images=show_images,
+        warnings=warnings or [],
+    )
 
 
 @dataclass
@@ -919,13 +1038,8 @@ def _plan_product_images(store, row_plans, prepared_images):
 
 
 def _media_file_path(images_dir, name):
-    candidate = Path(name)
-    if candidate.is_absolute() or ".." in candidate.parts:
-        raise RowError(f"The image file '{name}' is outside the images folder.")
-    base = images_dir.resolve()
-    path = (base / candidate).resolve()
     try:
-        path.relative_to(base)
+        path = safe_child_path(images_dir, name)
     except ValueError as error:
         raise RowError(f"The image file '{name}' is outside the images folder.") from error
     if not path.is_file():

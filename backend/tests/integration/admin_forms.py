@@ -1,3 +1,30 @@
+from html.parser import HTMLParser
+
+
+class FieldNameParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.names = []
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag in {"input", "select", "textarea"} and attributes.get("name"):
+            self.names.append(attributes["name"])
+
+
+def rendered_field_names(response):
+    """The field names the admin page actually rendered."""
+    parser = FieldNameParser()
+    parser.feed(response.content.decode())
+    return parser.names
+
+
+def rendered_form_data(response, values):
+    """Keep only the submitted values whose field the page rendered."""
+    names = set(rendered_field_names(response))
+    return {name: value for name, value in values.items() if name in names}
+
+
 def inline(prefix, rows=(), initial=0):
     """The formset an admin page posts for an inline: its management form plus ``rows``.
 

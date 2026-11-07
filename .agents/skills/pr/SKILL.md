@@ -12,6 +12,8 @@ metadata:
 Use this template for writing the PR body:
 
 ```markdown
+Closes #<ticket>
+
 ## Summary
 
 <diagram, diff-sketch, or tree>

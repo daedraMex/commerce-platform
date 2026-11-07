@@ -9,6 +9,7 @@ from django.contrib.admin.models import CHANGE, LogEntry
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from django.core.management import CommandError, call_command
+from PIL import Image
 
 from apps.catalog.models import (
     Category,
@@ -905,3 +906,187 @@ def test_a_product_name_that_cannot_become_a_slug_rejects_the_row(tmp_path):
     assert "Cannot build a slug" in output
     assert not Design.objects.exists()
     assert not Product.objects.exists()
+
+
+DESIGN_NAMES = [
+    "Jack Todos",
+    "Dona Azul",
+    "Straykids Azulclaro",
+    "Straykids Rosa",
+    "Gatito Kawaii",
+    "Oso Panda",
+    "Nube Celeste",
+    "Arcoiris Pastel",
+    "Flores Sakura",
+    "Luna Estrellada",
+    "Conejo Triste",
+    "Sapo Bonito",
+    "Pulpo Amor",
+    "Fresa Kawaii",
+    "Meloncito",
+    "Panda Bombon",
+    "Dragon Azul",
+    "Unicornio Magico",
+    "Tigre Sonriente",
+    "Rana Alegre",
+    "Pinguino Invierno",
+    "Zorro Dormido",
+    "Koala Tierno",
+    "Panda Lunar",
+    "Gato Astronauta",
+    "Oso Polar",
+    "Capibara Feliz",
+    "Ajolote Rosa",
+    "Murcielago Noche",
+    "Calabaza Halloween",
+]
+
+
+def write_catalog_image(directory, name, color):
+    directory.mkdir(exist_ok=True)
+    Image.new("RGB", (8, 8), color).save(directory / name, format="JPEG")
+
+
+def catalog_rows():
+    rows = [
+        row(
+            supplier_design_name=name.upper(),
+            design_name=name,
+            option_values="size=IND",
+            main_image="main.jpg" if index < 3 else "",
+            gallery_images="gallery.jpg" if index == 0 else "",
+        )
+        for index, name in enumerate(DESIGN_NAMES)
+    ]
+    rows.extend(
+        row(
+            supplier_design_name=f"{name.upper()} ALT",
+            design_name=name,
+            option_values="size=MAT",
+            price="249.00",
+            cost="90.00",
+        )
+        for name in DESIGN_NAMES[:6]
+    )
+    rows.append(
+        row(
+            supplier_design_name="STALE SIZE",
+            design_name="Stale Size",
+            option_values="size=IND;old_size=P",
+        )
+    )
+    return rows
+
+
+def test_a_real_catalog_dry_run_reports_warnings_without_rejecting_rows(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_catalog_image(images, "main.jpg", (10, 20, 30))
+    write_catalog_image(images, "gallery.jpg", (40, 50, 60))
+    (images / "decorative.pdf").write_bytes(b"%PDF-1.4\n")
+    path = write_csv(tmp_path, catalog_rows())
+
+    output = run_import(
+        store="home",
+        csv=str(path),
+        operator="operator@example.com",
+        images=str(images),
+        dry_run=True,
+    )
+
+    assert "Rows rejected: 0" in output
+    assert "Warnings: 8" in output
+    assert output.count("Near-duplicate design name") == 6
+    assert "decorative.pdf" in output
+    assert "Option code 'old_size'" in output
+    assert "Images would be stored: 2" in output
+    assert "Dry run: nothing was written." in output
+    assert not Design.objects.exists()
+
+
+def test_an_unknown_column_is_warned_once_with_its_row_count(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    path = write_csv(
+        tmp_path,
+        [
+            row(option_values="size=IND", review_note="see page 4"),
+            row(option_values="size=MAT", review_note="see page 5"),
+            row(supplier_design_name="DONA AZUL", design_name="Dona Azul"),
+        ],
+        fieldnames=[*FIELDNAMES, "review_note"],
+    )
+
+    output = run_import(
+        store="home",
+        csv=str(path),
+        operator="operator@example.com",
+        dry_run=True,
+    )
+
+    warning = (
+        "Column 'review_note' is not an option or attribute of category 'frazada' "
+        "and was ignored (2 rows)."
+    )
+    assert warning in output
+    assert output.count("review_note") == 1
+
+
+def test_an_unknown_option_code_is_warned_once_with_its_row_count(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    path = write_csv(
+        tmp_path,
+        [
+            row(option_values="size=IND;old_size=P"),
+            row(option_values="size=MAT;old_size=Q"),
+            row(supplier_design_name="DONA AZUL", design_name="Dona Azul"),
+        ],
+    )
+
+    output = run_import(
+        store="home",
+        csv=str(path),
+        operator="operator@example.com",
+        dry_run=True,
+    )
+
+    warning = (
+        "Option code 'old_size' is not defined for category 'frazada' and was ignored (2 rows)."
+    )
+    assert warning in output
+    assert output.count("old_size") == 1
+
+
+def test_hidden_files_in_the_images_folder_are_not_warned_about(tmp_path):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_catalog_image(images, "main.jpg", (10, 20, 30))
+    (images / ".DS_Store").write_bytes(b"junk")
+    hidden = images / ".cache"
+    hidden.mkdir()
+    (hidden / "notes.pdf").write_bytes(b"%PDF-1.4\n")
+    (images / "visible.pdf").write_bytes(b"%PDF-1.4\n")
+    path = write_csv(tmp_path, [row(main_image="main.jpg")])
+
+    output = run_import(
+        store="home",
+        csv=str(path),
+        operator="operator@example.com",
+        images=str(images),
+        dry_run=True,
+    )
+
+    assert "visible.pdf" in output
+    assert ".DS_Store" not in output
+    assert "notes.pdf" not in output

@@ -61,3 +61,22 @@ def test_filesystem_storage_defaults_media_base_url_to_the_local_route(
 
     assert module.STORAGES["default"]["BACKEND"].endswith("FileSystemStorage")
     assert module.MEDIA_BASE_URL == f"http://localhost:8000{module.MEDIA_URL}"
+
+
+def test_production_like_settings_use_r2_storage(settings_module, monkeypatch):
+    set_env(
+        monkeypatch,
+        R2_BUCKET_NAME="catalog-media",
+        R2_ACCESS_KEY_ID="key",
+        R2_SECRET_ACCESS_KEY="secret",
+        R2_ENDPOINT_URL="https://r2.example.com",
+        MEDIA_BASE_URL="https://media.example.com",
+    )
+
+    module = importlib.reload(settings_module)
+
+    assert module.MEDIA_BASE_URL == "https://media.example.com"
+    storage = module.STORAGES["default"]
+    assert storage["BACKEND"] == "storages.backends.s3.S3Storage"
+    assert storage["OPTIONS"]["bucket_name"] == "catalog-media"
+    assert storage["OPTIONS"]["querystring_auth"] is False
