@@ -28,8 +28,9 @@ class AgentResult:
 
 
 class AgentRunner:
-    def __init__(self, run: RunCommand = run_command):
+    def __init__(self, run: RunCommand = run_command, *, agent_user: str | None = None):
         self._run = run
+        self.agent_user = agent_user
 
     def run(
         self,
@@ -41,6 +42,8 @@ class AgentRunner:
     ) -> AgentResult:
         config_path = worktree / OPENCODE_CONFIG_PATH
         argv = ["opencode", "run", "--model", model, prompt]
+        if self.agent_user:
+            argv = ["sudo", "-u", self.agent_user, "--", *argv]
         env: dict[str, str | None] = {"OPENCODE_CONFIG": str(config_path)}
         for var in STRIPPED_ENV_VARS:
             env[var] = None

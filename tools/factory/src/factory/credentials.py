@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from pathlib import Path
 from typing import Protocol
 from urllib import request
 from urllib.error import HTTPError, URLError
@@ -21,6 +22,14 @@ from .config import FactoryConfigError
 
 class TokenProvider(Protocol):
     def mint(self, repo: str) -> str: ...
+
+
+def private_key_path(value: str | None) -> Path | None:
+    """Return the path to the private key when ``value`` points at an existing file."""
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    return path if path.is_file() else None
 
 
 SignFn = Callable[[dict, str], str]

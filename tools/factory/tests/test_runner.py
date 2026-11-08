@@ -39,6 +39,15 @@ def test_run_passes_model_and_prompt(tmp_path):
     assert "implement ticket" in argv
 
 
+def test_run_as_agent_user_prefixes_sudo(tmp_path):
+    recorder = RecordingRun()
+    runner = AgentRunner(run=recorder, agent_user="factory-agent")
+    runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+
+    argv, _cwd, _env = recorder.calls[0]
+    assert argv[:5] == ["sudo", "-u", "factory-agent", "--", "opencode"]
+
+
 def test_run_marks_timeout(tmp_path):
     from factory.shell import CommandTimeout
 

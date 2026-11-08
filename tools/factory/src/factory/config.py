@@ -9,7 +9,7 @@ Telegram bot token environment variables.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 
@@ -52,6 +52,9 @@ class Settings:
     github_app_id: str | None
     github_private_key: str | None
     github_installation_id: str | None
+    agent_user: str = "factory-agent"
+    secrets_file: Path = field(default_factory=lambda: Path.home() / "factory" / "secrets.env")
+    xolo_config_dir: Path = field(default_factory=lambda: Path.home() / ".config" / "xolo-bot")
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Settings:
@@ -84,4 +87,11 @@ class Settings:
             github_app_id=_read(env, "XOLO_BOT_APP_ID"),
             github_private_key=_read(env, "XOLO_BOT_PRIVATE_KEY"),
             github_installation_id=_read(env, "XOLO_BOT_INSTALLATION_ID"),
+            agent_user=_read(env, "FACTORY_AGENT_USER") or "factory-agent",
+            secrets_file=Path(
+                _read(env, "FACTORY_SECRETS_FILE") or str(home / "factory" / "secrets.env")
+            ),
+            xolo_config_dir=Path(
+                _read(env, "XOLO_BOT_CONFIG_DIR") or str(home / ".config" / "xolo-bot")
+            ),
         )

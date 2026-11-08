@@ -12,6 +12,7 @@ from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .git import Git
 from .github import GitHub
+from .isolation import sensitive_paths, verify_isolation
 from .models import select_model
 from .notify import Notifier, NullNotifier, PrReadyInfo, StuckInfo, TelegramNotifier
 from .outcomes import build_issue_comment
@@ -258,12 +259,13 @@ def _load_private_key(value: str | None) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
+    verify_isolation(agent_user=settings.agent_user, paths=sensitive_paths(settings))
     overlay = read_overlay()
     factory = Factory(
         settings,
         github=GitHub(settings.repo),
         git=Git(),
-        runner=AgentRunner(),
+        runner=AgentRunner(agent_user=settings.agent_user),
         notifier=_build_notifier(settings),
         token_provider=_build_token_provider(settings),
         overlay=overlay,
