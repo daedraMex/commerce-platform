@@ -22,16 +22,26 @@ class CommandResult:
 RunCommand = Callable[..., CommandResult]
 
 
+def merge_env(overrides: dict[str, str | None] | None) -> dict[str, str]:
+    """Merge overrides over the current environment; a ``None`` value removes a key."""
+    merged = os.environ.copy()
+    if overrides:
+        for key, value in overrides.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+    return merged
+
+
 def run_command(
     argv: list[str],
     cwd: str,
     *,
     timeout: int = 300,
-    env: dict[str, str] | None = None,
+    env: dict[str, str | None] | None = None,
 ) -> CommandResult:
-    merged_env = os.environ.copy()
-    if env:
-        merged_env.update(env)
+    merged_env = merge_env(env)
     try:
         proc = subprocess.run(
             argv,

@@ -49,6 +49,9 @@ class Settings:
     keep_days: int
     telegram_bot_token: str | None
     telegram_chat_id: str | None
+    github_app_id: str | None
+    github_private_key: str | None
+    github_installation_id: str | None
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Settings:
@@ -78,4 +81,7 @@ class Settings:
             keep_days=_read_int(env, "FACTORY_KEEP_DAYS", 14),
             telegram_bot_token=_read(env, "FACTORY_TELEGRAM_BOT_TOKEN"),
             telegram_chat_id=_read(env, "FACTORY_TELEGRAM_CHAT_ID"),
+            github_app_id=_read(env, "XOLO_BOT_APP_ID"),
+            github_private_key=_read(env, "XOLO_BOT_PRIVATE_KEY"),
+            github_installation_id=_read(env, "XOLO_BOT_INSTALLATION_ID"),
         )

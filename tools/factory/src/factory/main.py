@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .cleanup import cleanup_old
 from .config import Settings
+from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .git import Git
 from .github import GitHub
@@ -40,6 +41,7 @@ class Factory:
         git: Git,
         runner: AgentRunner,
         notifier: Notifier,
+        token_provider: TokenProvider,
         prompt_template: str,
     ):
         self.settings = settings
@@ -47,6 +49,7 @@ class Factory:
         self.git = git
         self.runner = runner
         self.notifier = notifier
+        self.token_provider = token_provider
         self.prompt_template = prompt_template
 
     def run(self) -> list[TicketResult]:
@@ -131,7 +134,8 @@ class Factory:
     ) -> TicketResult:
         self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})")
         diff = self.git.diff_stats(worktree)
-        self.git.push(worktree, branch)
+        token = self.token_provider.mint(self.settings.repo)
+        self.git.push(worktree, branch, token)
         summary = extract_summary(decisions) or ticket.title
         body = build_pr_body(
             ticket_number=ticket.number,
@@ -140,10 +144,10 @@ class Factory:
             decisions=extract_decisions(decisions),
         )
         pr_number = self.github.create_draft_pr(
-            branch=branch, title=f"#{ticket.number}: {ticket.title}", body=body
+            branch=branch, title=f"#{ticket.number}: {ticket.title}", body=body, token=token
         )
         if diff.migrations_changed:
-            self.github.add_pr_label(pr_number, MIGRATION_LABEL)
+            self.github.add_pr_label(pr_number, MIGRATION_LABEL, token)
         info = PrReadyInfo(
             ticket_number=ticket.number,
             ticket_title=ticket.title,
@@ -179,8 +183,9 @@ class Factory:
             attempts=self.settings.attempts,
             failing_check=failing_check,
         )
-        comment_url = self.github.comment(ticket.number, comment)
-        self.github.add_issue_label(ticket.number, NEEDS_DECISION_LABEL)
+        token = self.token_provider.mint(self.settings.repo)
+        comment_url = self.github.comment(ticket.number, comment, token)
+        self.github.add_issue_label(ticket.number, NEEDS_DECISION_LABEL, token)
         info = StuckInfo(
             ticket_number=ticket.number,
             ticket_title=ticket.title,
@@ -231,6 +236,23 @@ def _build_notifier(settings: Settings) -> Notifier:
     return NullNotifier()
 
 
+def _build_token_provider(settings: Settings) -> TokenProvider:
+    return GithubAppTokenProvider(
+        app_id=settings.github_app_id,
+        private_key=_load_private_key(settings.github_private_key),
+        installation_id=settings.github_installation_id,
+    )
+
+
+def _load_private_key(value: str | None) -> str | None:
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    if path.is_file():
+        return path.read_text()
+    return value
+
+
 def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
     prompt_template = read_prompt_template()
@@ -240,6 +262,7 @@ def main(argv: list[str] | None = None) -> int:
         git=Git(),
         runner=AgentRunner(),
         notifier=_build_notifier(settings),
+        token_provider=_build_token_provider(settings),
         prompt_template=prompt_template,
     )
     results = factory.run()

@@ -40,8 +40,8 @@ class FakeGit:
     def diff_stats(self, worktree):
         return self.diff
 
-    def push(self, worktree, branch):
-        self.pushed.append(branch)
+    def push(self, worktree, branch, token):
+        self.pushed.append((branch, token))
 
 
 class FakeGitHub:
@@ -56,19 +56,29 @@ class FakeGitHub:
     def list_tickets(self):
         return list(self.tickets)
 
-    def create_draft_pr(self, *, branch, title, body):
-        self.created_prs.append((branch, title, body))
+    def create_draft_pr(self, *, branch, title, body, token):
+        self.created_prs.append((branch, title, body, token))
         return self.pr_number
 
-    def add_pr_label(self, number, label):
-        self.pr_labels.append((number, label))
+    def add_pr_label(self, number, label, token):
+        self.pr_labels.append((number, label, token))
 
-    def add_issue_label(self, number, label):
-        self.issue_labels.append((number, label))
+    def add_issue_label(self, number, label, token):
+        self.issue_labels.append((number, label, token))
 
-    def comment(self, number, body):
-        self.comments.append((number, body))
+    def comment(self, number, body, token):
+        self.comments.append((number, body, token))
         return f"https://github.com/r/issues/{number}#comment-1"
+
+
+class FakeTokenProvider:
+    def __init__(self, token="TOKEN"):
+        self.token = token
+        self.calls = []
+
+    def mint(self, repo):
+        self.calls.append(repo)
+        return self.token
 
 
 class FakeRunner:
@@ -107,6 +117,9 @@ def make_settings(tmp_path):
         keep_days=14,
         telegram_bot_token=None,
         telegram_chat_id=None,
+        github_app_id="12345",
+        github_private_key="fake-key",
+        github_installation_id="67890",
     )
 
 
@@ -118,13 +131,14 @@ def make_ticket(number, *, labels=()):
     )
 
 
-def build_factory(tmp_path, *, git, github, runner, notifier, settings=None):
+def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, token_provider=None):
     return Factory(
         settings or make_settings(tmp_path),
         github=github,
         git=git,
         runner=runner,
         notifier=notifier,
+        token_provider=token_provider or FakeTokenProvider(),
         prompt_template=TEMPLATE,
     )
 
@@ -140,13 +154,13 @@ def test_success_opens_draft_pr_and_notifies(tmp_path):
 
     assert len(results) == 1 and results[0].ok
     assert len(github.created_prs) == 1
-    branch, title, body = github.created_prs[0]
+    branch, title, body, token = github.created_prs[0]
     assert branch == "nf/7-ticket-7"
     assert "Closes #7" in body
     assert "Built the thing." in body
     assert "Model: deepseek/deepseek-flash" in body
     assert "Chose A." in body
-    assert git.pushed == ["nf/7-ticket-7"]
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
     assert len(notifier.pr_ready) == 1
 
 
@@ -164,7 +178,7 @@ def test_success_labels_migration_when_migrations_changed(tmp_path):
 
     factory.run()
 
-    assert github.pr_labels == [(101, "migration")]
+    assert github.pr_labels == [(101, "migration", "TOKEN")]
 
 
 def test_failure_comments_and_labels_needs_decision(tmp_path):
@@ -178,7 +192,7 @@ def test_failure_comments_and_labels_needs_decision(tmp_path):
     results = factory.run()
 
     assert len(results) == 1 and not results[0].ok
-    assert github.issue_labels == [(7, "needs-decision")]
+    assert github.issue_labels == [(7, "needs-decision", "TOKEN")]
     assert len(github.comments) == 1
     assert len(notifier.stuck) == 1
     assert github.created_prs == []
@@ -227,6 +241,9 @@ def test_stops_at_first_failure(tmp_path):
         keep_days=settings.keep_days,
         telegram_bot_token=None,
         telegram_chat_id=None,
+        github_app_id="12345",
+        github_private_key="fake-key",
+        github_installation_id="67890",
     )
     git = FakeGit(check_passed=False)
     github = FakeGitHub(
@@ -263,3 +280,42 @@ def test_strong_model_ticket_runs_with_strong_model(tmp_path):
 
     assert runner.calls[0]["model"] == "deepseek/deepseek-v4-pro"
     assert "deepseek/deepseek-v4-pro" in runner.calls[0]["prompt"]
+
+
+def test_success_mints_token_and_scopes_it_to_push_and_pr(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], pr_number=101)
+    token_provider = FakeTokenProvider(token="MINTED-TOKEN")
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=RecordingNotifier(),
+        token_provider=token_provider,
+    )
+
+    factory.run()
+
+    assert token_provider.calls == ["daedraMex/commerce-platform"]
+    assert git.pushed == [("nf/7-ticket-7", "MINTED-TOKEN")]
+    assert github.created_prs[0][3] == "MINTED-TOKEN"
+
+
+def test_stuck_mints_token_and_scopes_it_to_comment_and_label(tmp_path):
+    git = FakeGit(check_passed=False, decisions="- Tried X.")
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    token_provider = FakeTokenProvider(token="MINTED-TOKEN")
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=RecordingNotifier(),
+        token_provider=token_provider,
+    )
+
+    factory.run()
+
+    assert github.comments[0][2] == "MINTED-TOKEN"
+    assert github.issue_labels[0][2] == "MINTED-TOKEN"

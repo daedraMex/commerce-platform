@@ -50,20 +50,27 @@ Run these once, as the admin user unless a step says `factory`.
    ```
 
 5. **Clone the repo and sync the factory package** as `factory`:
-   ```bash
-   git clone https://github.com/daedraMex/commerce-platform.git ~/factory/repo
-   cd ~/factory/repo/tools/factory
-   uv sync
-   ```
+    ```bash
+    git clone https://github.com/daedraMex/commerce-platform.git ~/factory/repo
+    cd ~/factory/repo/tools/factory
+    uv sync
+    ```
 
-6. **Sign in as the machine account.** Create a GitHub **machine account**
-   that is a collaborator on `daedraMex/commerce-platform` only. Give it a
-   fine-grained token scoped to this repo only: `contents` (read/write),
-   `pull requests` (read/write), `issues` (read/write), `metadata` (read).
-   Authenticate `gh` on the `factory` user with that token:
-   ```bash
-   gh auth login   # use the machine account's fine-grained token
-   ```
+6. **Create the `xolo-bot` GitHub App and install it on the repo only.** The
+   factory does **not** store any `gh` auth and does **not** set a global git
+   credential helper (a global helper would leak into the OpenCode subprocess).
+   Instead:
+   - Register a GitHub App (`xolo-bot`) in the machine account's org/personal
+     settings, give it `contents` (read/write), `pull requests` (read/write)
+     and `issues` (read/write), and install it on `daedraMex/commerce-platform`
+     only. Note its App ID and Installation ID, and download its private key.
+   - Save the private key as a file the `factory` user owns, `chmod 600`:
+     ```bash
+     install -m 600 xolo-bot.pem ~/factory/xolo-bot.pem
+     ```
+   - The factory mints a fresh installation token **only** inside the success
+     and stuck paths, and passes it only to the push/PR subprocesses (scoped to
+     those calls). It is never stored and never reaches the OpenCode subprocess.
 
 7. **Give OpenCode the model provider key** as `factory` (`opencode auth
    login`), and set a **spending cap** on the provider account. The machine
@@ -72,16 +79,26 @@ Run these once, as the admin user unless a step says `factory`.
 
 8. **Create the secrets file** `~/factory/secrets.env`, `chmod 600`, with the
    settings the factory reads from the environment:
-   ```bash
-   FACTORY_MODEL=deepseek/deepseek-flash        # the cheap default model
-   FACTORY_STRONG_MODEL=deepseek/deepseek-v4-pro # for strong-model tickets
-   FACTORY_TELEGRAM_BOT_TOKEN=123456:ABC...     # from @BotFather
-   FACTORY_TELEGRAM_CHAT_ID=123456789           # the one fixed chat id
-   # optional overrides:
-   # FACTORY_MAX_TICKETS=1
-   # FACTORY_REPO=daedraMex/commerce-platform
-   ```
-   All `FACTORY_*` settings are listed in `tools/factory/src/factory/config.py`.
+    ```bash
+    FACTORY_MODEL=deepseek/deepseek-flash        # the cheap default model
+    FACTORY_STRONG_MODEL=deepseek/deepseek-v4-pro # for strong-model tickets
+    FACTORY_TELEGRAM_BOT_TOKEN=123456:ABC...     # from @BotFather
+    FACTORY_TELEGRAM_CHAT_ID=123456789           # the one fixed chat id
+    XOLO_BOT_APP_ID=123456                       # the xolo-bot App ID
+    XOLO_BOT_PRIVATE_KEY=$HOME/factory/xolo-bot.pem   # path to the private key file
+    XOLO_BOT_INSTALLATION_ID=987654              # the installation on this repo
+    # optional overrides:
+    # FACTORY_MAX_TICKETS=1
+    # FACTORY_REPO=daedraMex/commerce-platform
+    ```
+    All settings are listed in `tools/factory/src/factory/config.py`. The
+    GitHub App private key lives in its own file because systemd's
+    `EnvironmentFile` cannot hold a multiline PEM.
+
+    The nightly fetch of `origin/main` and the `gh` read calls (ticket listing)
+    need read access. Give the `factory` user's clone a **repo-local** read
+    credential (e.g. a read-only deploy key in `~/factory/repo/.git/config`) —
+    never a global credential helper and never a stored `gh` auth.
 
 9. **Create the Telegram bot** with [@BotFather](https://t.me/BotFather),
    take its token into `FACTORY_TELEGRAM_BOT_TOKEN`, and find the one chat id

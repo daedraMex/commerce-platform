@@ -35,8 +35,16 @@ class Git:
             raise RuntimeError(f"git commit failed: {result.stderr.strip()}")
         return True
 
-    def push(self, worktree: Path, branch: str) -> None:
-        result = self._run(["git", "push", "-u", "origin", branch], str(worktree), timeout=300)
+    def push(self, worktree: Path, branch: str, token: str) -> None:
+        # Authenticate this one push with the freshly minted token, scoped to
+        # this subprocess, without touching any global git credential helper.
+        helper = '!f() { echo "username=x-access-token"; echo "password=$FACTORY_GIT_TOKEN"; }; f'
+        result = self._run(
+            ["git", "-c", f"credential.helper={helper}", "push", "-u", "origin", branch],
+            str(worktree),
+            timeout=300,
+            env={"FACTORY_GIT_TOKEN": token},
+        )
         if result.exit_code != 0:
             raise RuntimeError(f"git push failed: {result.stderr.strip()}")
 

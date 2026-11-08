@@ -37,7 +37,7 @@ class GitHub:
         tickets = [self._to_ticket(obj) for obj in json.loads(raw)]
         return self._resolve(tickets)
 
-    def create_draft_pr(self, *, branch: str, title: str, body: str) -> int:
+    def create_draft_pr(self, *, branch: str, title: str, body: str, token: str) -> int:
         result = self._run(
             [
                 "gh",
@@ -57,6 +57,7 @@ class GitHub:
             ],
             cwd="/",
             timeout=120,
+            env={"GH_TOKEN": token},
         )
         if result.exit_code != 0:
             raise RuntimeError(f"gh pr create failed: {result.stderr.strip()}")
@@ -64,21 +65,23 @@ class GitHub:
         url = result.stdout.strip().splitlines()[-1].strip()
         return int(url.rstrip("/").rsplit("/", 1)[-1])
 
-    def add_issue_label(self, number: int, label: str) -> None:
+    def add_issue_label(self, number: int, label: str, token: str) -> None:
         self._run(
             ["gh", "issue", "edit", str(number), "--repo", self.repo, "--add-label", label],
             cwd="/",
             timeout=120,
+            env={"GH_TOKEN": token},
         )
 
-    def add_pr_label(self, number: int, label: str) -> None:
+    def add_pr_label(self, number: int, label: str, token: str) -> None:
         self._run(
             ["gh", "pr", "edit", str(number), "--repo", self.repo, "--add-label", label],
             cwd="/",
             timeout=120,
+            env={"GH_TOKEN": token},
         )
 
-    def comment(self, number: int, body: str) -> str:
+    def comment(self, number: int, body: str, token: str) -> str:
         """Post a comment and return its URL so it can be linked from a notification."""
         result = self._run(
             [
@@ -94,6 +97,7 @@ class GitHub:
             ],
             cwd="/",
             timeout=120,
+            env={"GH_TOKEN": token},
         )
         return result.stdout.strip()
 

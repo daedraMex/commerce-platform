@@ -9,6 +9,15 @@ from .shell import CommandTimeout, RunCommand, run_command
 
 OPENCODE_CONFIG_PATH = "tools/factory/opencode.factory.json"
 
+# Never leak GitHub credentials into the OpenCode subprocess: the model-driven
+# agent must not be able to push, open PRs or read anything that requires auth.
+STRIPPED_ENV_VARS = (
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "GH_ENTERPRISE_TOKEN",
+    "GITHUB_ENTERPRISE_TOKEN",
+)
+
 
 @dataclass(frozen=True)
 class AgentResult:
@@ -32,7 +41,9 @@ class AgentRunner:
     ) -> AgentResult:
         config_path = worktree / OPENCODE_CONFIG_PATH
         argv = ["opencode", "run", "--model", model, prompt]
-        env = {"OPENCODE_CONFIG": str(config_path)}
+        env: dict[str, str | None] = {"OPENCODE_CONFIG": str(config_path)}
+        for var in STRIPPED_ENV_VARS:
+            env[var] = None
         try:
             result = self._run(
                 argv,
