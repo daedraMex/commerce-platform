@@ -82,6 +82,14 @@ Run these once, as the admin user unless a step says `factory`.
     factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh
     ```
 
+    The rules live in `/etc/sudoers.d/factory-agent`. If an older install left
+    a `/etc/sudoers.d/factory` file behind, remove it so its stale rules cannot
+    linger, then validate the sudoers files before relying on them:
+    ```bash
+    sudo rm -f /etc/sudoers.d/factory
+    sudo visudo -c
+    ```
+
     The two `Defaults>factory-agent` lines make every file `factory-agent`
     creates group-writable, so `factory` can commit and clean up the worktree;
     `factory.service` sets `UMask=0007` for the same reason in the other
