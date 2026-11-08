@@ -265,7 +265,11 @@ def main(argv: list[str] | None = None) -> int:
         settings,
         github=GitHub(settings.repo),
         git=Git(),
-        runner=AgentRunner(agent_user=settings.agent_user),
+        runner=AgentRunner(
+            agent_user=settings.agent_user,
+            agent_home=settings.agent_home,
+            provider_env_vars=settings.provider_env_vars,
+        ),
         notifier=_build_notifier(settings),
         token_provider=_build_token_provider(settings),
         overlay=overlay,

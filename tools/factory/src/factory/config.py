@@ -33,6 +33,13 @@ def _read_int(env: dict[str, str] | None, name: str, default: int) -> int:
         raise FactoryConfigError(f"{name} must be an integer, got {raw!r}.") from exc
 
 
+def _read_list(env: dict[str, str] | None, name: str, default: str) -> tuple[str, ...]:
+    raw = _read(env, name)
+    if raw is None:
+        raw = default
+    return tuple(item.strip() for item in raw.split(",") if item.strip())
+
+
 @dataclass(frozen=True)
 class Settings:
     """Resolved factory configuration."""
@@ -53,6 +60,8 @@ class Settings:
     github_private_key: str | None
     github_installation_id: str | None
     agent_user: str = "factory-agent"
+    agent_home: str | None = None
+    provider_env_vars: tuple[str, ...] = ()
     secrets_file: Path = field(default_factory=lambda: Path.home() / "factory" / "secrets.env")
     xolo_config_dir: Path = field(default_factory=lambda: Path.home() / ".config" / "xolo-bot")
 
@@ -88,6 +97,10 @@ class Settings:
             github_private_key=_read(env, "XOLO_BOT_PRIVATE_KEY"),
             github_installation_id=_read(env, "XOLO_BOT_INSTALLATION_ID"),
             agent_user=_read(env, "FACTORY_AGENT_USER") or "factory-agent",
+            agent_home=_read(env, "FACTORY_AGENT_HOME"),
+            provider_env_vars=_read_list(
+                env, "FACTORY_PROVIDER_ENV_VARS", "DEEPSEEK_API_KEY,OPENCODE_API_KEY"
+            ),
             secrets_file=Path(
                 _read(env, "FACTORY_SECRETS_FILE") or str(home / "factory" / "secrets.env")
             ),
