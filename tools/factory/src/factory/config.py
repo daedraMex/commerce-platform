@@ -1,9 +1,9 @@
 """Factory settings, read from environment variables.
 
-Secrets (model keys, GitHub token, Telegram token) are read from the factory
-user's secrets file and never from the repo. Only the two model ids are read
-here; the tokens live in the machine account's fine-grained token and the
-Telegram bot token environment variables.
+Secrets (the model provider keys, the Telegram bot token, and the xolo-bot
+GitHub App id, private key path and installation id) come from the factory
+user's secrets file, never from the repo. The xolo-bot installation token is
+minted on demand and never stored.
 """
 
 from __future__ import annotations
