@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 from .diff import DiffStats, build_diff_stats
-from .runner import CHECK_BIN, build_check_env, truncate_check_output
+from .runner import build_check_env, sudo_argv, truncate_check_output
 from .shell import RunCommand, run_command
 
 
@@ -71,10 +71,9 @@ class Git:
             agent_user=self._agent_user,
             agent_home=self._agent_home,
         )
-        argv: list[str] = []
+        argv = [str(backend / "scripts" / "check.sh")]
         if self._agent_user:
-            argv += ["sudo", "-n", "-u", self._agent_user, "--"]
-        argv.append(CHECK_BIN)
+            argv = sudo_argv(self._agent_user, argv, env)
         result = self._run(argv, str(backend), timeout=1800, env=env, replace_env=True)
         output = result.stdout
         if result.stderr:

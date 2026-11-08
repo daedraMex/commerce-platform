@@ -14,10 +14,26 @@ from .shell import CommandTimeout, RunCommand, run_command
 
 OPENCODE_CONFIG_PATH = "tools/factory/opencode.factory.json"
 OPENCODE_BIN = "/usr/bin/opencode"
-CHECK_BIN = "./scripts/check.sh"
 MAX_CHECK_OUTPUT_CHARS = 4000
 
 BASE_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "DATABASE_URL")
+
+
+def sudo_argv(agent_user: str, argv: list[str], env: dict[str, str]) -> list[str]:
+    """Wrap ``argv`` in a sudo downgrade that preserves exactly ``env``.
+
+    sudo's ``env_reset`` drops the explicit environment, so the sudoers rule
+    needs ``SETENV`` and we name each variable in ``--preserve-env``.
+    """
+    return [
+        "sudo",
+        "-n",
+        f"--preserve-env={','.join(env)}",
+        "-u",
+        agent_user,
+        "--",
+        *argv,
+    ]
 
 
 def _allowlisted_env(
@@ -114,10 +130,9 @@ class AgentRunner:
             agent_home=self.agent_home,
             provider_vars=self.provider_env_vars,
         )
-        argv: list[str] = []
+        argv: list[str] = [OPENCODE_BIN, "run", "--model", model, prompt]
         if self.agent_user:
-            argv += ["sudo", "-n", "-u", self.agent_user, "--"]
-        argv += [OPENCODE_BIN, "run", "--model", model, prompt]
+            argv = sudo_argv(self.agent_user, argv, env)
         try:
             result = self._run(
                 argv,

@@ -55,12 +55,14 @@ Run these once, as the admin user unless a step says `factory`.
     ```
 
     Let `factory` act *as* `factory-agent` (a downgrade, never an upgrade), so
-    it can launch OpenCode as the sandbox user and run the isolation check. The
-    sudo calls are always non-interactive (`-n`) so a missing rule fails fast
-    instead of waiting for a password, and use full command paths:
+    it can launch OpenCode as the sandbox user, run the isolation check and run
+    `check.sh`. The sudo calls are always non-interactive (`-n`) so a missing
+    rule fails fast instead of waiting for a password, use full command paths,
+    and name every variable in `--preserve-env` because sudo's `env_reset`
+    would otherwise drop it. The `SETENV` tag is what allows that:
     ```
     # /etc/sudoers.d/factory-agent
-    factory ALL=(factory-agent) NOPASSWD: /usr/bin/opencode, /usr/bin/cat
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh
     ```
 
     Create the machine layout. `/home/factory` stays `700`; only the worktrees
@@ -212,14 +214,17 @@ Run these once, as the admin user unless a step says `factory`.
   `~/.config/xolo-bot/` (via `sudo -n -u factory-agent -- /usr/bin/cat -n
   <path>`), and aborts if it can.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
-  `sudo -n -u factory-agent -- /usr/bin/opencode ...` with an explicit
-  environment — `PATH`, `HOME` (the agent's home), `LANG`, `DATABASE_URL`, the
-  model provider vars, and `OPENCODE_CONFIG` — nothing else.
+  `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
+  ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
+  `DATABASE_URL`, the model provider vars, and `OPENCODE_CONFIG` — nothing else.
+  The check runner gets the same downgrade with only `PATH`, `HOME`, `LANG` and
+  `DATABASE_URL`: no provider key, no GitHub token, no secrets.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`) and
   a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either stops the
   ticket as stuck and notifies Telegram.
 - **Fix loop.** Before pushing, the factory runs `./scripts/check.sh` in the
-  worktree; on failure it feeds the output back to the agent and retries, up to
+  worktree **as `factory-agent`**, with only the base env allowlist; on failure
+  it feeds a truncated tail of the output back to the agent and retries, up to
   the step budget.
 - **Stuck handoff.** A stuck ticket keeps its worktree; the Telegram message
   includes the `ssh` + `cd` command to enter it.

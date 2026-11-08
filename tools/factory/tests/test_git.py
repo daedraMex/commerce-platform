@@ -44,7 +44,15 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
     ).check(worktree)
 
     argv, cwd, env, replace_env = run.calls[0]
-    assert argv == ["sudo", "-n", "-u", "factory-agent", "--", "./scripts/check.sh"]
+    assert argv == [
+        "sudo",
+        "-n",
+        "--preserve-env=PATH,HOME,LANG,DATABASE_URL",
+        "-u",
+        "factory-agent",
+        "--",
+        str(worktree / "backend" / "scripts" / "check.sh"),
+    ]
     assert cwd == str(worktree / "backend")
     assert replace_env is True
     assert env == {

@@ -2,6 +2,7 @@ from factory.runner import (
     AgentRunner,
     build_agent_env,
     build_check_env,
+    sudo_argv,
     truncate_check_output,
 )
 from factory.shell import CommandResult
@@ -110,6 +111,7 @@ def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
     assert argv == [
         "sudo",
         "-n",
+        "--preserve-env=OPENCODE_CONFIG,PATH,HOME,LANG,DATABASE_URL,DEEPSEEK_API_KEY",
         "-u",
         "factory-agent",
         "--",
@@ -123,6 +125,23 @@ def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
     assert "GH_TOKEN" not in env
     assert env["DEEPSEEK_API_KEY"] == "dk"
     assert env["OPENCODE_CONFIG"].endswith("tools/factory/opencode.factory.json")
+
+
+def test_sudo_argv_preserves_only_the_named_env():
+    argv = sudo_argv(
+        "factory-agent",
+        ["/usr/bin/opencode"],
+        {"PATH": "/usr/bin", "DATABASE_URL": "postgres://db"},
+    )
+    assert argv == [
+        "sudo",
+        "-n",
+        "--preserve-env=PATH,DATABASE_URL",
+        "-u",
+        "factory-agent",
+        "--",
+        "/usr/bin/opencode",
+    ]
 
 
 def test_run_passes_model_and_prompt(tmp_path):
