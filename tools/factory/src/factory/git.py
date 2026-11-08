@@ -48,10 +48,14 @@ class Git:
         if result.exit_code != 0:
             raise RuntimeError(f"git push failed: {result.stderr.strip()}")
 
-    def check_passed(self, worktree: Path) -> bool:
+    def check(self, worktree: Path) -> tuple[bool, str]:
+        """Run the check script; return (passed, combined output)."""
         backend = worktree / "backend"
         result = self._run([_CHECK_SCRIPT], str(backend), timeout=1800)
-        return result.exit_code == 0
+        output = result.stdout
+        if result.stderr:
+            output += ("\n" if output else "") + result.stderr
+        return result.exit_code == 0, output.strip()
 
     def diff_stats(self, worktree: Path) -> DiffStats:
         numstat = self._run(

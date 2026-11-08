@@ -14,7 +14,6 @@ ARGUMENTS_TOKEN = "$ARGUMENTS"
 _OVERLAY_TOKENS = (
     "{{BRANCH}}",
     "{{MODEL}}",
-    "{{MAX_ATTEMPTS}}",
 )
 
 
@@ -32,13 +31,21 @@ def compose_prompt(
     *,
     model: str,
     branch: str,
-    max_attempts: int,
     command_template: str,
     overlay: str,
+    feedback: str = "",
 ) -> str:
     arguments = f"#{ticket.number}: {ticket.title}\n\n{ticket.body}".strip()
     base = command_template.replace(ARGUMENTS_TOKEN, arguments)
     filled_overlay = overlay
-    for token, value in zip(_OVERLAY_TOKENS, (branch, model, str(max_attempts)), strict=True):
+    for token, value in zip(_OVERLAY_TOKENS, (branch, model), strict=True):
         filled_overlay = filled_overlay.replace(token, value)
-    return f"{base}\n\n{filled_overlay}".strip() + "\n"
+    prompt = f"{base}\n\n{filled_overlay}".strip()
+    if feedback:
+        prompt += (
+            "\n\n## check.sh is still failing\n\n"
+            "Here is the latest output:\n\n```\n"
+            f"{feedback}\n"
+            "```\n\nFix the failures and re-run `./scripts/check.sh` from `backend/`."
+        )
+    return prompt + "\n"

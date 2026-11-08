@@ -14,8 +14,17 @@ DECISIONS_DOC = "# Summary\nBuilt the thing.\n\n# Decisions\n\n- Chose A.\n"
 
 
 class FakeGit:
-    def __init__(self, *, check_passed=True, decisions="", diff=None, command_body=COMMAND_BODY):
+    def __init__(
+        self,
+        *,
+        check_passed=True,
+        check_output="",
+        decisions="",
+        diff=None,
+        command_body=COMMAND_BODY,
+    ):
         self.check_result = check_passed
+        self.check_output = check_output
         self.decisions = decisions
         self.diff = diff or DiffStats()
         self.command_body = command_body
@@ -37,8 +46,8 @@ class FakeGit:
             return self.command_body
         return ""
 
-    def check_passed(self, worktree):
-        return self.check_result
+    def check(self, worktree):
+        return (self.check_result, self.check_output)
 
     def commit_all(self, worktree, message):
         self.committed.append(message)
@@ -359,3 +368,18 @@ def test_time_budget_exceeded_sticks_without_running(tmp_path):
     assert len(runner.calls) == 0
     assert notifier.stuck[0].failing_check == "time budget exceeded"
     assert notifier.stuck[0].attempts == 0
+
+
+def test_fix_loop_feeds_check_output_back_to_agent(tmp_path):
+    git = FakeGit(check_passed=False, check_output="E   AssertionError")
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert len(runner.calls) == 5
+    assert "E   AssertionError" not in runner.calls[0]["prompt"]
+    assert "E   AssertionError" in runner.calls[1]["prompt"]

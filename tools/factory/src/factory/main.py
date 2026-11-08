@@ -83,6 +83,7 @@ class Factory:
         deadline = time.monotonic() + self.settings.time_limit_seconds
         made = 0
         decisions = ""
+        feedback = ""
         for _step in range(1, self.settings.attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -99,9 +100,9 @@ class Factory:
                 ticket,
                 model=model,
                 branch=branch,
-                max_attempts=self.settings.attempts,
                 command_template=command_template,
                 overlay=self.overlay,
+                feedback=feedback,
             )
             result = self.runner.run(
                 worktree=worktree,
@@ -134,10 +135,12 @@ class Factory:
                     failing_check="time budget exceeded",
                     attempts=made,
                 )
-            if self.git.check_passed(worktree):
+            passed, check_output = self.git.check(worktree)
+            if passed:
                 return self._success(
                     ticket, model=model, branch=branch, worktree=worktree, decisions=decisions
                 )
+            feedback = check_output
         return self._stuck(
             ticket,
             model=model,
