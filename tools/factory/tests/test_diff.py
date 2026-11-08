@@ -1,4 +1,11 @@
-from factory.diff import DiffStats, build_diff_stats, is_migration_path, is_test_path
+from factory.diff import (
+    DiffStats,
+    build_diff_stats,
+    is_migration_path,
+    is_protected_path,
+    is_test_path,
+    touches_protected_paths,
+)
 
 
 def test_build_diff_stats_sums_added_and_deleted():
@@ -46,3 +53,30 @@ def test_empty_stats():
     stats = DiffStats()
     assert stats.added == 0
     assert stats.deleted == 0
+
+
+def test_is_protected_path_covers_the_guarded_files_and_dirs():
+    protected = [
+        ".github/workflows/ci.yml",
+        "tools/factory/src/factory/main.py",
+        "backend/scripts/check.sh",
+        ".opencode/commands/implement.md",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".pre-commit-config.yaml",
+        "opencode.json",
+        "opencode.factory.json",
+        "web/opencode.json",
+    ]
+    assert all(is_protected_path(path) for path in protected)
+
+
+def test_is_protected_path_allows_normal_code():
+    assert not is_protected_path("backend/apps/catalog/models.py")
+    assert not is_protected_path("docs/adr/0026-something.md")
+    assert not is_protected_path("web/storefront/package.json")
+
+
+def test_touches_protected_paths_ignores_nothing_normal():
+    assert touches_protected_paths(["backend/apps/catalog/models.py"]) is False
+    assert touches_protected_paths(["backend/apps/catalog/models.py", "AGENTS.md"]) is True

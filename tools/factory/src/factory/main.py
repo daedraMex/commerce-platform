@@ -11,6 +11,7 @@ from .cleanup import cleanup_old
 from .config import Settings
 from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
+from .diff import touches_protected_paths
 from .git import Git
 from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
@@ -151,7 +152,13 @@ class Factory:
             passed, check_output = self.git.check(worktree)
             if passed:
                 return self._success(
-                    ticket, model=model, branch=branch, worktree=worktree, decisions=decisions
+                    ticket,
+                    model=model,
+                    branch=branch,
+                    worktree=worktree,
+                    decisions=decisions,
+                    log_path=log_path,
+                    attempts=made,
                 )
             feedback = check_output
         return self._stuck(
@@ -173,9 +180,22 @@ class Factory:
         branch: str,
         worktree: Path,
         decisions: str,
+        log_path: Path,
+        attempts: int,
     ) -> TicketResult:
         self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})")
         diff = self.git.diff_stats(worktree)
+        if touches_protected_paths(f.path for f in diff.files):
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check="protected path changed",
+                attempts=attempts,
+            )
         token = self.token_provider.mint(self.settings.repo)
         self.git.push(worktree, branch, token)
         summary = extract_summary(decisions) or ticket.title

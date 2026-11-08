@@ -3,6 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
+
+PROTECTED_PREFIXES = (
+    ".github/",
+    "tools/factory/",
+    "backend/scripts/",
+    ".opencode/",
+)
+PROTECTED_FILES = frozenset(
+    {
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".pre-commit-config.yaml",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -33,6 +48,21 @@ def is_migration_path(path: str) -> bool:
 
 def is_test_path(path: str) -> bool:
     return "tests/" in path and path.endswith(".py")
+
+
+def is_protected_path(path: str) -> bool:
+    """Paths the agent must never change on an unattended run."""
+    normalized = path.replace("\\", "/")
+    if normalized in PROTECTED_FILES:
+        return True
+    if any(normalized.startswith(prefix) for prefix in PROTECTED_PREFIXES):
+        return True
+    name = PurePosixPath(normalized).name
+    return name.startswith("opencode") and name.endswith(".json")
+
+
+def touches_protected_paths(paths) -> bool:
+    return any(is_protected_path(path) for path in paths)
 
 
 def build_diff_stats(numstat: str, new_files: list[str]) -> DiffStats:

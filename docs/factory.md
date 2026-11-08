@@ -230,6 +230,11 @@ Run these once, as the admin user unless a step says `factory`.
   worktree **as `factory-agent`**, with only the base env allowlist; on failure
   it feeds a truncated tail of the output back to the agent and retries, up to
   the step budget.
+- **Protected paths.** Before pushing, the factory inspects the diff. If it
+  touches `.github/`, `tools/factory/`, `backend/scripts/`, `AGENTS.md`,
+  `CLAUDE.md`, `opencode*.json`, `.opencode/` or `.pre-commit-config.yaml`, the
+  ticket goes to `_stuck` with `protected path changed`; nothing is pushed and
+  no PR is opened.
 - **Stuck handoff.** A stuck ticket keeps its worktree; the Telegram message
   includes the `ssh` + `cd` command to enter it.
 

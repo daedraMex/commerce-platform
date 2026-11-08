@@ -199,6 +199,25 @@ def test_success_labels_migration_when_migrations_changed(tmp_path):
     assert github.pr_labels == [(101, "migration", "TOKEN")]
 
 
+def test_protected_path_change_goes_stuck_without_push_or_pr(tmp_path):
+    diff = DiffStats(
+        files=(FileChange(path=".github/workflows/ci.yml", added=3, deleted=0),),
+    )
+    git = FakeGit(check_passed=True, diff=diff)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == []
+    assert github.created_prs == []
+    assert notifier.stuck[0].failing_check == "protected path changed"
+
+
 def test_failure_comments_and_labels_needs_decision(tmp_path):
     git = FakeGit(check_passed=False, decisions="- Tried X.")
     github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
