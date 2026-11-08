@@ -62,7 +62,19 @@ Run these once, as the admin user unless a step says `factory`.
     would otherwise drop it. The `SETENV` tag is what allows that:
     ```
     # /etc/sudoers.d/factory-agent
+    Defaults>factory-agent umask=0007
+    Defaults>factory-agent umask_override
     factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh
+    ```
+
+    The two `Defaults>factory-agent` lines make every file `factory-agent`
+    creates group-writable, so `factory` can commit and clean up the worktree;
+    `factory.service` sets `UMask=0007` for the same reason in the other
+    direction. The setgid bit on `/srv/factory/worktrees` gives both users the
+    shared `factory-work` group. Git also refuses to operate on a worktree owned
+    by another user, so trust the worktree glob for `factory-agent` (as admin):
+    ```bash
+    sudo -u factory-agent -H git config --global --add safe.directory '/srv/factory/worktrees/*'
     ```
 
     Create the machine layout. `/home/factory` stays `700`; only the worktrees
@@ -78,6 +90,22 @@ Run these once, as the admin user unless a step says `factory`.
     (`~/.ssh/commerce_deploy`) remain owned by `factory` (mode `600`), so
     `factory-agent` cannot read them even via bash. The factory verifies this on
     every startup.
+
+    Smoke-test the cross-user permissions by hand once (as admin):
+    ```bash
+    # 1. factory-agent creates a group-writable file
+    sudo -u factory-agent touch /srv/factory/worktrees/smoke
+    stat -c '%A %U:%G' /srv/factory/worktrees/smoke
+    # expect: -rw-rw---- factory-agent factory-work
+    sudo rm /srv/factory/worktrees/smoke
+
+    # 2. the agent cannot write where the factory must stay in control
+    sudo -u factory-agent test -w /srv/factory/repo; echo "agent write rc=$? (expect 1)"
+    sudo -u factory-agent test -w /srv/factory/repo/.git/hooks; echo "agent hooks rc=$? (expect 1)"
+
+    # 3. git accepts a factory-owned worktree as factory-agent (no "dubious ownership")
+    sudo -u factory-agent -H git -C /srv/factory/worktrees/<branch> status
+    ```
 
 4. **Install the toolchain.** As `factory`, install `uv` (Python 3.12) and
    Node.js. Install OpenCode system-wide at `/usr/bin/opencode` (as admin),
