@@ -12,7 +12,7 @@ from .config import Settings
 from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .diff import touches_protected_paths
-from .git import Git
+from .git import Git, verify_git_version
 from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
 from .models import select_model
@@ -333,6 +333,7 @@ def main(argv: list[str] | None = None) -> int:
         paths=sensitive_paths(settings),
         write_paths=write_protected_paths(settings),
     )
+    verify_git_version()
     overlay = read_overlay()
     factory = Factory(
         settings,

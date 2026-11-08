@@ -3,11 +3,45 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from .diff import DiffStats, build_diff_stats
 from .runner import build_check_env, sudo_argv, truncate_check_output
 from .shell import RunCommand, run_command
+
+MIN_GIT_VERSION = (2, 46)
+_GIT_VERSION_RE = re.compile(r"git version (\d+)\.(\d+)(?:\.(\d+))?")
+
+
+class GitVersionError(RuntimeError):
+    """Raised when the installed git cannot honour the safe.directory glob."""
+
+
+def parse_git_version(text: str) -> tuple[int, ...] | None:
+    """Read ``git version X.Y[.Z]`` into a comparable tuple, or ``None``."""
+    match = _GIT_VERSION_RE.search(text)
+    if match is None:
+        return None
+    return tuple(int(part) for part in match.groups() if part is not None)
+
+
+def verify_git_version(run: RunCommand = run_command) -> None:
+    """Abort unless git >= 2.46 supports the ``safe.directory`` worktree glob."""
+    result = run(["git", "--version"], cwd="/", timeout=60)
+    version = parse_git_version(result.stdout + result.stderr)
+    if result.exit_code != 0 or version is None:
+        found = result.stderr.strip() or result.stdout.strip() or "unknown"
+        raise GitVersionError(f"could not determine the git version: {found}")
+    if version[:2] < MIN_GIT_VERSION:
+        found = ".".join(str(part) for part in version)
+        minimum = ".".join(str(part) for part in MIN_GIT_VERSION)
+        raise GitVersionError(
+            f"git >= {minimum} is required for the safe.directory worktree glob; "
+            f"found {found}. Install it from ppa:git-core/ppa: "
+            "sudo add-apt-repository ppa:git-core/ppa && sudo apt update && "
+            "sudo apt install -y git"
+        )
 
 
 class Git:

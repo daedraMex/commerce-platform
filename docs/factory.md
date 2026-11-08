@@ -11,6 +11,20 @@ The decisions behind it are in `docs/adr/0025-night-factory-unattended-agent-run
 - It never pushes to `main`, never force-pushes, never merges. A human signs
   twice: marking a ticket agent-ready, then approving and merging the PR.
 
+## Prerequisites
+
+- **git >= 2.46.** Pop!_OS 24.04 ships git 2.43, whose `safe.directory` does
+  not support the `/srv/factory/worktrees/*` glob. Without the upgrade the glob
+  silently does not match and git refuses a factory-owned worktree for
+  `factory-agent` with "dubious ownership". Install the newer git from the
+  git-core PPA, then confirm the version:
+  ```bash
+  sudo add-apt-repository ppa:git-core/ppa && sudo apt update && sudo apt install -y git
+  git --version   # must be >= 2.46
+  ```
+  The factory also aborts at startup when it finds anything older.
+- Python 3.12 (via uv), Node.js and OpenCode 1.19.5, installed in step 4.
+
 ## Machine layout
 
 The main clone and the worktrees live under `/srv/factory`, outside

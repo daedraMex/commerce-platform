@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from factory.git import Git
+import pytest
+
+from factory.git import (
+    Git,
+    GitVersionError,
+    parse_git_version,
+    verify_git_version,
+)
 from factory.shell import CommandResult
 
 
@@ -89,3 +96,34 @@ def test_commit_never_runs_hooks():
         "-m",
         "feat: something",
     ]
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        ("git version 2.43.0", (2, 43, 0)),
+        ("git version 2.46.1", (2, 46, 1)),
+        ("git version 2.47.0.windows.1", (2, 47, 0)),
+    ],
+)
+def test_parse_git_version(output, expected):
+    assert parse_git_version(output) == expected
+
+
+def test_verify_git_version_accepts_2_46_and_newer():
+    verify_git_version(run=RecordingRun(CommandResult(0, "git version 2.46.1", "")))
+
+
+def test_verify_git_version_rejects_older_and_names_the_ppa():
+    with pytest.raises(GitVersionError, match="ppa:git-core/ppa"):
+        verify_git_version(run=RecordingRun(CommandResult(0, "git version 2.43.0", "")))
+
+
+def test_verify_git_version_rejects_unparseable_output():
+    with pytest.raises(GitVersionError, match="could not determine"):
+        verify_git_version(run=RecordingRun(CommandResult(0, "not git", "")))
+
+
+def test_verify_git_version_rejects_a_failed_command():
+    with pytest.raises(GitVersionError, match="could not determine"):
+        verify_git_version(run=RecordingRun(CommandResult(127, "", "git: command not found")))
