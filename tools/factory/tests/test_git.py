@@ -72,3 +72,20 @@ def test_check_truncates_output_fed_to_the_agent():
     assert len(output) < 9000
     assert output.endswith("x" * 100)
     assert "truncated" in output
+
+
+def test_commit_never_runs_hooks():
+    run = RecordingRun()
+    worktree = Path("/work")
+
+    Git(run=run).commit_all(worktree, "feat: something")
+
+    assert run.calls[1][0] == [
+        "git",
+        "-c",
+        "core.hooksPath=/dev/null",
+        "commit",
+        "--no-verify",
+        "-m",
+        "feat: something",
+    ]
