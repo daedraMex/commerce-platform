@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
 from factory.main import Factory
@@ -213,7 +215,7 @@ def test_timeout_is_stuck(tmp_path):
     results = factory.run()
 
     assert not results[0].ok
-    assert notifier.stuck[0].failing_check.startswith("timeout")
+    assert notifier.stuck[0].failing_check == "time budget exceeded"
 
 
 def test_open_question_is_stuck(tmp_path):
@@ -270,7 +272,7 @@ def test_stops_at_first_failure(tmp_path):
     results = factory.run()
 
     assert [r.ticket.number for r in results] == [7]
-    assert len(runner.calls) == 1
+    assert len(runner.calls) == 5
 
 
 def test_strong_model_ticket_runs_with_strong_model(tmp_path):
@@ -324,3 +326,36 @@ def test_stuck_mints_token_and_scopes_it_to_comment_and_label(tmp_path):
 
     assert github.comments[0][2] == "MINTED-TOKEN"
     assert github.issue_labels[0][2] == "MINTED-TOKEN"
+
+
+def test_step_budget_exhausted_sticks_and_notifies(tmp_path):
+    git = FakeGit(check_passed=False, decisions="- Tried X.")
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(tmp_path, git=git, github=github, runner=runner, notifier=notifier)
+
+    results = factory.run()
+
+    assert not results[0].ok
+    assert len(runner.calls) == 5
+    assert notifier.stuck[0].failing_check == "step budget exceeded (5 attempts)"
+    assert notifier.stuck[0].attempts == 5
+
+
+def test_time_budget_exceeded_sticks_without_running(tmp_path):
+    settings = replace(make_settings(tmp_path), time_limit_seconds=0)
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=notifier, settings=settings
+    )
+
+    results = factory.run()
+
+    assert not results[0].ok
+    assert len(runner.calls) == 0
+    assert notifier.stuck[0].failing_check == "time budget exceeded"
+    assert notifier.stuck[0].attempts == 0

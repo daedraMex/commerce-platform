@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -78,53 +79,73 @@ class Factory:
         )
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
-        prompt = compose_prompt(
+        log_path = self._log_path(ticket)
+        deadline = time.monotonic() + self.settings.time_limit_seconds
+        made = 0
+        decisions = ""
+        for _step in range(1, self.settings.attempts + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return self._stuck(
+                    ticket,
+                    model=model,
+                    decisions=decisions,
+                    log_path=log_path,
+                    open_question=None,
+                    failing_check="time budget exceeded",
+                    attempts=made,
+                )
+            prompt = compose_prompt(
+                ticket,
+                model=model,
+                branch=branch,
+                max_attempts=self.settings.attempts,
+                command_template=command_template,
+                overlay=self.overlay,
+            )
+            result = self.runner.run(
+                worktree=worktree,
+                model=model,
+                prompt=prompt,
+                timeout_seconds=int(remaining),
+            )
+            made += 1
+            self._write_log(ticket, result)
+            decisions = self.git.read_file(worktree, DECISIONS_FILE)
+            open_question = extract_open_question(decisions)
+
+            if open_question:
+                return self._stuck(
+                    ticket,
+                    model=model,
+                    decisions=decisions,
+                    log_path=log_path,
+                    open_question=open_question,
+                    failing_check="decision needed",
+                    attempts=made,
+                )
+            if result.timed_out:
+                return self._stuck(
+                    ticket,
+                    model=model,
+                    decisions=decisions,
+                    log_path=log_path,
+                    open_question=None,
+                    failing_check="time budget exceeded",
+                    attempts=made,
+                )
+            if self.git.check_passed(worktree):
+                return self._success(
+                    ticket, model=model, branch=branch, worktree=worktree, decisions=decisions
+                )
+        return self._stuck(
             ticket,
             model=model,
-            branch=branch,
-            max_attempts=self.settings.attempts,
-            command_template=command_template,
-            overlay=self.overlay,
-        )
-        result = self.runner.run(
-            worktree=worktree,
-            model=model,
-            prompt=prompt,
-            timeout_seconds=self.settings.time_limit_seconds,
-        )
-        log_path = self._write_log(ticket, result)
-        decisions = self.git.read_file(worktree, DECISIONS_FILE)
-        open_question = extract_open_question(decisions)
-
-        if open_question:
-            return self._stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                open_question=open_question,
-                failing_check="decision needed",
-            )
-        if result.timed_out:
-            return self._stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                open_question=None,
-                failing_check=f"timeout ({self.settings.time_limit_seconds}s)",
-            )
-        if not self.git.check_passed(worktree):
-            return self._stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                open_question=None,
-                failing_check="scripts/check.sh",
-            )
-        return self._success(
-            ticket, model=model, branch=branch, worktree=worktree, decisions=decisions
+            decisions=decisions,
+            log_path=log_path,
+            open_question=None,
+            failing_check=f"step budget exceeded ({self.settings.attempts} attempts)",
+            attempts=made,
         )
 
     def _success(
@@ -178,13 +199,14 @@ class Factory:
         log_path: Path,
         open_question: str | None,
         failing_check: str,
+        attempts: int,
     ) -> TicketResult:
         comment = build_issue_comment(
             open_question=open_question,
             decisions=extract_decisions(decisions),
             log_tail=_tail(log_path, LOG_TAIL_LINES),
             model=model,
-            attempts=self.settings.attempts,
+            attempts=attempts,
             failing_check=failing_check,
         )
         token = self.token_provider.mint(self.settings.repo)
@@ -194,7 +216,7 @@ class Factory:
             ticket_number=ticket.number,
             ticket_title=ticket.title,
             model=model,
-            attempts=self.settings.attempts,
+            attempts=attempts,
             failing_check=failing_check,
             open_question=open_question,
             comment_url=comment_url,
@@ -204,9 +226,12 @@ class Factory:
         self.notifier.send_stuck(info)
         return TicketResult(ticket=ticket, ok=False)
 
-    def _write_log(self, ticket: Ticket, result) -> Path:
+    def _log_path(self, ticket: Ticket) -> Path:
         self.settings.logs_dir.mkdir(parents=True, exist_ok=True)
-        log_path = self.settings.logs_dir / f"{ticket.number}.log"
+        return self.settings.logs_dir / f"{ticket.number}.log"
+
+    def _write_log(self, ticket: Ticket, result) -> Path:
+        log_path = self._log_path(ticket)
         content = result.stdout or ""
         if result.stderr:
             content += ("\n" if content else "") + result.stderr
