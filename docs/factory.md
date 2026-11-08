@@ -187,6 +187,7 @@ Run these once, as the admin user unless a step says `factory`.
     # FACTORY_REPO_DIR=/srv/factory/repo
     # FACTORY_WORKTREES_DIR=/srv/factory/worktrees
     # FACTORY_LOGS_DIR=/home/factory/logs
+    # FACTORY_DEPLOY_KEY=/home/factory/.ssh/commerce_deploy
     ```
     All settings are listed in `tools/factory/src/factory/config.py`. The
     GitHub App private key lives in its own file because systemd's
