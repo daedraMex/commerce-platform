@@ -15,7 +15,14 @@ from .git import Git
 from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation
 from .models import select_model
-from .notify import Notifier, NullNotifier, PrReadyInfo, StuckInfo, TelegramNotifier
+from .notify import (
+    Notifier,
+    NullNotifier,
+    PrReadyInfo,
+    StuckInfo,
+    TelegramNotifier,
+    build_handoff_command,
+)
 from .outcomes import build_issue_comment
 from .pr_body import build_pr_body
 from .prompt import compose_prompt, read_command_body
@@ -92,6 +99,7 @@ class Factory:
                     model=model,
                     decisions=decisions,
                     log_path=log_path,
+                    worktree=worktree,
                     open_question=None,
                     failing_check="time budget exceeded",
                     attempts=made,
@@ -121,6 +129,7 @@ class Factory:
                     model=model,
                     decisions=decisions,
                     log_path=log_path,
+                    worktree=worktree,
                     open_question=open_question,
                     failing_check="decision needed",
                     attempts=made,
@@ -131,6 +140,7 @@ class Factory:
                     model=model,
                     decisions=decisions,
                     log_path=log_path,
+                    worktree=worktree,
                     open_question=None,
                     failing_check="time budget exceeded",
                     attempts=made,
@@ -146,6 +156,7 @@ class Factory:
             model=model,
             decisions=decisions,
             log_path=log_path,
+            worktree=worktree,
             open_question=None,
             failing_check=f"step budget exceeded ({self.settings.attempts} attempts)",
             attempts=made,
@@ -200,6 +211,7 @@ class Factory:
         model: str,
         decisions: str,
         log_path: Path,
+        worktree: Path,
         open_question: str | None,
         failing_check: str,
         attempts: int,
@@ -225,6 +237,10 @@ class Factory:
             comment_url=comment_url,
             ticket_url=self._ticket_url(ticket.number),
             log_path=str(log_path),
+            worktree=str(worktree),
+            handoff_command=build_handoff_command(
+                host=self.settings.handoff_host, worktree=str(worktree)
+            ),
         )
         self.notifier.send_stuck(info)
         return TicketResult(ticket=ticket, ok=False)

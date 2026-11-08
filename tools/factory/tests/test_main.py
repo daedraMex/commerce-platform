@@ -383,3 +383,19 @@ def test_fix_loop_feeds_check_output_back_to_agent(tmp_path):
     assert len(runner.calls) == 5
     assert "E   AssertionError" not in runner.calls[0]["prompt"]
     assert "E   AssertionError" in runner.calls[1]["prompt"]
+
+
+def test_stuck_keeps_worktree_and_includes_handoff(tmp_path):
+    settings = replace(make_settings(tmp_path), handoff_host="factory@host")
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier, settings=settings
+    )
+
+    factory.run()
+
+    info = notifier.stuck[0]
+    assert info.worktree.endswith("nf/7-ticket-7")
+    assert info.handoff_command == f"ssh factory@host && cd {info.worktree}"

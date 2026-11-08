@@ -64,6 +64,7 @@ class Settings:
     provider_env_vars: tuple[str, ...] = ()
     secrets_file: Path = field(default_factory=lambda: Path.home() / "factory" / "secrets.env")
     xolo_config_dir: Path = field(default_factory=lambda: Path.home() / ".config" / "xolo-bot")
+    handoff_host: str | None = None
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Settings:
@@ -107,4 +108,5 @@ class Settings:
             xolo_config_dir=Path(
                 _read(env, "XOLO_BOT_CONFIG_DIR") or str(home / ".config" / "xolo-bot")
             ),
+            handoff_host=_read(env, "FACTORY_HOST"),
         )

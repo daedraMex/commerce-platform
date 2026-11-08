@@ -2,6 +2,7 @@ from factory.notify import (
     PrReadyInfo,
     StuckInfo,
     TelegramNotifier,
+    build_handoff_command,
     build_pr_ready_message,
     build_stuck_message,
     escape_html,
@@ -38,6 +39,8 @@ def _stuck(**overrides):
         comment_url="https://github.com/r/issues/7#comment-1",
         ticket_url="https://github.com/r/issues/7",
         log_path="/home/factory/factory/logs/7.log",
+        worktree="/home/factory/factory/worktrees/nf/7-add-widget",
+        handoff_command="ssh factory@host && cd /home/factory/factory/worktrees/nf/7-add-widget",
     )
     fields.update(overrides)
     return StuckInfo(**fields)
@@ -93,6 +96,17 @@ def test_stuck_message_shows_log_path_not_content():
     msg = build_stuck_message(_stuck())
     assert "/home/factory/factory/logs/7.log" in msg
     assert "Traceback (most recent call last)" not in msg
+
+
+def test_stuck_message_includes_handoff_command():
+    msg = build_stuck_message(_stuck())
+    assert "/home/factory/factory/worktrees/nf/7-add-widget" in msg
+    assert "ssh factory@host &amp;&amp; cd /home/factory/factory/worktrees/nf/7-add-widget" in msg
+
+
+def test_build_handoff_command_with_and_without_host():
+    assert build_handoff_command(host="factory@host", worktree="/w") == "ssh factory@host && cd /w"
+    assert build_handoff_command(host=None, worktree="/w") == "cd /w"
 
 
 def test_escape_html():
