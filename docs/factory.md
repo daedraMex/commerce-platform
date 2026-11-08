@@ -72,12 +72,12 @@ Run these once, as the admin user unless a step says `factory`.
     sudo install -d -m 755 -o factory -g factory /srv/factory
     sudo install -d -m 2770 -o factory -g factory-work /srv/factory/worktrees
     sudo chmod 700 /home/factory
-    sudo install -d -m 700 -o factory -g factory /home/factory/.config/xolo-bot
     ```
 
-    The secrets file, the private key and `/home/factory/.config/xolo-bot/`
-    remain owned by `factory` (mode `600`/`700`), so `factory-agent` cannot read
-    them even via bash. The factory verifies this on every startup.
+    The secrets file, the private key and the SSH deploy key
+    (`~/.ssh/commerce_deploy`) remain owned by `factory` (mode `600`), so
+    `factory-agent` cannot read them even via bash. The factory verifies this on
+    every startup.
 
 4. **Install the toolchain.** As `factory`, install `uv` (Python 3.12) and
    Node.js. Install OpenCode system-wide at `/usr/bin/opencode` (as admin),
@@ -210,9 +210,13 @@ Run these once, as the admin user unless a step says `factory`.
 ## Hardening
 
 - **Isolation.** OpenCode runs as `factory-agent`; on every startup the factory
-  proves that user cannot read the GitHub App private key, `secrets.env` or
-  `~/.config/xolo-bot/` (via `sudo -n -u factory-agent -- /usr/bin/cat -n
-  <path>`), and aborts if it can.
+  runs a positive control (that user must be able to `cat /etc/hostname`) and
+  then proves it cannot read the GitHub App private key, `secrets.env` or
+  `~/.ssh/commerce_deploy` (via `sudo -n -u factory-agent -- /usr/bin/cat -n
+  <path>`). It also proves `factory-agent` cannot write to `/srv/factory`,
+  `/srv/factory/repo` or `repo/.git/hooks` (via `/usr/bin/test -w`). Any result
+  other than a clean "permission denied" or "not writable" aborts the run, so a
+  broken sudo rule fails closed.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,

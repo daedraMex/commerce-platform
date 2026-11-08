@@ -63,7 +63,7 @@ class Settings:
     agent_home: str | None = None
     provider_env_vars: tuple[str, ...] = ()
     secrets_file: Path = field(default_factory=lambda: Path.home() / "factory" / "secrets.env")
-    xolo_config_dir: Path = field(default_factory=lambda: Path.home() / ".config" / "xolo-bot")
+    deploy_key: Path = field(default_factory=lambda: Path.home() / ".ssh" / "commerce_deploy")
     handoff_host: str | None = None
 
     @classmethod
@@ -103,8 +103,8 @@ class Settings:
             secrets_file=Path(
                 _read(env, "FACTORY_SECRETS_FILE") or str(home / "factory" / "secrets.env")
             ),
-            xolo_config_dir=Path(
-                _read(env, "XOLO_BOT_CONFIG_DIR") or str(home / ".config" / "xolo-bot")
+            deploy_key=Path(
+                _read(env, "FACTORY_DEPLOY_KEY") or str(home / ".ssh" / "commerce_deploy")
             ),
             handoff_host=_read(env, "FACTORY_HOST"),
         )

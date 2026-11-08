@@ -13,7 +13,7 @@ from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .git import Git
 from .github import GitHub
-from .isolation import sensitive_paths, verify_isolation
+from .isolation import sensitive_paths, verify_isolation, write_protected_paths
 from .models import select_model
 from .notify import (
     Notifier,
@@ -306,7 +306,11 @@ def _load_private_key(value: str | None) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
-    verify_isolation(agent_user=settings.agent_user, paths=sensitive_paths(settings))
+    verify_isolation(
+        agent_user=settings.agent_user,
+        paths=sensitive_paths(settings),
+        write_paths=write_protected_paths(settings),
+    )
     overlay = read_overlay()
     factory = Factory(
         settings,
