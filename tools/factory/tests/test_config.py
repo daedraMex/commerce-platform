@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from factory.config import FactoryConfigError, Settings
@@ -48,3 +50,30 @@ def test_from_env_bad_max_tickets_fails_clearly():
                 "FACTORY_MAX_TICKETS": "nope",
             }
         )
+
+
+def test_from_env_defaults_to_the_srv_factory_layout():
+    settings = Settings.from_env(
+        {
+            "FACTORY_MODEL": "m",
+            "FACTORY_STRONG_MODEL": "s",
+        }
+    )
+    assert settings.repo_dir == Path("/srv/factory/repo")
+    assert settings.worktrees_dir == Path("/srv/factory/worktrees")
+    assert settings.logs_dir == Path.home() / "factory" / "logs"
+
+
+def test_from_env_reads_dir_overrides():
+    settings = Settings.from_env(
+        {
+            "FACTORY_MODEL": "m",
+            "FACTORY_STRONG_MODEL": "s",
+            "FACTORY_REPO_DIR": "/tmp/repo",
+            "FACTORY_WORKTREES_DIR": "/tmp/worktrees",
+            "FACTORY_LOGS_DIR": "/tmp/logs",
+        }
+    )
+    assert settings.repo_dir == Path("/tmp/repo")
+    assert settings.worktrees_dir == Path("/tmp/worktrees")
+    assert settings.logs_dir == Path("/tmp/logs")

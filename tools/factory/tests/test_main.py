@@ -68,8 +68,10 @@ class FakeGitHub:
         self.comments = []
         self.issue_labels = []
         self.pr_labels = []
+        self.listed_with = None
 
-    def list_tickets(self):
+    def list_tickets(self, token=None):
+        self.listed_with = token
         return list(self.tickets)
 
     def create_draft_pr(self, *, branch, title, body, token):
@@ -313,7 +315,11 @@ def test_success_mints_token_and_scopes_it_to_push_and_pr(tmp_path):
 
     factory.run()
 
-    assert token_provider.calls == ["daedraMex/commerce-platform"]
+    assert token_provider.calls == [
+        "daedraMex/commerce-platform",
+        "daedraMex/commerce-platform",
+    ]
+    assert github.listed_with == "MINTED-TOKEN"
     assert git.pushed == [("nf/7-ticket-7", "MINTED-TOKEN")]
     assert github.created_prs[0][3] == "MINTED-TOKEN"
 

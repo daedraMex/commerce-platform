@@ -16,7 +16,7 @@ class GitHub:
         self.repo = repo
         self._run = run
 
-    def list_tickets(self) -> list[Ticket]:
+    def list_tickets(self, token: str | None = None) -> list[Ticket]:
         raw = self._run(
             [
                 "gh",
@@ -33,9 +33,10 @@ class GitHub:
             ],
             cwd="/",
             timeout=120,
+            env=_gh_env(token),
         ).stdout
         tickets = [self._to_ticket(obj) for obj in json.loads(raw)]
-        return self._resolve(tickets)
+        return self._resolve(tickets, token)
 
     def create_draft_pr(self, *, branch: str, title: str, body: str, token: str) -> int:
         result = self._run(
@@ -109,12 +110,14 @@ class GitHub:
             labels=frozenset(obj.get("labels", [])),
         )
 
-    def _resolve(self, tickets: list[Ticket]) -> list[Ticket]:
+    def _resolve(self, tickets: list[Ticket], token: str | None) -> list[Ticket]:
         """Resolve open blockers and existing PRs; keep only the resolved tickets."""
-        open_pr_numbers = self._open_pr_ticket_numbers()
+        open_pr_numbers = self._open_pr_ticket_numbers(token)
         resolved: list[Ticket] = []
         for ticket in tickets:
-            blocked_by = tuple(n for n in self._open_blockers(ticket.body) if self._is_open(n))
+            blocked_by = tuple(
+                n for n in self._open_blockers(ticket.body) if self._is_open(n, token)
+            )
             resolved.append(
                 Ticket(
                     number=ticket.number,
@@ -131,22 +134,24 @@ class GitHub:
         # Native dependencies are the live gate; the "Blocked by:" line is the fallback.
         return list(parse_blocked_by(body))
 
-    def _is_open(self, number: int) -> bool:
+    def _is_open(self, number: int, token: str | None) -> bool:
         result = self._run(
             ["gh", "issue", "view", str(number), "--repo", self.repo, "--json", "state"],
             cwd="/",
             timeout=120,
+            env=_gh_env(token),
         )
         try:
             return json.loads(result.stdout).get("state") == "OPEN"
         except (json.JSONDecodeError, AttributeError):
             return False
 
-    def _open_pr_ticket_numbers(self) -> set[int]:
+    def _open_pr_ticket_numbers(self, token: str | None) -> set[int]:
         result = self._run(
             ["gh", "pr", "list", "--repo", self.repo, "--state", "open", "--json", "body"],
             cwd="/",
             timeout=120,
+            env=_gh_env(token),
         )
         numbers: set[int] = set()
         try:
@@ -156,3 +161,7 @@ class GitHub:
         except json.JSONDecodeError:
             pass
         return numbers
+
+
+def _gh_env(token: str | None) -> dict[str, str] | None:
+    return {"GH_TOKEN": token} if token else None

@@ -85,10 +85,8 @@ class Settings:
             repo=_read(env, "FACTORY_REPO") or "daedraMex/commerce-platform",
             max_tickets=_read_int(env, "FACTORY_MAX_TICKETS", 1),
             attempts=_read_int(env, "FACTORY_ATTEMPTS", 5),
-            repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or str(home / "factory" / "repo")),
-            worktrees_dir=Path(
-                _read(env, "FACTORY_WORKTREES_DIR") or str(home / "factory" / "worktrees")
-            ),
+            repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or "/srv/factory/repo"),
+            worktrees_dir=Path(_read(env, "FACTORY_WORKTREES_DIR") or "/srv/factory/worktrees"),
             logs_dir=Path(_read(env, "FACTORY_LOGS_DIR") or str(home / "factory" / "logs")),
             time_limit_seconds=_read_int(env, "FACTORY_TIME_LIMIT_MINUTES", 120) * 60,
             keep_days=_read_int(env, "FACTORY_KEEP_DAYS", 14),

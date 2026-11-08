@@ -70,7 +70,7 @@ def test_verify_isolation_skips_when_no_agent_user(tmp_path):
     assert calls == []
 
 
-def test_verify_isolation_uses_sudo_cat(tmp_path):
+def test_verify_isolation_uses_non_interactive_sudo_cat(tmp_path):
     seen = []
 
     def run(argv, cwd, *, timeout, env=None):
@@ -78,4 +78,13 @@ def test_verify_isolation_uses_sudo_cat(tmp_path):
         return CommandResult(exit_code=1, stdout="", stderr="")
 
     verify_isolation(agent_user="factory-agent", paths=[Path("/secret")], run=run)
-    assert seen[0] == ["sudo", "-u", "factory-agent", "--", "cat", "/secret"]
+    assert seen[0] == [
+        "sudo",
+        "-n",
+        "-u",
+        "factory-agent",
+        "--",
+        "/usr/bin/cat",
+        "-n",
+        "/secret",
+    ]

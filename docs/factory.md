@@ -13,14 +13,19 @@ The decisions behind it are in `docs/adr/0025-night-factory-unattended-agent-run
 
 ## Machine layout
 
-Everything lives under the `factory` user's home (`~/factory`):
+The main clone and the worktrees live under `/srv/factory`, outside
+`/home/factory` (which stays `700` so its secrets are out of the agent's reach):
 
 ```
-~/factory/
-├── repo/          # a clone of daedraMex/commerce-platform (the factory's git source)
-├── worktrees/     # one git worktree per ticket, cleaned after 14 days
-├── logs/          # one log file per ticket run, cleaned after 14 days
-└── secrets.env    # chmod 600, see below
+/srv/factory/           # factory:factory
+├── repo/               # clone of daedraMex/commerce-platform (the factory's git source)
+└── worktrees/          # factory:factory-work, mode 2770; one worktree per ticket,
+                        # cleaned after 14 days
+
+/home/factory/          # factory:factory, mode 700
+├── logs/               # one log file per ticket run, cleaned after 14 days
+├── secrets.env         # chmod 600, see below
+└── xolo-bot.pem        # chmod 600, see below
 ```
 
 ## One-time machine setup
@@ -36,48 +41,72 @@ Run these once, as the admin user unless a step says `factory`.
    socket or a password the test settings can use). These are *not* production
    databases; they hold nothing but test data.
 
-3. **Create two users.** The `factory` user runs the factory; the unprivileged
-   `factory-agent` user is what OpenCode actually runs as, so the model can only
-   reach its own worktree:
+3. **Create two users and a shared worktree group.** The `factory` user runs the
+   factory; the unprivileged `factory-agent` user is what OpenCode actually runs
+   as, so the model can only reach its own worktree. Both are members of the
+   dedicated `factory-work` group; `factory-agent` is **not** in the `factory`
+   group:
     ```bash
     sudo useradd --create-home --shell /bin/bash factory
     sudo useradd --create-home --shell /bin/bash factory-agent
-    sudo groupadd factory
-    sudo usermod -a -G factory factory
-    sudo usermod -a -G factory factory-agent
+    sudo groupadd factory-work
+    sudo usermod -a -G factory-work factory
+    sudo usermod -a -G factory-work factory-agent
     ```
 
     Let `factory` act *as* `factory-agent` (a downgrade, never an upgrade), so
-    it can launch OpenCode as the sandbox user and run the isolation check:
+    it can launch OpenCode as the sandbox user and run the isolation check. The
+    sudo calls are always non-interactive (`-n`) so a missing rule fails fast
+    instead of waiting for a password, and use full command paths:
     ```
     # /etc/sudoers.d/factory-agent
-    factory ALL=(factory-agent) NOPASSWD: ALL
+    factory ALL=(factory-agent) NOPASSWD: /usr/bin/opencode, /usr/bin/cat
     ```
 
-    Make worktrees group-writable so `factory-agent` can edit its own worktree,
-    while the secrets stay out of reach:
+    Create the machine layout. `/home/factory` stays `700`; only the worktrees
+    are group-writable, so `factory-agent` can edit its own worktree while the
+    secrets stay out of reach:
     ```bash
-    sudo install -d -m 2770 -g factory ~/factory/worktrees
-    chmod 600 ~/factory/secrets.env ~/factory/xolo-bot.pem
-    chmod 700 ~/.config/xolo-bot
+    sudo install -d -m 755 -o factory -g factory /srv/factory
+    sudo install -d -m 2770 -o factory -g factory-work /srv/factory/worktrees
+    sudo chmod 700 /home/factory
+    sudo install -d -m 700 -o factory -g factory /home/factory/.config/xolo-bot
     ```
 
-    The secrets file, the private key and `~/.config/xolo-bot/` remain owned by
-    `factory` (mode `600`/`700`), so `factory-agent` cannot read them even via
-    bash. The factory verifies this on every startup.
+    The secrets file, the private key and `/home/factory/.config/xolo-bot/`
+    remain owned by `factory` (mode `600`/`700`), so `factory-agent` cannot read
+    them even via bash. The factory verifies this on every startup.
 
-4. **Install the toolchain as `factory`:** `uv` (Python 3.12), Node.js, and
-   OpenCode. Pin OpenCode to `1.19.5` (the factory config uses the V1
-   permission syntax; newer `opencode2` uses a different schema):
-   ```bash
-   curl -fsSL https://astral.sh/uv/install.sh | sh   # gives ~/.local/bin/uv
-   # then install node, and opencode 1.19.5
-   ```
-
-5. **Clone the repo and sync the factory package** as `factory`:
+4. **Install the toolchain.** As `factory`, install `uv` (Python 3.12) and
+   Node.js. Install OpenCode system-wide at `/usr/bin/opencode` (as admin),
+   because the sudoers rule allows exactly that path. Pin OpenCode to `1.19.5`
+   (the factory config uses the V1 permission syntax; newer `opencode2` uses a
+   different schema):
     ```bash
-    git clone https://github.com/daedraMex/commerce-platform.git ~/factory/repo
-    cd ~/factory/repo/tools/factory
+    curl -fsSL https://astral.sh/uv/install.sh | sh   # gives ~/.local/bin/uv
+    # then install node
+    sudo install -m 755 opencode /usr/bin/opencode     # OpenCode 1.19.5
+    ```
+
+5. **Set up the read-only deploy key and clone** as `factory`. Fetching uses
+   the read-only deploy key over SSH; pushes use HTTPS with the minted xolo-bot
+   token:
+    ```bash
+    ssh-keygen -t ed25519 -N '' -C commerce-deploy -f ~/.ssh/commerce_deploy
+    chmod 600 ~/.ssh/commerce_deploy
+    # add ~/.ssh/commerce_deploy.pub to the repo's Deploy keys (read-only)
+    cat >> ~/.ssh/config <<'EOF'
+    Host github-commerce
+      HostName github.com
+      User git
+      IdentityFile ~/.ssh/commerce_deploy
+      IdentitiesOnly yes
+    EOF
+    chmod 600 ~/.ssh/config
+    git clone git@github-commerce:daedraMex/commerce-platform.git /srv/factory/repo
+    cd /srv/factory/repo
+    git remote set-url --push origin https://github.com/daedraMex/commerce-platform.git
+    cd tools/factory
     uv sync
     ```
 
@@ -91,11 +120,13 @@ Run these once, as the admin user unless a step says `factory`.
      only. Note its App ID and Installation ID, and download its private key.
    - Save the private key as a file the `factory` user owns, `chmod 600`:
      ```bash
-     install -m 600 xolo-bot.pem ~/factory/xolo-bot.pem
+     install -m 600 xolo-bot.pem /home/factory/xolo-bot.pem
      ```
-   - The factory mints a fresh installation token **only** inside the success
-     and stuck paths, and passes it only to the push/PR subprocesses (scoped to
-     those calls). It is never stored and never reaches the OpenCode subprocess.
+   - The factory mints a short-lived installation token on demand: one for the
+     run's `gh` read calls (`list_tickets` and its blocker/PR lookups) and a
+     fresh one inside the success and stuck paths. Each token is passed only to
+     the subprocesses that need it; it is never stored and never reaches the
+     OpenCode subprocess.
 
 7. **Give OpenCode the model provider key.** Set a **spending cap** on the
    provider account. The key reaches the agent through the environment
@@ -123,15 +154,19 @@ Run these once, as the admin user unless a step says `factory`.
     # FACTORY_ATTEMPTS=5              # max agent steps per ticket
     # FACTORY_TIME_LIMIT_MINUTES=120  # max wall-clock per ticket
     # FACTORY_REPO=daedraMex/commerce-platform
+    # FACTORY_REPO_DIR=/srv/factory/repo
+    # FACTORY_WORKTREES_DIR=/srv/factory/worktrees
+    # FACTORY_LOGS_DIR=/home/factory/logs
     ```
     All settings are listed in `tools/factory/src/factory/config.py`. The
     GitHub App private key lives in its own file because systemd's
     `EnvironmentFile` cannot hold a multiline PEM.
 
-    The nightly fetch of `origin/main` and the `gh` read calls (ticket listing)
-    need read access. Give the `factory` user's clone a **repo-local** read
-    credential (e.g. a read-only deploy key in `~/factory/repo/.git/config`) —
-    never a global credential helper and never a stored `gh` auth.
+    `fetch_main` runs `git fetch origin main`, so it uses the SSH fetch URL and
+    the read-only deploy key. The `gh` read calls (`list_tickets` and its
+    blocker/PR lookups) use the GitHub API, not the git remote, and receive a
+    fresh xolo-bot installation token from the token provider. No `gh auth`
+    login and no global git credential helper are needed.
 
 9. **Create the Telegram bot** with [@BotFather](https://t.me/BotFather),
    take its token into `FACTORY_TELEGRAM_BOT_TOKEN`, and find the one chat id
@@ -142,8 +177,8 @@ Run these once, as the admin user unless a step says `factory`.
 10. **Install the systemd user units** as `factory`:
     ```bash
     mkdir -p ~/.config/systemd/user
-    cp ~/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
-    cp ~/factory/repo/tools/factory/systemd/factory.timer  ~/.config/systemd/user/
+    cp /srv/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
+    cp /srv/factory/repo/tools/factory/systemd/factory.timer  ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now factory.timer
     loginctl enable-linger factory   # keep the timer alive when nobody is logged in
@@ -174,11 +209,12 @@ Run these once, as the admin user unless a step says `factory`.
 
 - **Isolation.** OpenCode runs as `factory-agent`; on every startup the factory
   proves that user cannot read the GitHub App private key, `secrets.env` or
-  `~/.config/xolo-bot/` (via `sudo -u factory-agent -- cat <path>`), and aborts
-  if it can.
-- **Env allowlist.** The OpenCode subprocess gets an explicit environment —
-  `PATH`, `HOME` (the agent's home), `LANG`, `DATABASE_URL`, the model provider
-  vars, and `OPENCODE_CONFIG` — nothing else.
+  `~/.config/xolo-bot/` (via `sudo -n -u factory-agent -- /usr/bin/cat -n
+  <path>`), and aborts if it can.
+- **Env allowlist.** The factory launches `/usr/bin/opencode` as
+  `sudo -n -u factory-agent -- /usr/bin/opencode ...` with an explicit
+  environment — `PATH`, `HOME` (the agent's home), `LANG`, `DATABASE_URL`, the
+  model provider vars, and `OPENCODE_CONFIG` — nothing else.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`) and
   a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either stops the
   ticket as stuck and notifies Telegram.
@@ -212,7 +248,7 @@ lines) and the `needs-decision` label. To unblock it:
 
 As `factory`:
 ```bash
-cd ~/factory/repo/tools/factory
+cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
 uv run factory
 ```

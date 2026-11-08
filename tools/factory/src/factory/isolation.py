@@ -37,7 +37,11 @@ def verify_isolation(
     if not agent_user:
         return
     for path in paths:
-        result = run(["sudo", "-u", agent_user, "--", "cat", str(path)], cwd="/", timeout=60)
+        result = run(
+            ["sudo", "-n", "-u", agent_user, "--", "/usr/bin/cat", "-n", str(path)],
+            cwd="/",
+            timeout=60,
+        )
         if result.exit_code == 0:
             raise IsolationError(
                 f"agent user {agent_user!r} can read {path}; tighten its permissions."

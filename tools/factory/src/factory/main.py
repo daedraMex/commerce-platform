@@ -65,7 +65,10 @@ class Factory:
     def run(self) -> list[TicketResult]:
         cleanup_old(self.settings.worktrees_dir, keep_days=self.settings.keep_days)
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
-        tickets = select_tickets(self.github.list_tickets(), max_tickets=self.settings.max_tickets)
+        token = self.token_provider.mint(self.settings.repo)
+        tickets = select_tickets(
+            self.github.list_tickets(token), max_tickets=self.settings.max_tickets
+        )
         results: list[TicketResult] = []
         for ticket in tickets:
             result = self._run_ticket(ticket)

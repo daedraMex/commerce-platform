@@ -7,19 +7,9 @@ class RecordingRun:
         self.result = result or CommandResult(exit_code=0, stdout="", stderr="")
         self.calls = []
 
-    def __call__(self, argv, cwd, *, timeout, env=None):
-        self.calls.append((argv, cwd, env))
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        self.calls.append((argv, cwd, env, replace_env))
         return self.result
-
-
-def _env_from_argv(argv):
-    start = argv.index("env") + 1
-    end = argv.index("opencode")
-    env = {}
-    for item in argv[start:end]:
-        key, _, value = item.partition("=")
-        env[key] = value
-    return env
 
 
 def test_build_agent_env_allowlists_only_known_vars():
@@ -60,7 +50,7 @@ def test_build_agent_env_defaults_home_to_agent_user():
     assert env["HOME"] == "/home/factory-agent"
 
 
-def test_run_uses_env_allowlist_in_argv(tmp_path):
+def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
     recorder = RecordingRun()
     runner = AgentRunner(
         run=recorder,
@@ -77,13 +67,23 @@ def test_run_uses_env_allowlist_in_argv(tmp_path):
     )
     runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
 
-    argv, _cwd, env = recorder.calls[0]
-    assert argv[:5] == ["sudo", "-u", "factory-agent", "--", "env"]
-    allowed = _env_from_argv(argv)
-    assert "GH_TOKEN" not in allowed
-    assert allowed["DEEPSEEK_API_KEY"] == "dk"
-    assert allowed["OPENCODE_CONFIG"].endswith("tools/factory/opencode.factory.json")
-    assert env is None
+    argv, _cwd, env, replace_env = recorder.calls[0]
+    assert argv == [
+        "sudo",
+        "-n",
+        "-u",
+        "factory-agent",
+        "--",
+        "/usr/bin/opencode",
+        "run",
+        "--model",
+        "m",
+        "p",
+    ]
+    assert replace_env is True
+    assert "GH_TOKEN" not in env
+    assert env["DEEPSEEK_API_KEY"] == "dk"
+    assert env["OPENCODE_CONFIG"].endswith("tools/factory/opencode.factory.json")
 
 
 def test_run_passes_model_and_prompt(tmp_path):
@@ -96,7 +96,8 @@ def test_run_passes_model_and_prompt(tmp_path):
         timeout_seconds=60,
     )
 
-    argv, _cwd, _env = recorder.calls[0]
+    argv, _cwd, _env, _replace_env = recorder.calls[0]
+    assert "/usr/bin/opencode" in argv
     assert "deepseek/deepseek-flash" in argv
     assert "implement ticket" in argv
 
@@ -104,7 +105,7 @@ def test_run_passes_model_and_prompt(tmp_path):
 def test_run_marks_timeout(tmp_path):
     from factory.shell import CommandTimeout
 
-    def timed_out(argv, cwd, *, timeout, env=None):
+    def timed_out(argv, cwd, *, timeout, env=None, replace_env=False):
         raise CommandTimeout("slow")
 
     runner = AgentRunner(run=timed_out)

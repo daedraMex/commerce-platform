@@ -13,6 +13,7 @@ from pathlib import Path
 from .shell import CommandTimeout, RunCommand, run_command
 
 OPENCODE_CONFIG_PATH = "tools/factory/opencode.factory.json"
+OPENCODE_BIN = "/usr/bin/opencode"
 
 BASE_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "DATABASE_URL")
 
@@ -80,12 +81,16 @@ class AgentRunner:
         )
         argv: list[str] = []
         if self.agent_user:
-            argv += ["sudo", "-u", self.agent_user, "--"]
-        argv += ["env"]
-        argv += [f"{key}={value}" for key, value in sorted(env.items())]
-        argv += ["opencode", "run", "--model", model, prompt]
+            argv += ["sudo", "-n", "-u", self.agent_user, "--"]
+        argv += [OPENCODE_BIN, "run", "--model", model, prompt]
         try:
-            result = self._run(argv, str(worktree), timeout=timeout_seconds)
+            result = self._run(
+                argv,
+                str(worktree),
+                timeout=timeout_seconds,
+                env=env,
+                replace_env=True,
+            )
         except CommandTimeout:
             return AgentResult(exit_code=None, stdout="", stderr="", timed_out=True)
         return AgentResult(

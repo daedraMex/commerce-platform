@@ -6,6 +6,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 EnvironmentFile=%h/factory/secrets.env
-WorkingDirectory=%h/factory/repo/tools/factory
+WorkingDirectory=/srv/factory/repo/tools/factory
 ExecStart=%h/.local/bin/uv run factory
 TimeoutStartSec=4h

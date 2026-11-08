@@ -40,8 +40,12 @@ def run_command(
     *,
     timeout: int = 300,
     env: dict[str, str | None] | None = None,
+    replace_env: bool = False,
 ) -> CommandResult:
-    merged_env = merge_env(env)
+    if replace_env:
+        merged_env = {key: value for key, value in (env or {}).items() if value is not None}
+    else:
+        merged_env = merge_env(env)
     try:
         proc = subprocess.run(
             argv,
