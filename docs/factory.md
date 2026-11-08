@@ -36,10 +36,35 @@ Run these once, as the admin user unless a step says `factory`.
    socket or a password the test settings can use). These are *not* production
    databases; they hold nothing but test data.
 
-3. **Create the `factory` user.** No sudo, not in the `docker` group:
-   ```bash
-   sudo useradd --create-home --shell /bin/bash factory
-   ```
+3. **Create two users.** The `factory` user runs the factory; the unprivileged
+   `factory-agent` user is what OpenCode actually runs as, so the model can only
+   reach its own worktree:
+    ```bash
+    sudo useradd --create-home --shell /bin/bash factory
+    sudo useradd --create-home --shell /bin/bash factory-agent
+    sudo groupadd factory
+    sudo usermod -a -G factory factory
+    sudo usermod -a -G factory factory-agent
+    ```
+
+    Let `factory` act *as* `factory-agent` (a downgrade, never an upgrade), so
+    it can launch OpenCode as the sandbox user and run the isolation check:
+    ```
+    # /etc/sudoers.d/factory-agent
+    factory ALL=(factory-agent) NOPASSWD: ALL
+    ```
+
+    Make worktrees group-writable so `factory-agent` can edit its own worktree,
+    while the secrets stay out of reach:
+    ```bash
+    sudo install -d -m 2770 -g factory ~/factory/worktrees
+    chmod 600 ~/factory/secrets.env ~/factory/xolo-bot.pem
+    chmod 700 ~/.config/xolo-bot
+    ```
+
+    The secrets file, the private key and `~/.config/xolo-bot/` remain owned by
+    `factory` (mode `600`/`700`), so `factory-agent` cannot read them even via
+    bash. The factory verifies this on every startup.
 
 4. **Install the toolchain as `factory`:** `uv` (Python 3.12), Node.js, and
    OpenCode. Pin OpenCode to `1.19.5` (the factory config uses the V1
@@ -72,10 +97,11 @@ Run these once, as the admin user unless a step says `factory`.
      and stuck paths, and passes it only to the push/PR subprocesses (scoped to
      those calls). It is never stored and never reaches the OpenCode subprocess.
 
-7. **Give OpenCode the model provider key** as `factory` (`opencode auth
-   login`), and set a **spending cap** on the provider account. The machine
-   must never receive the production, R2, payment or per-store integration
-   credentials, and never the real `.env`.
+7. **Give OpenCode the model provider key.** Set a **spending cap** on the
+   provider account. The key reaches the agent through the environment
+   allowlist (see `FACTORY_PROVIDER_ENV_VARS` below), not through `opencode
+   auth login`. The machine must never receive the production, R2, payment or
+   per-store integration credentials, and never the real `.env`.
 
 8. **Create the secrets file** `~/factory/secrets.env`, `chmod 600`, with the
    settings the factory reads from the environment:
@@ -87,8 +113,15 @@ Run these once, as the admin user unless a step says `factory`.
     XOLO_BOT_APP_ID=123456                       # the xolo-bot App ID
     XOLO_BOT_PRIVATE_KEY=$HOME/factory/xolo-bot.pem   # path to the private key file
     XOLO_BOT_INSTALLATION_ID=987654              # the installation on this repo
+    # agent isolation + env allowlist:
+    FACTORY_AGENT_USER=factory-agent
+    FACTORY_AGENT_HOME=/home/factory-agent
+    FACTORY_PROVIDER_ENV_VARS=DEEPSEEK_API_KEY   # model key(s) the agent may see
+    FACTORY_HOST=factory@factory-host            # ssh target for the stuck handoff
     # optional overrides:
     # FACTORY_MAX_TICKETS=1
+    # FACTORY_ATTEMPTS=5              # max agent steps per ticket
+    # FACTORY_TIME_LIMIT_MINUTES=120  # max wall-clock per ticket
     # FACTORY_REPO=daedraMex/commerce-platform
     ```
     All settings are listed in `tools/factory/src/factory/config.py`. The
@@ -136,6 +169,24 @@ Run these once, as the admin user unless a step says `factory`.
   takes, oldest first, each on its own branch. Raise it only when a night has
   room for more than one independent ticket; the run still stops at the first
   failure.
+
+## Hardening
+
+- **Isolation.** OpenCode runs as `factory-agent`; on every startup the factory
+  proves that user cannot read the GitHub App private key, `secrets.env` or
+  `~/.config/xolo-bot/` (via `sudo -u factory-agent -- cat <path>`), and aborts
+  if it can.
+- **Env allowlist.** The OpenCode subprocess gets an explicit environment —
+  `PATH`, `HOME` (the agent's home), `LANG`, `DATABASE_URL`, the model provider
+  vars, and `OPENCODE_CONFIG` — nothing else.
+- **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`) and
+  a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either stops the
+  ticket as stuck and notifies Telegram.
+- **Fix loop.** Before pushing, the factory runs `./scripts/check.sh` in the
+  worktree; on failure it feeds the output back to the agent and retries, up to
+  the step budget.
+- **Stuck handoff.** A stuck ticket keeps its worktree; the Telegram message
+  includes the `ssh` + `cd` command to enter it.
 
 ## Reading logs and decisions
 
