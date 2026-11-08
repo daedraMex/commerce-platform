@@ -141,12 +141,12 @@ def test_success_opens_draft_pr_and_notifies(tmp_path):
     assert len(results) == 1 and results[0].ok
     assert len(github.created_prs) == 1
     branch, title, body = github.created_prs[0]
-    assert branch == "factory/7-ticket-7"
+    assert branch == "nf/7-ticket-7"
     assert "Closes #7" in body
     assert "Built the thing." in body
     assert "Model: deepseek/deepseek-flash" in body
     assert "Chose A." in body
-    assert git.pushed == ["factory/7-ticket-7"]
+    assert git.pushed == ["nf/7-ticket-7"]
     assert len(notifier.pr_ready) == 1
 
 

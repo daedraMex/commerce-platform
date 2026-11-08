@@ -97,6 +97,9 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 ## Safety
 - Never read, print or commit .env files, secrets, tokens or credentials.
 - Never run git push, destructive git commands or database drops without asking.
+  Exception (night factory only, see ADR): may run `git push origin nf/<ticket-id>`
+  to its own ticket branch. Never push to main or any other branch, never use
+  --force or --force-with-lease, never delete remote branches.
 - Migrations are reviewed by a human before merging.
 
 ## Agent skills

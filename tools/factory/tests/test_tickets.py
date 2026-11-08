@@ -68,7 +68,7 @@ def test_parse_blocked_by_missing_returns_empty():
 
 def test_branch_name_is_deterministic_and_safe():
     ticket = Ticket(number=42, title="Add Dark Mode!")
-    assert branch_name(ticket) == "factory/42-add-dark-mode"
+    assert branch_name(ticket) == "nf/42-add-dark-mode"
 
 
 def test_is_ready_requires_ready_label():

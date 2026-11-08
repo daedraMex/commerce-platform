@@ -30,7 +30,7 @@ class Ticket:
 
 def branch_name(ticket: Ticket) -> str:
     """The branch the factory works on and pushes for a ticket."""
-    return f"factory/{ticket.number}-{_slug(ticket.title)}"
+    return f"nf/{ticket.number}-{_slug(ticket.title)}"
 
 
 def is_ready(ticket: Ticket) -> bool:
