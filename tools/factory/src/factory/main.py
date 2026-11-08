@@ -16,11 +16,12 @@ from .models import select_model
 from .notify import Notifier, NullNotifier, PrReadyInfo, StuckInfo, TelegramNotifier
 from .outcomes import build_issue_comment
 from .pr_body import build_pr_body
-from .prompt import compose_prompt
+from .prompt import compose_prompt, read_command_body
 from .runner import AgentRunner
 from .tickets import Ticket, branch_name, select_tickets
 
 DECISIONS_FILE = "DECISIONS.md"
+IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
 NEEDS_DECISION_LABEL = "needs-decision"
 MIGRATION_LABEL = "migration"
 LOG_TAIL_LINES = 30
@@ -42,7 +43,7 @@ class Factory:
         runner: AgentRunner,
         notifier: Notifier,
         token_provider: TokenProvider,
-        prompt_template: str,
+        overlay: str,
     ):
         self.settings = settings
         self.github = github
@@ -50,7 +51,7 @@ class Factory:
         self.runner = runner
         self.notifier = notifier
         self.token_provider = token_provider
-        self.prompt_template = prompt_template
+        self.overlay = overlay
 
     def run(self) -> list[TicketResult]:
         cleanup_old(self.settings.worktrees_dir, keep_days=self.settings.keep_days)
@@ -75,12 +76,14 @@ class Factory:
             self.settings.repo_dir, self.settings.worktrees_dir / branch, branch
         )
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
+        command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
         prompt = compose_prompt(
             ticket,
             model=model,
             branch=branch,
             max_attempts=self.settings.attempts,
-            template=self.prompt_template,
+            command_template=command_template,
+            overlay=self.overlay,
         )
         result = self.runner.run(
             worktree=worktree,
@@ -225,7 +228,7 @@ def _tail(path: Path, lines: int) -> str:
     return "\n".join(path.read_text().splitlines()[-lines:])
 
 
-def read_prompt_template() -> str:
+def read_overlay() -> str:
     candidate = Path(__file__).resolve().parent.parent.parent / "prompt.md"
     return candidate.read_text()
 
@@ -255,7 +258,7 @@ def _load_private_key(value: str | None) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     settings = Settings.from_env()
-    prompt_template = read_prompt_template()
+    overlay = read_overlay()
     factory = Factory(
         settings,
         github=GitHub(settings.repo),
@@ -263,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         runner=AgentRunner(),
         notifier=_build_notifier(settings),
         token_provider=_build_token_provider(settings),
-        prompt_template=prompt_template,
+        overlay=overlay,
     )
     results = factory.run()
     for result in results:

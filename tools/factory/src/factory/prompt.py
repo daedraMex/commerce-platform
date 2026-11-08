@@ -1,17 +1,30 @@
-"""Compose the prompt handed to the agent for one ticket."""
+"""Compose the prompt handed to the agent for one ticket.
+
+The prompt reuses the repo's ``/implement`` command file — the same source of
+truth the manual path uses — and appends the night-factory overlay with the
+extra rules that apply only to unattended runs.
+"""
 
 from __future__ import annotations
 
 from .tickets import Ticket
 
-_TOKENS = (
-    "{{TICKET_NUMBER}}",
-    "{{TICKET_TITLE}}",
-    "{{TICKET_BODY}}",
+ARGUMENTS_TOKEN = "$ARGUMENTS"
+
+_OVERLAY_TOKENS = (
+    "{{BRANCH}}",
     "{{MODEL}}",
     "{{MAX_ATTEMPTS}}",
-    "{{BRANCH}}",
 )
+
+
+def read_command_body(text: str) -> str:
+    """Strip a command file's YAML frontmatter and return its body."""
+    if text.lstrip().startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) == 3:
+            return parts[2].strip()
+    return text.strip()
 
 
 def compose_prompt(
@@ -20,17 +33,12 @@ def compose_prompt(
     model: str,
     branch: str,
     max_attempts: int,
-    template: str,
+    command_template: str,
+    overlay: str,
 ) -> str:
-    values = (
-        str(ticket.number),
-        ticket.title,
-        ticket.body,
-        model,
-        str(max_attempts),
-        branch,
-    )
-    prompt = template
-    for token, value in zip(_TOKENS, values, strict=True):
-        prompt = prompt.replace(token, value)
-    return prompt
+    arguments = f"#{ticket.number}: {ticket.title}\n\n{ticket.body}".strip()
+    base = command_template.replace(ARGUMENTS_TOKEN, arguments)
+    filled_overlay = overlay
+    for token, value in zip(_OVERLAY_TOKENS, (branch, model, str(max_attempts)), strict=True):
+        filled_overlay = filled_overlay.replace(token, value)
+    return f"{base}\n\n{filled_overlay}".strip() + "\n"

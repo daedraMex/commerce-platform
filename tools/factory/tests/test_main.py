@@ -4,16 +4,19 @@ from factory.main import Factory
 from factory.runner import AgentResult
 from factory.tickets import Ticket
 
-TEMPLATE = "Implement ticket {{TICKET_NUMBER}} with {{MODEL}}."
+OVERLAY = "Model: {{MODEL}}. Branch: {{BRANCH}}."
+
+COMMAND_BODY = "Read .agents/skills/implement/SKILL.md and follow it.\n\n$ARGUMENTS"
 
 DECISIONS_DOC = "# Summary\nBuilt the thing.\n\n# Decisions\n\n- Chose A.\n"
 
 
 class FakeGit:
-    def __init__(self, *, check_passed=True, decisions="", diff=None):
+    def __init__(self, *, check_passed=True, decisions="", diff=None, command_body=COMMAND_BODY):
         self.check_result = check_passed
         self.decisions = decisions
         self.diff = diff or DiffStats()
+        self.command_body = command_body
         self.committed = []
         self.pushed = []
         self.worktrees = []
@@ -28,6 +31,8 @@ class FakeGit:
     def read_file(self, worktree, relpath):
         if relpath == "DECISIONS.md":
             return self.decisions
+        if relpath == ".opencode/commands/implement.md":
+            return self.command_body
         return ""
 
     def check_passed(self, worktree):
@@ -139,7 +144,7 @@ def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, tok
         runner=runner,
         notifier=notifier,
         token_provider=token_provider or FakeTokenProvider(),
-        prompt_template=TEMPLATE,
+        overlay=OVERLAY,
     )
 
 
