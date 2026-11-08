@@ -16,6 +16,9 @@ backend/media/
 .env.*
 !.env.example
 
+# Night factory
+DECISIONS.md
+
 # Node
 node_modules/
 .next/
