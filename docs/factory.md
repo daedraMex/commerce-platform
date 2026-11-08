@@ -106,20 +106,35 @@ Run these once, as the admin user unless a step says `factory`.
     `factory-agent` cannot read them even via bash. The factory verifies this on
     every startup.
 
-    Smoke-test the cross-user permissions by hand once (as admin):
+    Smoke-test the cross-user setup on the real machine by hand once (as admin),
+    using a throwaway worktree whose flat name matches the sudoers glob:
     ```bash
+    # 0. create a throwaway worktree and branch
+    sudo -u factory git -C /srv/factory/repo worktree add \
+      -b smoke-worktree /srv/factory/worktrees/smoke-worktree origin/main
+
     # 1. factory-agent creates a group-writable file
-    sudo -u factory-agent touch /srv/factory/worktrees/smoke
-    stat -c '%A %U:%G' /srv/factory/worktrees/smoke
+    sudo -u factory-agent touch /srv/factory/worktrees/smoke-worktree/smoke
+    stat -c '%A %U:%G' /srv/factory/worktrees/smoke-worktree/smoke
     # expect: -rw-rw---- factory-agent factory-work
-    sudo rm /srv/factory/worktrees/smoke
+    sudo -u factory rm /srv/factory/worktrees/smoke-worktree/smoke
 
     # 2. the agent cannot write where the factory must stay in control
     sudo -u factory-agent test -w /srv/factory/repo; echo "agent write rc=$? (expect 1)"
     sudo -u factory-agent test -w /srv/factory/repo/.git/hooks; echo "agent hooks rc=$? (expect 1)"
 
-    # 3. git accepts a factory-owned worktree as factory-agent (no "dubious ownership")
-    sudo -u factory-agent -H git -C /srv/factory/worktrees/<branch> status
+    # 3. git accepts the factory-owned worktree as factory-agent (no "dubious ownership")
+    sudo -u factory-agent git -C /srv/factory/worktrees/smoke-worktree status
+
+    # 4. the sudoers rule allows check.sh without a password
+    sudo -u factory sudo -n -u factory-agent -- \
+      /srv/factory/worktrees/smoke-worktree/backend/scripts/check.sh
+    # any result is fine except "sudo: a password is required"
+
+    # 5. remove the throwaway worktree and branch
+    sudo -u factory git -C /srv/factory/repo worktree remove --force \
+      /srv/factory/worktrees/smoke-worktree
+    sudo -u factory git -C /srv/factory/repo branch -D smoke-worktree
     ```
 
 4. **Install the toolchain.** As `factory`, install `uv` (Python 3.12) and
