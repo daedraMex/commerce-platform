@@ -113,7 +113,7 @@ Run these once, as the admin user unless a step says `factory`.
    (the factory config uses the V1 permission syntax; newer `opencode2` uses a
    different schema):
     ```bash
-    curl -fsSL https://astral.sh/uv/install.sh | sh   # gives ~/.local/bin/uv
+    curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
     # then install node
     sudo install -m 755 opencode /usr/bin/opencode     # OpenCode 1.19.5
     ```
