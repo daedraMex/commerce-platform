@@ -5,12 +5,13 @@ from factory.shell import CommandResult
 
 
 class RecordingRun:
-    def __init__(self):
+    def __init__(self, result=None):
+        self.result = result or CommandResult(exit_code=0, stdout="", stderr="")
         self.calls = []
 
     def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
-        self.calls.append((argv, cwd))
-        return CommandResult(exit_code=0, stdout="", stderr="")
+        self.calls.append((argv, cwd, env, replace_env))
+        return self.result
 
 
 def test_fetch_main_fetches_from_origin():
@@ -19,4 +20,47 @@ def test_fetch_main_fetches_from_origin():
 
     Git(run=run).fetch_main(repo)
 
-    assert run.calls == [(["git", "fetch", "origin", "main"], str(repo))]
+    assert run.calls == [
+        (["git", "fetch", "origin", "main"], str(repo), None, False),
+    ]
+
+
+def test_check_runs_the_script_as_the_agent_user_without_secrets():
+    run = RecordingRun()
+    worktree = Path("/srv/factory/worktrees/nf/1")
+
+    Git(
+        run=run,
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        base_env={
+            "PATH": "/usr/bin",
+            "HOME": "/home/factory",
+            "LANG": "C",
+            "DATABASE_URL": "postgres://db",
+            "DEEPSEEK_API_KEY": "dk-123",
+            "GH_TOKEN": "secret",
+        },
+    ).check(worktree)
+
+    argv, cwd, env, replace_env = run.calls[0]
+    assert argv == ["sudo", "-n", "-u", "factory-agent", "--", "./scripts/check.sh"]
+    assert cwd == str(worktree / "backend")
+    assert replace_env is True
+    assert env == {
+        "PATH": "/usr/bin",
+        "HOME": "/home/factory-agent",
+        "LANG": "C",
+        "DATABASE_URL": "postgres://db",
+    }
+
+
+def test_check_truncates_output_fed_to_the_agent():
+    run = RecordingRun(CommandResult(exit_code=1, stdout="x" * 9000, stderr=""))
+
+    passed, output = Git(run=run).check(Path("/work"))
+
+    assert passed is False
+    assert len(output) < 9000
+    assert output.endswith("x" * 100)
+    assert "truncated" in output

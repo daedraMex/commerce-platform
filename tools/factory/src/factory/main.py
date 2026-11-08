@@ -311,7 +311,10 @@ def main(argv: list[str] | None = None) -> int:
     factory = Factory(
         settings,
         github=GitHub(settings.repo),
-        git=Git(),
+        git=Git(
+            agent_user=settings.agent_user,
+            agent_home=settings.agent_home,
+        ),
         runner=AgentRunner(
             agent_user=settings.agent_user,
             agent_home=settings.agent_home,

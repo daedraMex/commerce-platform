@@ -14,8 +14,25 @@ from .shell import CommandTimeout, RunCommand, run_command
 
 OPENCODE_CONFIG_PATH = "tools/factory/opencode.factory.json"
 OPENCODE_BIN = "/usr/bin/opencode"
+CHECK_BIN = "./scripts/check.sh"
+MAX_CHECK_OUTPUT_CHARS = 4000
 
 BASE_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "DATABASE_URL")
+
+
+def _allowlisted_env(
+    base_env: dict[str, str],
+    *,
+    agent_user: str | None,
+    agent_home: str | None,
+) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for name in BASE_ENV_ALLOWLIST:
+        if name == "HOME" and agent_user:
+            env["HOME"] = agent_home or f"/home/{agent_user}"
+        elif base_env.get(name):
+            env[name] = base_env[name]
+    return env
 
 
 def build_agent_env(
@@ -28,16 +45,34 @@ def build_agent_env(
 ) -> dict[str, str]:
     """Build the explicit environment the agent subprocess receives."""
     env = {"OPENCODE_CONFIG": config_path}
-    for name in BASE_ENV_ALLOWLIST:
-        if name == "HOME" and agent_user:
-            env["HOME"] = agent_home or f"/home/{agent_user}"
-        elif base_env.get(name):
-            env[name] = base_env[name]
+    env.update(_allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home))
     for name in provider_vars:
         value = base_env.get(name)
         if value:
             env[name] = value
     return env
+
+
+def build_check_env(
+    base_env: dict[str, str],
+    *,
+    agent_user: str | None,
+    agent_home: str | None,
+) -> dict[str, str]:
+    """Build the explicit environment the check runner receives.
+
+    The check runner executes agent-written code, so it gets only the base
+    allowlist: never the model provider key, the GitHub token or any other
+    secret.
+    """
+    return _allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home)
+
+
+def truncate_check_output(output: str, *, limit: int = MAX_CHECK_OUTPUT_CHARS) -> str:
+    """Keep the tail of check output so agent feedback stays bounded."""
+    if len(output) <= limit:
+        return output
+    return "… (earlier output truncated) …\n" + output[-limit:]
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,9 @@
-from factory.runner import AgentRunner, build_agent_env
+from factory.runner import (
+    AgentRunner,
+    build_agent_env,
+    build_check_env,
+    truncate_check_output,
+)
 from factory.shell import CommandResult
 
 
@@ -48,6 +53,40 @@ def test_build_agent_env_defaults_home_to_agent_user():
         provider_vars=(),
     )
     assert env["HOME"] == "/home/factory-agent"
+
+
+def test_build_check_env_has_only_the_base_allowlist():
+    env = build_check_env(
+        {
+            "PATH": "/usr/bin",
+            "HOME": "/home/factory",
+            "LANG": "C",
+            "DATABASE_URL": "postgres://db",
+            "DEEPSEEK_API_KEY": "dk-123",
+            "GH_TOKEN": "secret",
+            "OPENCODE_CONFIG": "/work/opencode.json",
+        },
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+    )
+    assert env == {
+        "PATH": "/usr/bin",
+        "HOME": "/home/factory-agent",
+        "LANG": "C",
+        "DATABASE_URL": "postgres://db",
+    }
+
+
+def test_truncate_check_output_keeps_the_tail():
+    output = "x" * 50 + "y" * 50
+    truncated = truncate_check_output(output, limit=20)
+    assert truncated.endswith("y" * 20)
+    assert "truncated" in truncated
+    assert "x" not in truncated
+
+
+def test_truncate_check_output_leaves_short_output_alone():
+    assert truncate_check_output("ok", limit=20) == "ok"
 
 
 def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):

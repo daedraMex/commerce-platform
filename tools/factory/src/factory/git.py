@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .diff import DiffStats, build_diff_stats
+from .runner import CHECK_BIN, build_check_env, truncate_check_output
 from .shell import RunCommand, run_command
-
-_CHECK_SCRIPT = "scripts/check.sh"
 
 
 class Git:
-    def __init__(self, run: RunCommand = run_command):
+    def __init__(
+        self,
+        run: RunCommand = run_command,
+        *,
+        agent_user: str | None = None,
+        agent_home: str | None = None,
+        base_env: dict[str, str] | None = None,
+    ):
         self._run = run
+        self._agent_user = agent_user
+        self._agent_home = agent_home
+        self._base_env = dict(base_env if base_env is not None else os.environ)
 
     def fetch_main(self, repo_dir: Path) -> None:
         self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
@@ -49,13 +59,27 @@ class Git:
             raise RuntimeError(f"git push failed: {result.stderr.strip()}")
 
     def check(self, worktree: Path) -> tuple[bool, str]:
-        """Run the check script; return (passed, combined output)."""
+        """Run the check script as the agent user; return (passed, truncated output).
+
+        The agent wrote this code, so the script must run as the unprivileged
+        agent user with only the base environment allowlist — never as the
+        factory user and never with secrets.
+        """
         backend = worktree / "backend"
-        result = self._run([_CHECK_SCRIPT], str(backend), timeout=1800)
+        env = build_check_env(
+            self._base_env,
+            agent_user=self._agent_user,
+            agent_home=self._agent_home,
+        )
+        argv: list[str] = []
+        if self._agent_user:
+            argv += ["sudo", "-n", "-u", self._agent_user, "--"]
+        argv.append(CHECK_BIN)
+        result = self._run(argv, str(backend), timeout=1800, env=env, replace_env=True)
         output = result.stdout
         if result.stderr:
             output += ("\n" if output else "") + result.stderr
-        return result.exit_code == 0, output.strip()
+        return result.exit_code == 0, truncate_check_output(output.strip())
 
     def diff_stats(self, worktree: Path) -> DiffStats:
         numstat = self._run(
