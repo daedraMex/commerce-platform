@@ -28,7 +28,7 @@ from .outcomes import build_issue_comment
 from .pr_body import build_pr_body
 from .prompt import compose_prompt, read_command_body
 from .runner import AgentRunner
-from .tickets import Ticket, branch_name, select_tickets
+from .tickets import Ticket, branch_name, select_tickets, worktree_path
 
 DECISIONS_FILE = "DECISIONS.md"
 IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
@@ -86,7 +86,9 @@ class Factory:
         )
         branch = branch_name(ticket)
         worktree = self.git.create_worktree(
-            self.settings.repo_dir, self.settings.worktrees_dir / branch, branch
+            self.settings.repo_dir,
+            worktree_path(self.settings.worktrees_dir, branch),
+            branch,
         )
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))

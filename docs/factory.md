@@ -20,7 +20,8 @@ The main clone and the worktrees live under `/srv/factory`, outside
 /srv/factory/           # factory:factory
 ├── repo/               # clone of daedraMex/commerce-platform (the factory's git source)
 └── worktrees/          # factory:factory-work, mode 2770; one worktree per ticket,
-                        # cleaned after 14 days
+                        # flat dir names: branch nf/46-slug -> nf-46-slug, so the
+                        # sudoers check-script glob matches; cleaned after 14 days
 
 /home/factory/          # factory:factory, mode 700
 ├── logs/               # one log file per ticket run, cleaned after 14 days

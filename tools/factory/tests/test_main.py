@@ -1,4 +1,5 @@
 from dataclasses import replace
+from pathlib import Path
 
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
@@ -422,5 +423,6 @@ def test_stuck_keeps_worktree_and_includes_handoff(tmp_path):
     factory.run()
 
     info = notifier.stuck[0]
-    assert info.worktree.endswith("nf/7-ticket-7")
+    assert info.worktree.endswith("nf-7-ticket-7")
+    assert Path(info.worktree).parent == settings.worktrees_dir
     assert info.handoff_command == f"ssh factory@host && cd {info.worktree}"

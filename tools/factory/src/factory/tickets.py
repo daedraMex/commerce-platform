@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from pathlib import Path
 
 READY_LABEL = "ready-for-agent"
 NEEDS_DECISION_LABEL = "needs-decision"
@@ -31,6 +32,21 @@ class Ticket:
 def branch_name(ticket: Ticket) -> str:
     """The branch the factory works on and pushes for a ticket."""
     return f"nf/{ticket.number}-{_slug(ticket.title)}"
+
+
+def worktree_dir_name(branch: str) -> str:
+    """A flat directory name for a branch.
+
+    Branch names contain a slash (``nf/46-slug``), but sudo's ``*`` does not
+    cross ``/``, so a nested worktree would never match the sudoers check-script
+    glob. Keep the branch unchanged and flatten it for the directory instead.
+    """
+    return branch.replace("/", "-")
+
+
+def worktree_path(worktrees_dir: Path, branch: str) -> Path:
+    """The worktree path: exactly one component under ``worktrees_dir``."""
+    return worktrees_dir / worktree_dir_name(branch)
 
 
 def is_ready(ticket: Ticket) -> bool:

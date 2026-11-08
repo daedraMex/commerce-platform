@@ -1,4 +1,13 @@
-from factory.tickets import Ticket, branch_name, is_ready, parse_blocked_by, select_tickets
+from pathlib import PurePosixPath
+
+from factory.tickets import (
+    Ticket,
+    branch_name,
+    is_ready,
+    parse_blocked_by,
+    select_tickets,
+    worktree_path,
+)
 
 
 def _ticket(number, *, labels=(), blocked_by=(), has_open_pr=False):
@@ -69,6 +78,24 @@ def test_parse_blocked_by_missing_returns_empty():
 def test_branch_name_is_deterministic_and_safe():
     ticket = Ticket(number=42, title="Add Dark Mode!")
     assert branch_name(ticket) == "nf/42-add-dark-mode"
+
+
+def test_worktree_path_is_flat_and_matches_the_sudoers_glob(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    path = worktree_path(worktrees, "nf/46-add-dark-mode")
+
+    assert path == worktrees / "nf-46-add-dark-mode"
+    assert path.parent == worktrees
+    assert path.name == "nf-46-add-dark-mode"
+    assert PurePosixPath(str(path)).match(str(worktrees / "*"))
+    assert PurePosixPath(str(path / "backend" / "scripts" / "check.sh")).match(
+        str(worktrees / "*" / "backend" / "scripts" / "check.sh")
+    )
+
+
+def test_worktree_path_rejects_a_nested_branch_component(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    assert "/" not in worktree_path(worktrees, "nf/46-slug").name
 
 
 def test_is_ready_requires_ready_label():
