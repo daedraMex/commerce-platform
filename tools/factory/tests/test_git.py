@@ -3,8 +3,12 @@ from pathlib import Path
 import pytest
 
 from factory.git import (
+    BOT_COMMIT_NAME,
     Git,
+    GitIdentityError,
     GitVersionError,
+    bot_commit_email,
+    commit_identity_args,
     parse_git_version,
     verify_git_version,
 )
@@ -138,10 +142,14 @@ def test_commit_never_runs_hooks():
     run = RecordingRun()
     worktree = Path("/work")
 
-    Git(run=run).commit_all(worktree, "feat: something")
+    Git(run=run, bot_user_id="12345").commit_all(worktree, "feat: something")
 
     assert run.calls[1][0] == [
         "git",
+        "-c",
+        "user.name=xolo-bot[bot]",
+        "-c",
+        "user.email=12345+xolo-bot[bot]@users.noreply.github.com",
         "-c",
         "core.hooksPath=/dev/null",
         "commit",
@@ -149,6 +157,63 @@ def test_commit_never_runs_hooks():
         "-m",
         "feat: something",
     ]
+
+
+def test_bot_commit_identity_uses_the_github_noreply_address():
+    assert BOT_COMMIT_NAME == "xolo-bot[bot]"
+    assert bot_commit_email("12345") == "12345+xolo-bot[bot]@users.noreply.github.com"
+
+
+def test_commit_identity_args_are_explicit_git_config():
+    assert commit_identity_args("12345") == [
+        "-c",
+        "user.name=xolo-bot[bot]",
+        "-c",
+        "user.email=12345+xolo-bot[bot]@users.noreply.github.com",
+    ]
+
+
+def test_commit_requires_the_bot_user_id_before_staging():
+    run = RecordingRun()
+
+    with pytest.raises(GitIdentityError, match="XOLO_BOT_USER_ID"):
+        Git(run=run).commit_all(Path("/work"), "feat: something")
+
+    assert run.calls == []
+
+
+def test_verify_commit_identity_is_a_dry_git_var_check():
+    run = RecordingRun()
+    repo = Path("/srv/factory/repo")
+
+    Git(run=run, bot_user_id="12345").verify_commit_identity(repo)
+
+    identity = [
+        "-c",
+        "user.name=xolo-bot[bot]",
+        "-c",
+        "user.email=12345+xolo-bot[bot]@users.noreply.github.com",
+    ]
+    assert run.calls == [
+        (["git", *identity, "var", "GIT_AUTHOR_IDENT"], str(repo), None, False),
+        (["git", *identity, "var", "GIT_COMMITTER_IDENT"], str(repo), None, False),
+    ]
+
+
+def test_verify_commit_identity_raises_when_git_cannot_build_it():
+    run = RecordingRun(CommandResult(exit_code=128, stdout="", stderr="Author identity unknown"))
+
+    with pytest.raises(GitIdentityError, match="Author identity unknown"):
+        Git(run=run, bot_user_id="12345").verify_commit_identity(Path("/srv/factory/repo"))
+
+
+def test_verify_commit_identity_requires_the_bot_user_id():
+    run = RecordingRun()
+
+    with pytest.raises(GitIdentityError, match="XOLO_BOT_USER_ID"):
+        Git(run=run).verify_commit_identity(Path("/srv/factory/repo"))
+
+    assert run.calls == []
 
 
 @pytest.mark.parametrize(

@@ -77,16 +77,28 @@ Run these once, as the admin user unless a step says `factory`.
     would otherwise drop it. The `SETENV` tag is what allows that:
     ```
     # /etc/sudoers.d/factory-agent
+    Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
     factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh
     ```
 
-    The rules live in `/etc/sudoers.d/factory-agent`. If an older install left
+    `Defaults:factory !log_allowed` stops sudo from writing the successful
+    downgrade commands to the journal, including the environment named in
+    `--preserve-env` and the prompt passed to OpenCode. Denied commands are
+    still logged. This is why the provider key is never passed through sudo:
+    the agent holds it itself (step 7).
+
+    The rules live in `/etc/sudoers.d/factory-agent`. The preflight reads that
+    file to check the `!log_allowed` line, so make it readable by `factory`
+    (root-owned and never group-writable): if an older install left
     a `/etc/sudoers.d/factory` file behind, remove it so its stale rules cannot
-    linger, then validate the sudoers files before relying on them:
+    linger, then set permissions and validate the sudoers files before relying
+    on them:
     ```bash
     sudo rm -f /etc/sudoers.d/factory
+    sudo chown root:factory /etc/sudoers.d/factory-agent
+    sudo chmod 0440 /etc/sudoers.d/factory-agent
     sudo visudo -c
     ```
 
@@ -197,7 +209,11 @@ Run these once, as the admin user unless a step says `factory`.
    - Register a GitHub App (`xolo-bot`) in the machine account's org/personal
      settings, give it `contents` (read/write), `pull requests` (read/write)
      and `issues` (read/write), and install it on `daedraMex/commerce-platform`
-     only. Note its App ID and Installation ID, and download its private key.
+     only. Note its App ID and Installation ID, download its private key, and
+     note the numeric user id of its bot account from
+     `https://api.github.com/users/xolo-bot%5Bbot%5D` (the `id` field). The
+     runner commits as `xolo-bot[bot]` using that id, never a machine git
+     identity.
    - Save the private key as a file the `factory` user owns, `chmod 600`:
      ```bash
      install -m 600 xolo-bot.pem /home/factory/xolo-bot.pem
@@ -208,11 +224,23 @@ Run these once, as the admin user unless a step says `factory`.
      the subprocesses that need it; it is never stored and never reaches the
      OpenCode subprocess.
 
-7. **Give OpenCode the model provider key.** Set a **spending cap** on the
-   provider account. The key reaches the agent through the environment
-   allowlist (see `FACTORY_PROVIDER_ENV_VARS` below), not through `opencode
-   auth login`. The machine must never receive the production, R2, payment or
-   per-store integration credentials, and never the real `.env`.
+7. **Give the agent the model provider key.** Set a **spending cap** on the
+   provider account. Log OpenCode in *as `factory-agent`* so the key lives in
+   that user's own auth store (`~/.local/share/opencode/auth.json`, mode `600`)
+   and never travels through sudo or the environment:
+   ```bash
+   sudo -u factory-agent -H /usr/bin/opencode auth login   # choose the provider, paste the key
+   sudo -u factory-agent -H /usr/bin/opencode auth list    # expect the provider to be listed
+   ```
+   The factory starts OpenCode with `HOME=/home/factory-agent`, so it finds
+   that store on every run. Do **not** put the key in `secrets.env` and do
+   **not** set `FACTORY_PROVIDER_ENV_VARS`: passing it through
+   `sudo --preserve-env` is exactly what used to write it to the journal. On an
+   existing machine, delete any `DEEPSEEK_API_KEY`/`FACTORY_PROVIDER_ENV_VARS`
+   lines from `secrets.env` and **rotate that key** (an older install passed it
+   through sudo, so the key may already be in the journal). The machine must
+   never receive the production, R2, payment or per-store integration
+   credentials, and never the real `.env`.
 
 8. **Create the secrets file** `~/factory/secrets.env`, `chmod 600`, with the
    settings the factory reads from the environment:
@@ -224,10 +252,10 @@ Run these once, as the admin user unless a step says `factory`.
     XOLO_BOT_APP_ID=123456                       # the xolo-bot App ID
     XOLO_BOT_PRIVATE_KEY=$HOME/factory/xolo-bot.pem   # path to the private key file
     XOLO_BOT_INSTALLATION_ID=987654              # the installation on this repo
-    # agent isolation + env allowlist:
+    XOLO_BOT_USER_ID=1234567                     # xolo-bot[bot] user id, for commits
+    # agent isolation (the provider key is in factory-agent's own auth store):
     FACTORY_AGENT_USER=factory-agent
     FACTORY_AGENT_HOME=/home/factory-agent
-    FACTORY_PROVIDER_ENV_VARS=DEEPSEEK_API_KEY   # model key(s) the agent may see
     FACTORY_HOST=factory@factory-host            # ssh target for the stuck handoff
     # optional overrides:
     # FACTORY_MAX_TICKETS=1
@@ -303,13 +331,32 @@ Run these once, as the admin user unless a step says `factory`.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
-  `DATABASE_URL`, the model provider vars, and `OPENCODE_CONFIG` — nothing else.
-  The check runner gets the same downgrade with only `PATH`, `HOME`, `LANG` and
-  `DATABASE_URL`, plus a fixed set of non-secret test settings (`SECRET_KEY`,
-  `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`) that match CI's backend job so Django
-  can start without a worktree `.env`: no provider key, no GitHub token, no
-  secrets. The agent gets the same test settings. They are constants in the
-  factory code and are never read from `secrets.env`.
+  `DATABASE_URL` and `OPENCODE_CONFIG` — nothing else. The model provider key is
+  not in it: the agent reads its own OpenCode auth store from its home, so the
+  key never crosses sudo. The check runner gets the same downgrade with only
+  `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret test
+  settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`) that match CI's
+  backend job so Django can start without a worktree `.env`: no provider key,
+  no GitHub token, no secrets. The agent gets the same test settings. They are
+  constants in the factory code and are never read from `secrets.env`.
+- **Commit identity.** The runner stages and commits with an explicit
+  `-c user.name=xolo-bot[bot] -c user.email=<id>+xolo-bot[bot]@users.noreply.github.com`
+  built from `XOLO_BOT_USER_ID`, so it never depends on a machine `git config`.
+  The preflight runs `git var GIT_AUTHOR_IDENT`/`GIT_COMMITTER_IDENT` with the
+  same args (a dry check that creates no commit) and fails if the id is missing
+  or unusable. The agent never commits; it leaves its changes in the worktree.
+- **Sudo journal.** The preflight reads `/etc/sudoers.d/factory-agent` and fails
+  unless it contains `Defaults:factory !log_allowed`, so successful downgrade
+  commands (with their environment and prompt) stay out of the journal. The
+  file must stay readable by `factory` (`root:factory`, mode `0440`) for that
+  check; if it is not, the run stops instead of proceeding unverified.
+- **Secret rotation.** If any secret (the model provider key, the Telegram bot
+  token or the xolo-bot private key) ever appears in the journal, a log file, a
+  pull request or anywhere else it should not, treat it as compromised and
+  **rotate it**: re-run `sudo -u factory-agent -H /usr/bin/opencode auth login`
+  for the provider key, issue a new Telegram token and update `secrets.env`, or
+  regenerate the xolo-bot key and replace `xolo-bot.pem`, then restart the
+  timer. Deleting the log line is not enough.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`) and
   a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either stops the
   ticket as stuck and notifies Telegram.
@@ -367,8 +414,9 @@ uv run factory preflight
 It uses the real tools and the real code paths, not fakes: it fetches
 `origin/main`, lists tickets through the `gh` code path, creates a throwaway
 `preflight-<timestamp>` worktree from the fresh `origin/main`, runs `check.sh`
-in it as `factory-agent` with the real check environment, verifies isolation
-and the git version, then removes the worktree and its branch even on failure.
+in it as `factory-agent` with the real check environment, verifies isolation,
+the git version, the bot commit identity and the sudoers `!log_allowed` line,
+then removes the worktree and its branch even on failure.
 Any failed step sends `preflight failed: <step>: <short error>` to Telegram
 (truncated, with no environment values or secrets) and exits non-zero without
 touching a ticket. The nightly run performs the same preflight before selecting

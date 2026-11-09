@@ -28,6 +28,40 @@ def test_runbook_says_run_the_preflight_after_any_change():
     assert "first after any machine or factory change" in text
 
 
+def test_runbook_documents_the_agent_owned_provider_key():
+    text = RUNBOOK.read_text()
+
+    assert "sudo -u factory-agent -H /usr/bin/opencode auth login" in text
+    assert "sudo -u factory-agent -H /usr/bin/opencode auth list" in text
+    assert "FACTORY_PROVIDER_ENV_VARS=" not in text
+    assert "DEEPSEEK_API_KEY=" not in text
+
+
+def test_runbook_documents_the_no_logging_sudoers_line_and_permission():
+    text = RUNBOOK.read_text()
+
+    assert "Defaults:factory !log_allowed" in text
+    assert "sudo chown root:factory /etc/sudoers.d/factory-agent" in text
+    assert "sudo chmod 0440 /etc/sudoers.d/factory-agent" in text
+    assert "sudoers `!log_allowed` line" in text
+
+
+def test_runbook_says_rotate_any_secret_that_appeared_in_logs():
+    text = " ".join(RUNBOOK.read_text().lower().split())
+
+    assert "appears in the journal" in text
+    assert "treat it as compromised and **rotate it**" in text
+
+
+def test_runbook_documents_the_bot_commit_identity():
+    text = RUNBOOK.read_text()
+
+    assert "XOLO_BOT_USER_ID=1234567" in text
+    assert "xolo-bot[bot]" in text
+    assert "git var GIT_AUTHOR_IDENT" in text
+    assert "the bot commit identity" in text
+
+
 def test_runbook_documents_the_safe_repo_group_and_fix_commands():
     text = RUNBOOK.read_text()
 

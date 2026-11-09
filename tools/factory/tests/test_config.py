@@ -77,3 +77,14 @@ def test_from_env_reads_dir_overrides():
     assert settings.repo_dir == Path("/tmp/repo")
     assert settings.worktrees_dir == Path("/tmp/worktrees")
     assert settings.logs_dir == Path("/tmp/logs")
+
+
+def test_from_env_reads_the_bot_user_id_for_commits():
+    settings = Settings.from_env(
+        {
+            "FACTORY_MODEL": "m",
+            "FACTORY_STRONG_MODEL": "s",
+            "XOLO_BOT_USER_ID": "12345",
+        }
+    )
+    assert settings.github_user_id == "12345"

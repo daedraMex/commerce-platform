@@ -9,17 +9,29 @@ from factory.tickets import Ticket
 
 class FakeGit:
     def __init__(
-        self, *, check_passed=True, check_output="check output", fetch_error=None, events=None
+        self,
+        *,
+        check_passed=True,
+        check_output="check output",
+        fetch_error=None,
+        identity_error=None,
+        events=None,
     ):
         self.check_passed = check_passed
         self.check_output = check_output
         self.fetch_error = fetch_error
+        self.identity_error = identity_error
         self.calls = events if events is not None else []
 
     def fetch_main(self, repo_dir):
         self.calls.append(("fetch_main", repo_dir))
         if self.fetch_error is not None:
             raise self.fetch_error
+
+    def verify_commit_identity(self, repo_dir):
+        self.calls.append(("verify_commit_identity", repo_dir))
+        if self.identity_error is not None:
+            raise self.identity_error
 
     def create_worktree(self, repo_dir, worktree, branch):
         self.calls.append(("create_worktree", worktree, branch))
@@ -99,6 +111,9 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
     def verify_git_version():
         verified.append(("verify_git_version",))
 
+    def verify_sudoers_logging():
+        verified.append(("verify_sudoers_logging",))
+
     return Preflight(
         settings,
         git=git or FakeGit(events=events),
@@ -108,6 +123,7 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
         clock=lambda: 42,
         verify_isolation_fn=verify_isolation,
         verify_git_version_fn=verify_git_version,
+        verify_sudoers_logging_fn=verify_sudoers_logging,
     )
 
 
@@ -125,16 +141,19 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
         "fetch_main",
         "verify_isolation",
         "verify_git_version",
+        "verify_commit_identity",
+        "verify_sudoers_logging",
         "create_worktree",
         "check",
         "remove_worktree",
         "delete_branch",
     ]
-    assert events[3] == (
+    assert events[5] == (
         "create_worktree",
         Path(tmp_path / "worktrees" / "preflight-42"),
         "preflight-42",
     )
+    assert events[3] == ("verify_commit_identity", tmp_path / "repo")
     assert events[1][1]["repo_dir"] == tmp_path / "repo"
 
 
@@ -211,9 +230,45 @@ def test_preflight_stops_before_creating_a_worktree_when_isolation_fails(tmp_pat
         clock=lambda: 42,
         verify_isolation_fn=failing_isolation,
         verify_git_version_fn=lambda: None,
+        verify_sudoers_logging_fn=lambda: None,
     )
 
     with pytest.raises(PreflightError, match="verify isolation"):
         preflight.run()
 
     assert [call[0] for call in git.calls] == ["fetch_main"]
+
+
+def test_preflight_stops_before_creating_a_worktree_when_sudoers_would_log(tmp_path):
+    git = FakeGit()
+
+    def failing_sudoers():
+        raise RuntimeError("missing Defaults:factory !log_allowed")
+
+    preflight = Preflight(
+        make_settings(tmp_path),
+        git=git,
+        github=FakeGitHub(),
+        notifier=RecordingNotifier(),
+        token_provider=FakeTokenProvider(),
+        clock=lambda: 42,
+        verify_isolation_fn=lambda **_kwargs: None,
+        verify_git_version_fn=lambda: None,
+        verify_sudoers_logging_fn=failing_sudoers,
+    )
+
+    with pytest.raises(PreflightError, match="verify sudoers logging"):
+        preflight.run()
+
+    assert [call[0] for call in git.calls] == ["fetch_main", "verify_commit_identity"]
+
+
+def test_preflight_stops_before_creating_a_worktree_when_identity_is_missing(tmp_path):
+    git = FakeGit(identity_error=RuntimeError("XOLO_BOT_USER_ID is not set"))
+    notifier = RecordingNotifier()
+
+    with pytest.raises(PreflightError, match="verify commit identity"):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    assert [call[0] for call in git.calls] == ["fetch_main", "verify_commit_identity"]
+    assert "XOLO_BOT_USER_ID is not set" in notifier.run_failed[0].reason

@@ -20,9 +20,9 @@ fetch it from GitHub.
    first line of `DECISIONS.md`, on a line starting with exactly
    `OPEN QUESTION:`, then stop. Never guess on a safety-relevant decision.
 
-5. Run `./scripts/check.sh` from the `backend/` directory to verify your work
-   before you commit. The runner runs it again and, if it still fails, asks you
-   to fix the reported failures.
+5. Run `./scripts/check.sh` from the `backend/` directory to verify your work.
+   The runner runs it again and, if it still fails, asks you to fix the
+   reported failures.
 
 6. Never edit AGENTS.md, CLAUDE.md, opencode.json, any other opencode config,
    `.github/`, `tools/factory/`, or `docs/adr/`.
@@ -30,6 +30,6 @@ fetch it from GitHub.
 7. Do not run `code-review` or any self-review — a human reviews the draft PR.
    Do not push, open pull requests, or merge; the runner does that.
 
-8. Commit your work to the current branch with a clear, English commit message.
+8. Do not commit. Leave your changes in the worktree; the runner commits them.
 
 Work only inside this worktree. Do not read or write files outside it.

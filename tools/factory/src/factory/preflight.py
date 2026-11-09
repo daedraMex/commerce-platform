@@ -18,6 +18,7 @@ from .git import Git, verify_git_version
 from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
 from .notify import Notifier, RunFailedInfo
+from .sudoers import verify_sudoers_logging
 from .tickets import Ticket, worktree_path
 
 MAX_ERROR_CHARS = 300
@@ -52,6 +53,7 @@ class Preflight:
         clock: Callable[[], int] | None = None,
         verify_isolation_fn: Callable[..., None] = verify_isolation,
         verify_git_version_fn: Callable[[], None] = verify_git_version,
+        verify_sudoers_logging_fn: Callable[[], None] = verify_sudoers_logging,
     ):
         self.settings = settings
         self.git = git
@@ -61,6 +63,7 @@ class Preflight:
         self._clock = clock or (lambda: int(time.time()))
         self._verify_isolation = verify_isolation_fn
         self._verify_git_version = verify_git_version_fn
+        self._verify_sudoers_logging = verify_sudoers_logging_fn
 
     def run(self) -> list[Ticket]:
         run_id = str(self._clock())
@@ -85,6 +88,12 @@ class Preflight:
 
             step = "verify git version"
             self._verify_git_version()
+
+            step = "verify commit identity"
+            self.git.verify_commit_identity(self.settings.repo_dir)
+
+            step = "verify sudoers logging"
+            self._verify_sudoers_logging()
 
             step = "create worktree"
             branch = f"preflight-{run_id}"

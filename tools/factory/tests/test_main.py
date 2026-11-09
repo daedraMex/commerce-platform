@@ -51,6 +51,9 @@ class FakeGit:
         if self.fetch_error is not None:
             raise self.fetch_error
 
+    def verify_commit_identity(self, repo_dir):
+        self.events.append("verify_commit_identity")
+
     def worktree_exists(self, repo_dir, worktree):
         self.operations.append(("worktree_exists", str(worktree)))
         return str(worktree) in self.existing_worktrees
@@ -211,6 +214,10 @@ def _noop_verify_git_version():
     return None
 
 
+def _noop_verify_sudoers_logging():
+    return None
+
+
 def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, token_provider=None):
     return Factory(
         settings or make_settings(tmp_path),
@@ -222,6 +229,7 @@ def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, tok
         overlay=OVERLAY,
         preflight_verify_isolation=_noop_verify_isolation,
         preflight_verify_git_version=_noop_verify_git_version,
+        preflight_verify_sudoers_logging=_noop_verify_sudoers_logging,
         preflight_clock=lambda: 42,
     )
 

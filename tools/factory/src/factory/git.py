@@ -18,6 +18,38 @@ class GitVersionError(RuntimeError):
     """Raised when the installed git cannot honour the safe.directory glob."""
 
 
+BOT_COMMIT_NAME = "xolo-bot[bot]"
+BOT_COMMIT_EMAIL_DOMAIN = "users.noreply.github.com"
+
+
+class GitIdentityError(RuntimeError):
+    """Raised when the bot commit identity cannot be built or used."""
+
+
+def bot_commit_email(user_id: str) -> str:
+    """Return the noreply email GitHub uses for an app's bot account."""
+    return f"{user_id}+{BOT_COMMIT_NAME}@{BOT_COMMIT_EMAIL_DOMAIN}"
+
+
+def commit_identity_args(user_id: str | None) -> list[str]:
+    """Return the ``git -c`` args that pin the commit identity in code.
+
+    Git identity is machine state; passing it explicitly means a fresh machine
+    with no global ``user.name``/``user.email`` still commits as the bot.
+    """
+    if not user_id:
+        raise GitIdentityError(
+            "XOLO_BOT_USER_ID is not set; the runner needs it to commit as "
+            f"{BOT_COMMIT_NAME} without relying on machine git config."
+        )
+    return [
+        "-c",
+        f"user.name={BOT_COMMIT_NAME}",
+        "-c",
+        f"user.email={bot_commit_email(user_id)}",
+    ]
+
+
 def parse_git_version(text: str) -> tuple[int, ...] | None:
     """Read ``git version X.Y[.Z]`` into a comparable tuple, or ``None``."""
     match = _GIT_VERSION_RE.search(text)
@@ -51,11 +83,13 @@ class Git:
         *,
         agent_user: str | None = None,
         agent_home: str | None = None,
+        bot_user_id: str | None = None,
         base_env: dict[str, str] | None = None,
     ):
         self._run = run
         self._agent_user = agent_user
         self._agent_home = agent_home
+        self._bot_user_id = bot_user_id
         self._base_env = dict(base_env if base_env is not None else os.environ)
 
     def fetch_main(self, repo_dir: Path) -> None:
@@ -88,12 +122,30 @@ class Git:
             raise RuntimeError(f"could not create worktree for {branch}: {result.stderr.strip()}")
         return worktree
 
+    def verify_commit_identity(self, repo_dir: Path) -> None:
+        """Dry-check that git can build the explicit bot identity.
+
+        ``git var`` resolves the author and committer identity without creating
+        a commit or touching a ref, so a machine with no global git identity
+        passes only because the runner supplies one.
+        """
+        identity = commit_identity_args(self._bot_user_id)
+        for variable in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
+            result = self._run(["git", *identity, "var", variable], str(repo_dir), timeout=60)
+            if result.exit_code != 0:
+                raise GitIdentityError(
+                    f"git cannot build the {BOT_COMMIT_NAME} commit identity: "
+                    f"{result.stderr.strip() or result.exit_code}"
+                )
+
     def commit_all(self, worktree: Path, message: str) -> bool:
         """Stage and commit everything; return False when there was nothing to commit."""
+        identity = commit_identity_args(self._bot_user_id)
         self._run(["git", "add", "-A"], str(worktree), timeout=120)
         result = self._run(
             [
                 "git",
+                *identity,
                 "-c",
                 "core.hooksPath=/dev/null",
                 "commit",

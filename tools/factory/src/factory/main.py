@@ -31,6 +31,7 @@ from .pr_body import build_pr_body
 from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, read_command_body
 from .runner import AgentRunner
+from .sudoers import verify_sudoers_logging
 from .tickets import Ticket, branch_name, select_tickets, worktree_path
 
 DECISIONS_FILE = "DECISIONS.md"
@@ -68,6 +69,7 @@ class Factory:
         overlay: str,
         preflight_verify_isolation=verify_isolation,
         preflight_verify_git_version=verify_git_version,
+        preflight_verify_sudoers_logging=verify_sudoers_logging,
         preflight_clock=None,
     ):
         self.settings = settings
@@ -79,6 +81,7 @@ class Factory:
         self.overlay = overlay
         self._preflight_verify_isolation = preflight_verify_isolation
         self._preflight_verify_git_version = preflight_verify_git_version
+        self._preflight_verify_sudoers_logging = preflight_verify_sudoers_logging
         self._preflight_clock = preflight_clock
 
     def run(self) -> list[TicketResult]:
@@ -107,6 +110,7 @@ class Factory:
             clock=self._preflight_clock,
             verify_isolation_fn=self._preflight_verify_isolation,
             verify_git_version_fn=self._preflight_verify_git_version,
+            verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
         ).run()
 
     def _remove_stale_ticket_worktree(self, worktree: Path, branch: str) -> None:
@@ -369,11 +373,11 @@ def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> F
         git=Git(
             agent_user=settings.agent_user,
             agent_home=settings.agent_home,
+            bot_user_id=settings.github_user_id,
         ),
         runner=AgentRunner(
             agent_user=settings.agent_user,
             agent_home=settings.agent_home,
-            provider_env_vars=settings.provider_env_vars,
         ),
         notifier=notifier or _build_notifier(settings),
         token_provider=_build_token_provider(settings),
