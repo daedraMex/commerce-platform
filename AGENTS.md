@@ -56,6 +56,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   Authorizer port, not only in views.
 - Never delete products or orders; use is_active or status.
 - Every API error is an RFC 9457 problem details response with a stable `code`.
+- OpenAPI examples are fixed literal values, never read from settings or the
+  environment, so the generated schema is deterministic.
 - The media bucket holds public product media only; never store private files
   (invoices, customer documents) in it.
 - Never upload a supplier's watermarked image; every catalog image is our own photo.
