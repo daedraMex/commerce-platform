@@ -1,0 +1,9 @@
+Matching Defaults entries for factory on factory-host:
+    env_reset, mail_badpass,
+    secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin\:/snap/bin,
+    use_pty, log_allowed
+
+User factory may run the following commands on factory-host:
+    (factory-agent) NOPASSWD: SETENV: /usr/bin/opencode, /usr/bin/cat,
+        /usr/bin/test,
+        /srv/factory/worktrees/*/backend/scripts/check.sh

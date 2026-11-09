@@ -25,6 +25,7 @@ TEST_SETTINGS = {
     "DEBUG": "False",
     "ALLOWED_HOSTS": "localhost,127.0.0.1",
     "REDIS_URL": "redis://localhost:6379/0",
+    "PYTEST_ADDOPTS": "-p no:cacheprovider",
 }
 
 
@@ -66,16 +67,16 @@ def build_agent_env(
     config_path: str,
     agent_user: str | None,
     agent_home: str | None,
-    provider_vars: tuple[str, ...],
 ) -> dict[str, str]:
-    """Build the explicit environment the agent subprocess receives."""
+    """Build the explicit environment the agent subprocess receives.
+
+    The model provider key is deliberately absent: the agent holds it in its
+    own OpenCode auth store, so it never crosses the sudo boundary (and never
+    appears in the journal).
+    """
     env = {"OPENCODE_CONFIG": config_path}
     env.update(_allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home))
     env.update(TEST_SETTINGS)
-    for name in provider_vars:
-        value = base_env.get(name)
-        if value:
-            env[name] = value
     return env
 
 
@@ -118,13 +119,11 @@ class AgentRunner:
         *,
         agent_user: str | None = None,
         agent_home: str | None = None,
-        provider_env_vars: tuple[str, ...] = (),
         base_env: dict[str, str] | None = None,
     ):
         self._run = run
         self.agent_user = agent_user
         self.agent_home = agent_home
-        self.provider_env_vars = provider_env_vars
         self.base_env = dict(base_env if base_env is not None else os.environ)
 
     def run(
@@ -140,7 +139,6 @@ class AgentRunner:
             config_path=str(worktree / OPENCODE_CONFIG_PATH),
             agent_user=self.agent_user,
             agent_home=self.agent_home,
-            provider_vars=self.provider_env_vars,
         )
         argv: list[str] = [OPENCODE_BIN, "run", "--model", model, prompt]
         if self.agent_user:

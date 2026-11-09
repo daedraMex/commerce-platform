@@ -1,8 +1,11 @@
+from pathlib import Path
+
 from factory.prompt import compose_prompt, read_command_body
 from factory.tickets import Ticket
 
 COMMAND = "Read .agents/skills/implement/SKILL.md and follow it.\n\n$ARGUMENTS"
 OVERLAY = "Branch: {{BRANCH}} Model: {{MODEL}}"
+PROMPT_OVERLAY = Path(__file__).resolve().parents[1] / "prompt.md"
 
 
 def test_read_command_body_strips_frontmatter():
@@ -65,3 +68,12 @@ def test_compose_prompt_omits_feedback_when_empty():
         overlay=OVERLAY,
     )
     assert "check.sh is still failing" not in prompt
+
+
+def test_overlay_tells_the_agent_not_to_commit():
+    text = PROMPT_OVERLAY.read_text()
+
+    assert "Do not commit." in text
+    assert "Leave your changes in the worktree; the runner commits them." in text
+    assert "Commit your work" not in text
+    assert "before you commit" not in text

@@ -2,6 +2,7 @@ from pathlib import PurePosixPath
 
 from factory.tickets import (
     Ticket,
+    branch_from_worktree_dir_name,
     branch_name,
     is_ready,
     parse_blocked_by,
@@ -96,6 +97,11 @@ def test_worktree_path_is_flat_and_matches_the_sudoers_glob(tmp_path):
 def test_worktree_path_rejects_a_nested_branch_component(tmp_path):
     worktrees = tmp_path / "worktrees"
     assert "/" not in worktree_path(worktrees, "nf/46-slug").name
+
+
+def test_branch_from_worktree_dir_name_recovers_factory_branches():
+    assert branch_from_worktree_dir_name("nf-46-add-dark-mode") == "nf/46-add-dark-mode"
+    assert branch_from_worktree_dir_name("preflight-42") == "preflight-42"
 
 
 def test_is_ready_requires_ready_label():

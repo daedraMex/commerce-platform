@@ -51,13 +51,19 @@ class FakeGit:
         if self.fetch_error is not None:
             raise self.fetch_error
 
+    def verify_commit_identity(self, repo_dir):
+        self.events.append("verify_commit_identity")
+
+    def verify_no_leaked_worktrees(self, repo_dir, worktrees_dir):
+        self.events.append("verify_no_leaked_worktrees")
+
     def worktree_exists(self, repo_dir, worktree):
         self.operations.append(("worktree_exists", str(worktree)))
         return str(worktree) in self.existing_worktrees
 
     def branch_exists(self, repo_dir, branch):
         self.operations.append(("branch_exists", branch))
-        return branch in self.existing_branches
+        return branch in self.existing_branches or branch.startswith("preflight-")
 
     def create_worktree(self, repo_dir, worktree, branch):
         self.events.append("create_worktree")
@@ -65,7 +71,7 @@ class FakeGit:
         self.worktrees.append((branch, worktree))
         return worktree
 
-    def remove_worktree(self, repo_dir, worktree):
+    def remove_worktree(self, repo_dir, worktree, worktrees_dir):
         self.events.append("remove_worktree")
         self.operations.append(("remove_worktree", str(worktree)))
         self.removed_worktrees.append(worktree)
@@ -74,6 +80,10 @@ class FakeGit:
         self.events.append("delete_branch")
         self.operations.append(("delete_branch", branch))
         self.deleted_branches.append(branch)
+
+    def create_agent_cleanup_probe(self, worktree):
+        self.events.append("create_agent_cleanup_probe")
+        return worktree / "backend" / ".cleanup-probe"
 
     def write_file(self, worktree, relpath, content):
         return None
@@ -211,6 +221,10 @@ def _noop_verify_git_version():
     return None
 
 
+def _noop_verify_sudoers_logging():
+    return None
+
+
 def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, token_provider=None):
     return Factory(
         settings or make_settings(tmp_path),
@@ -222,6 +236,7 @@ def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, tok
         overlay=OVERLAY,
         preflight_verify_isolation=_noop_verify_isolation,
         preflight_verify_git_version=_noop_verify_git_version,
+        preflight_verify_sudoers_logging=_noop_verify_sudoers_logging,
         preflight_clock=lambda: 42,
     )
 

@@ -18,6 +18,7 @@ from .git import Git, verify_git_version
 from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
 from .notify import Notifier, RunFailedInfo
+from .sudoers import verify_sudoers_logging
 from .tickets import Ticket, worktree_path
 
 MAX_ERROR_CHARS = 300
@@ -52,6 +53,7 @@ class Preflight:
         clock: Callable[[], int] | None = None,
         verify_isolation_fn: Callable[..., None] = verify_isolation,
         verify_git_version_fn: Callable[[], None] = verify_git_version,
+        verify_sudoers_logging_fn: Callable[[], None] = verify_sudoers_logging,
     ):
         self.settings = settings
         self.git = git
@@ -61,6 +63,7 @@ class Preflight:
         self._clock = clock or (lambda: int(time.time()))
         self._verify_isolation = verify_isolation_fn
         self._verify_git_version = verify_git_version_fn
+        self._verify_sudoers_logging = verify_sudoers_logging_fn
 
     def run(self) -> list[Ticket]:
         run_id = str(self._clock())
@@ -86,6 +89,15 @@ class Preflight:
             step = "verify git version"
             self._verify_git_version()
 
+            step = "verify commit identity"
+            self.git.verify_commit_identity(self.settings.repo_dir)
+
+            step = "verify sudoers logging"
+            self._verify_sudoers_logging()
+
+            step = "verify worktrees directory"
+            self.git.verify_no_leaked_worktrees(self.settings.repo_dir, self.settings.worktrees_dir)
+
             step = "create worktree"
             branch = f"preflight-{run_id}"
             worktree = worktree_path(self.settings.worktrees_dir, branch)
@@ -96,6 +108,15 @@ class Preflight:
             if not passed:
                 self._write_check_log(log_path, output)
                 raise RuntimeError(f"check.sh failed; see {log_path}")
+
+            step = "verify worktree cleanup"
+            probe = self.git.create_agent_cleanup_probe(worktree)
+            doomed_worktree, doomed_branch = worktree, branch
+            worktree = None
+            branch = None
+            self._cleanup(doomed_worktree, doomed_branch)
+            if doomed_worktree.exists() or probe.exists():
+                raise RuntimeError(f"worktree cleanup left files behind at {doomed_worktree}")
 
             return tickets
         except PreflightError:
@@ -115,12 +136,6 @@ class Preflight:
 
     def _cleanup(self, worktree, branch) -> None:
         if worktree is not None:
-            try:
-                self.git.remove_worktree(self.settings.repo_dir, worktree)
-            except Exception:
-                pass
-        if branch is not None:
-            try:
-                self.git.delete_branch(self.settings.repo_dir, branch)
-            except Exception:
-                pass
+            self.git.remove_worktree(self.settings.repo_dir, worktree, self.settings.worktrees_dir)
+        if branch is not None and self.git.branch_exists(self.settings.repo_dir, branch):
+            self.git.delete_branch(self.settings.repo_dir, branch)

@@ -36,14 +36,13 @@ def test_build_agent_env_allowlists_only_known_vars():
         config_path="/work/tools/factory/opencode.factory.json",
         agent_user="factory-agent",
         agent_home="/home/factory-agent",
-        provider_vars=("DEEPSEEK_API_KEY",),
     )
     assert env["OPENCODE_CONFIG"] == "/work/tools/factory/opencode.factory.json"
     assert env["PATH"] == "/usr/bin"
     assert env["HOME"] == "/home/factory-agent"
     assert env["LANG"] == "en_US.UTF-8"
     assert env["DATABASE_URL"] == "postgres://db"
-    assert env["DEEPSEEK_API_KEY"] == "dk-123"
+    assert "DEEPSEEK_API_KEY" not in env
     assert "GH_TOKEN" not in env
     assert "TELEGRAM_TOKEN" not in env
     assert {name: env[name] for name in TEST_SETTINGS} == TEST_SETTINGS
@@ -57,7 +56,6 @@ def test_build_agent_env_defaults_home_to_agent_user():
         config_path="c",
         agent_user="factory-agent",
         agent_home=None,
-        provider_vars=(),
     )
     assert env["HOME"] == "/home/factory-agent"
 
@@ -93,6 +91,7 @@ def test_check_env_uses_the_values_matching_ci():
         "DEBUG": "False",
         "ALLOWED_HOSTS": "localhost,127.0.0.1",
         "REDIS_URL": "redis://localhost:6379/0",
+        "PYTEST_ADDOPTS": "-p no:cacheprovider",
     }
 
 
@@ -137,7 +136,6 @@ def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
     runner = AgentRunner(
         run=recorder,
         agent_user="factory-agent",
-        provider_env_vars=("DEEPSEEK_API_KEY",),
         base_env={
             "PATH": "/usr/bin",
             "HOME": "/home/factory",
@@ -154,7 +152,7 @@ def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
         "sudo",
         "-n",
         "--preserve-env=OPENCODE_CONFIG,PATH,HOME,LANG,DATABASE_URL,"
-        "SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL,DEEPSEEK_API_KEY",
+        "SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL,PYTEST_ADDOPTS",
         "-u",
         "factory-agent",
         "--",
@@ -166,7 +164,7 @@ def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
     ]
     assert replace_env is True
     assert "GH_TOKEN" not in env
-    assert env["DEEPSEEK_API_KEY"] == "dk"
+    assert "DEEPSEEK_API_KEY" not in env
     assert env["OPENCODE_CONFIG"].endswith("tools/factory/opencode.factory.json")
 
 

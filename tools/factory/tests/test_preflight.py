@@ -9,17 +9,38 @@ from factory.tickets import Ticket
 
 class FakeGit:
     def __init__(
-        self, *, check_passed=True, check_output="check output", fetch_error=None, events=None
+        self,
+        *,
+        check_passed=True,
+        check_output="check output",
+        fetch_error=None,
+        identity_error=None,
+        remove_error=None,
+        leaked_error=None,
+        events=None,
     ):
         self.check_passed = check_passed
         self.check_output = check_output
         self.fetch_error = fetch_error
+        self.identity_error = identity_error
+        self.remove_error = remove_error
+        self.leaked_error = leaked_error
         self.calls = events if events is not None else []
 
     def fetch_main(self, repo_dir):
         self.calls.append(("fetch_main", repo_dir))
         if self.fetch_error is not None:
             raise self.fetch_error
+
+    def verify_commit_identity(self, repo_dir):
+        self.calls.append(("verify_commit_identity", repo_dir))
+        if self.identity_error is not None:
+            raise self.identity_error
+
+    def verify_no_leaked_worktrees(self, repo_dir, worktrees_dir):
+        self.calls.append(("verify_no_leaked_worktrees", worktrees_dir))
+        if self.leaked_error is not None:
+            raise self.leaked_error
 
     def create_worktree(self, repo_dir, worktree, branch):
         self.calls.append(("create_worktree", worktree, branch))
@@ -29,8 +50,17 @@ class FakeGit:
         self.calls.append(("check", worktree))
         return (self.check_passed, self.check_output)
 
-    def remove_worktree(self, repo_dir, worktree):
+    def create_agent_cleanup_probe(self, worktree):
+        self.calls.append(("create_agent_cleanup_probe", worktree))
+        return worktree / "backend" / ".cleanup-probe"
+
+    def remove_worktree(self, repo_dir, worktree, worktrees_dir):
         self.calls.append(("remove_worktree", worktree))
+        if self.remove_error is not None:
+            raise self.remove_error
+
+    def branch_exists(self, repo_dir, branch):
+        return True
 
     def delete_branch(self, repo_dir, branch):
         self.calls.append(("delete_branch", branch))
@@ -99,6 +129,9 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
     def verify_git_version():
         verified.append(("verify_git_version",))
 
+    def verify_sudoers_logging():
+        verified.append(("verify_sudoers_logging",))
+
     return Preflight(
         settings,
         git=git or FakeGit(events=events),
@@ -108,6 +141,7 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
         clock=lambda: 42,
         verify_isolation_fn=verify_isolation,
         verify_git_version_fn=verify_git_version,
+        verify_sudoers_logging_fn=verify_sudoers_logging,
     )
 
 
@@ -125,16 +159,21 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
         "fetch_main",
         "verify_isolation",
         "verify_git_version",
+        "verify_commit_identity",
+        "verify_sudoers_logging",
+        "verify_no_leaked_worktrees",
         "create_worktree",
         "check",
+        "create_agent_cleanup_probe",
         "remove_worktree",
         "delete_branch",
     ]
-    assert events[3] == (
+    assert events[6] == (
         "create_worktree",
         Path(tmp_path / "worktrees" / "preflight-42"),
         "preflight-42",
     )
+    assert events[3] == ("verify_commit_identity", tmp_path / "repo")
     assert events[1][1]["repo_dir"] == tmp_path / "repo"
 
 
@@ -211,9 +250,70 @@ def test_preflight_stops_before_creating_a_worktree_when_isolation_fails(tmp_pat
         clock=lambda: 42,
         verify_isolation_fn=failing_isolation,
         verify_git_version_fn=lambda: None,
+        verify_sudoers_logging_fn=lambda: None,
     )
 
     with pytest.raises(PreflightError, match="verify isolation"):
         preflight.run()
 
     assert [call[0] for call in git.calls] == ["fetch_main"]
+
+
+def test_preflight_stops_before_creating_a_worktree_when_sudoers_would_log(tmp_path):
+    git = FakeGit()
+
+    def failing_sudoers():
+        raise RuntimeError("missing Defaults:factory !log_allowed")
+
+    preflight = Preflight(
+        make_settings(tmp_path),
+        git=git,
+        github=FakeGitHub(),
+        notifier=RecordingNotifier(),
+        token_provider=FakeTokenProvider(),
+        clock=lambda: 42,
+        verify_isolation_fn=lambda **_kwargs: None,
+        verify_git_version_fn=lambda: None,
+        verify_sudoers_logging_fn=failing_sudoers,
+    )
+
+    with pytest.raises(PreflightError, match="verify sudoers logging"):
+        preflight.run()
+
+    assert [call[0] for call in git.calls] == ["fetch_main", "verify_commit_identity"]
+
+
+def test_preflight_stops_before_creating_a_worktree_when_identity_is_missing(tmp_path):
+    git = FakeGit(identity_error=RuntimeError("XOLO_BOT_USER_ID is not set"))
+    notifier = RecordingNotifier()
+
+    with pytest.raises(PreflightError, match="verify commit identity"):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    assert [call[0] for call in git.calls] == ["fetch_main", "verify_commit_identity"]
+    assert "XOLO_BOT_USER_ID is not set" in notifier.run_failed[0].reason
+
+
+def test_preflight_fails_loudly_when_worktree_cleanup_fails(tmp_path):
+    git = FakeGit(remove_error=RuntimeError("rm: permission denied"))
+    notifier = RecordingNotifier()
+
+    with pytest.raises(PreflightError, match="verify worktree cleanup"):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    assert "rm: permission denied" in notifier.run_failed[0].reason
+    assert [call[0] for call in git.calls][-2:] == [
+        "create_agent_cleanup_probe",
+        "remove_worktree",
+    ]
+
+
+def test_preflight_fails_loudly_on_leftover_worktree_entries(tmp_path):
+    git = FakeGit(leaked_error=RuntimeError("worktrees directory contains nf-66-leftover"))
+    notifier = RecordingNotifier()
+
+    with pytest.raises(PreflightError, match="verify worktrees directory"):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    assert "nf-66-leftover" in notifier.run_failed[0].reason
+    assert [call[0] for call in git.calls][-1] == "verify_no_leaked_worktrees"
