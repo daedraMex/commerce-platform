@@ -8,6 +8,7 @@ from factory.git import (
     parse_git_version,
     verify_git_version,
 )
+from factory.runner import TEST_SETTINGS
 from factory.shell import CommandResult
 
 
@@ -61,7 +62,7 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
     assert argv == [
         "sudo",
         "-n",
-        "--preserve-env=PATH,HOME,LANG,DATABASE_URL",
+        "--preserve-env=PATH,HOME,LANG,DATABASE_URL,SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL",
         "-u",
         "factory-agent",
         "--",
@@ -74,6 +75,7 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
         "HOME": "/home/factory-agent",
         "LANG": "C",
         "DATABASE_URL": "postgres://db",
+        **TEST_SETTINGS,
     }
 
 

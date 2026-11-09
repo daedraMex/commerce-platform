@@ -18,6 +18,15 @@ MAX_CHECK_OUTPUT_CHARS = 4000
 
 BASE_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "DATABASE_URL")
 
+# Fixed, non-secret settings the backend needs to start without a worktree .env.
+# Keep these values in sync with the `backend` job env in .github/workflows/ci.yml.
+TEST_SETTINGS = {
+    "SECRET_KEY": "ci-not-a-secret-change-me-0123456789",
+    "DEBUG": "False",
+    "ALLOWED_HOSTS": "localhost,127.0.0.1",
+    "REDIS_URL": "redis://localhost:6379/0",
+}
+
 
 def sudo_argv(agent_user: str, argv: list[str], env: dict[str, str]) -> list[str]:
     """Wrap ``argv`` in a sudo downgrade that preserves exactly ``env``.
@@ -62,6 +71,7 @@ def build_agent_env(
     """Build the explicit environment the agent subprocess receives."""
     env = {"OPENCODE_CONFIG": config_path}
     env.update(_allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home))
+    env.update(TEST_SETTINGS)
     for name in provider_vars:
         value = base_env.get(name)
         if value:
@@ -78,10 +88,12 @@ def build_check_env(
     """Build the explicit environment the check runner receives.
 
     The check runner executes agent-written code, so it gets only the base
-    allowlist: never the model provider key, the GitHub token or any other
-    secret.
+    allowlist plus the fixed test settings: never the model provider key, the
+    GitHub token or any other secret.
     """
-    return _allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home)
+    env = _allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home)
+    env.update(TEST_SETTINGS)
+    return env
 
 
 def truncate_check_output(output: str, *, limit: int = MAX_CHECK_OUTPUT_CHARS) -> str:
