@@ -6,6 +6,7 @@ import pytest
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
 from factory.main import Factory
+from factory.preflight import PreflightError
 from factory.runner import AgentResult
 from factory.tickets import Ticket
 
@@ -26,6 +27,7 @@ class FakeGit:
         diff=None,
         command_body=COMMAND_BODY,
         fetch_error=None,
+        preflight_check_passed=True,
     ):
         self.check_result = check_passed
         self.check_output = check_output
@@ -33,9 +35,12 @@ class FakeGit:
         self.diff = diff or DiffStats()
         self.command_body = command_body
         self.fetch_error = fetch_error
+        self.preflight_check_passed = preflight_check_passed
         self.committed = []
         self.pushed = []
         self.worktrees = []
+        self.removed_worktrees = []
+        self.deleted_branches = []
         self.events = []
 
     def fetch_main(self, repo_dir):
@@ -48,6 +53,14 @@ class FakeGit:
         self.worktrees.append((branch, worktree))
         return worktree
 
+    def remove_worktree(self, repo_dir, worktree):
+        self.events.append("remove_worktree")
+        self.removed_worktrees.append(worktree)
+
+    def delete_branch(self, repo_dir, branch):
+        self.events.append("delete_branch")
+        self.deleted_branches.append(branch)
+
     def write_file(self, worktree, relpath, content):
         return None
 
@@ -59,6 +72,9 @@ class FakeGit:
         return ""
 
     def check(self, worktree):
+        self.events.append("check")
+        if "preflight" in str(worktree):
+            return (self.preflight_check_passed, "")
         return (self.check_result, self.check_output)
 
     def commit_all(self, worktree, message):
@@ -165,6 +181,14 @@ def make_ticket(number, *, labels=()):
     )
 
 
+def _noop_verify_isolation(**_kwargs):
+    return None
+
+
+def _noop_verify_git_version():
+    return None
+
+
 def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, token_provider=None):
     return Factory(
         settings or make_settings(tmp_path),
@@ -174,6 +198,9 @@ def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, tok
         notifier=notifier,
         token_provider=token_provider or FakeTokenProvider(),
         overlay=OVERLAY,
+        preflight_verify_isolation=_noop_verify_isolation,
+        preflight_verify_git_version=_noop_verify_git_version,
+        preflight_clock=lambda: 42,
     )
 
 
@@ -225,7 +252,39 @@ def test_fetch_failure_aborts_the_run_and_notifies(tmp_path):
     assert git.worktrees == []
     assert github.listed_with is None
     assert len(notifier.run_failed) == 1
-    assert "could not fetch origin/main" in notifier.run_failed[0].reason
+    assert notifier.run_failed[0].reason.startswith("preflight failed: fetch origin/main:")
+    assert "git fetch failed" in notifier.run_failed[0].reason
+
+
+def test_preflight_check_failure_aborts_before_running_a_ticket(tmp_path):
+    git = FakeGit(preflight_check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(tmp_path, git=git, github=github, runner=runner, notifier=notifier)
+
+    with pytest.raises(PreflightError, match="check.sh"):
+        factory.run()
+
+    assert runner.calls == []
+    assert git.committed == []
+    assert len(notifier.run_failed) == 1
+    assert notifier.run_failed[0].reason.startswith("preflight failed: check.sh:")
+    assert git.removed_worktrees
+    assert git.deleted_branches
+
+
+def test_preflight_cleans_up_its_throwaway_worktree_and_branch(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert git.removed_worktrees[0] == git.worktrees[0][1]
+    assert git.deleted_branches == ["preflight-42"]
 
 
 def test_success_labels_migration_when_migrations_changed(tmp_path):
@@ -454,6 +513,46 @@ def test_fix_loop_feeds_check_output_back_to_agent(tmp_path):
     assert len(runner.calls) == 5
     assert "E   AssertionError" not in runner.calls[0]["prompt"]
     assert "E   AssertionError" in runner.calls[1]["prompt"]
+
+
+class FakePreflightFactory:
+    def __init__(self, *, tickets=None, error=None):
+        self.tickets = tickets or []
+        self.error = error
+
+    def run_preflight(self):
+        if self.error is not None:
+            raise self.error
+        return self.tickets
+
+    def run(self):
+        raise AssertionError("the preflight CLI must not run tickets")
+
+
+def test_preflight_cli_reports_success(monkeypatch, capsys, tmp_path):
+    import factory.main as main_module
+
+    fake = FakePreflightFactory(tickets=[make_ticket(7)])
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings: fake)
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+
+    assert main_module.main(["preflight"]) == 0
+    assert "preflight ok (1 tickets listed)" in capsys.readouterr().out
+
+
+def test_preflight_cli_reports_failure_and_exits_nonzero(monkeypatch, capsys, tmp_path):
+    import factory.main as main_module
+
+    fake = FakePreflightFactory(error=PreflightError("check.sh", "check.sh failed"))
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings: fake)
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+
+    assert main_module.main(["preflight"]) == 1
+    assert "preflight failed: check.sh: check.sh failed" in capsys.readouterr().out
 
 
 def test_stuck_keeps_worktree_and_includes_handoff(tmp_path):

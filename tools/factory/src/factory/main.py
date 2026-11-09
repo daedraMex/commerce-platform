@@ -14,19 +14,19 @@ from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_questio
 from .diff import touches_protected_paths
 from .git import Git, verify_git_version
 from .github import GitHub
-from .isolation import sensitive_paths, verify_isolation, write_protected_paths
+from .isolation import verify_isolation
 from .models import select_model
 from .notify import (
     Notifier,
     NullNotifier,
     PrReadyInfo,
-    RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
     build_handoff_command,
 )
 from .outcomes import build_issue_comment
 from .pr_body import build_pr_body
+from .preflight import Preflight, PreflightError
 from .prompt import compose_prompt, read_command_body
 from .runner import AgentRunner
 from .tickets import Ticket, branch_name, select_tickets, worktree_path
@@ -55,6 +55,9 @@ class Factory:
         notifier: Notifier,
         token_provider: TokenProvider,
         overlay: str,
+        preflight_verify_isolation=verify_isolation,
+        preflight_verify_git_version=verify_git_version,
+        preflight_clock=None,
     ):
         self.settings = settings
         self.github = github
@@ -63,15 +66,14 @@ class Factory:
         self.notifier = notifier
         self.token_provider = token_provider
         self.overlay = overlay
+        self._preflight_verify_isolation = preflight_verify_isolation
+        self._preflight_verify_git_version = preflight_verify_git_version
+        self._preflight_clock = preflight_clock
 
     def run(self) -> list[TicketResult]:
         cleanup_old(self.settings.worktrees_dir, keep_days=self.settings.keep_days)
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
-        self._fetch_main_or_abort()
-        token = self.token_provider.mint(self.settings.repo)
-        tickets = select_tickets(
-            self.github.list_tickets(token), max_tickets=self.settings.max_tickets
-        )
+        tickets = select_tickets(self.run_preflight(), max_tickets=self.settings.max_tickets)
         results: list[TicketResult] = []
         for ticket in tickets:
             result = self._run_ticket(ticket)
@@ -80,15 +82,18 @@ class Factory:
                 break
         return results
 
-    def _fetch_main_or_abort(self) -> None:
-        """Refresh origin/main before any worktree branches from it."""
-        try:
-            self.git.fetch_main(self.settings.repo_dir)
-        except Exception as exc:
-            self.notifier.send_run_failed(
-                RunFailedInfo(reason=f"could not fetch origin/main: {exc}")
-            )
-            raise
+    def run_preflight(self) -> list[Ticket]:
+        """Run the real-tool preflight and return the tickets it listed."""
+        return Preflight(
+            self.settings,
+            git=self.git,
+            github=self.github,
+            notifier=self.notifier,
+            token_provider=self.token_provider,
+            clock=self._preflight_clock,
+            verify_isolation_fn=self._preflight_verify_isolation,
+            verify_git_version_fn=self._preflight_verify_git_version,
+        ).run()
 
     def _run_ticket(self, ticket: Ticket) -> TicketResult:
         model = select_model(
@@ -338,16 +343,8 @@ def _load_private_key(value: str | None) -> str | None:
     return value
 
 
-def main(argv: list[str] | None = None) -> int:
-    settings = Settings.from_env()
-    verify_isolation(
-        agent_user=settings.agent_user,
-        paths=sensitive_paths(settings),
-        write_paths=write_protected_paths(settings),
-    )
-    verify_git_version()
-    overlay = read_overlay()
-    factory = Factory(
+def _build_factory(settings: Settings) -> Factory:
+    return Factory(
         settings,
         github=GitHub(settings.repo),
         git=Git(
@@ -361,9 +358,32 @@ def main(argv: list[str] | None = None) -> int:
         ),
         notifier=_build_notifier(settings),
         token_provider=_build_token_provider(settings),
-        overlay=overlay,
+        overlay=read_overlay(),
     )
-    results = factory.run()
+
+
+def preflight_main() -> int:
+    """Run the real-tool preflight by hand and report the result."""
+    factory = _build_factory(Settings.from_env())
+    try:
+        tickets = factory.run_preflight()
+    except PreflightError as exc:
+        print(f"preflight failed: {exc}")
+        return 1
+    print(f"preflight ok ({len(tickets)} tickets listed)")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args and args[0] == "preflight":
+        return preflight_main()
+    factory = _build_factory(Settings.from_env())
+    try:
+        results = factory.run()
+    except PreflightError as exc:
+        print(f"preflight failed: {exc}")
+        return 1
     for result in results:
         outcome = "ok" if result.ok else "stuck"
         print(f"#{result.ticket.number}: {outcome}")

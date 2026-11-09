@@ -289,7 +289,11 @@ Run these once, as the admin user unless a step says `factory`.
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
   `DATABASE_URL`, the model provider vars, and `OPENCODE_CONFIG` — nothing else.
   The check runner gets the same downgrade with only `PATH`, `HOME`, `LANG` and
-  `DATABASE_URL`: no provider key, no GitHub token, no secrets.
+  `DATABASE_URL`, plus a fixed set of non-secret test settings (`SECRET_KEY`,
+  `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`) that match CI's backend job so Django
+  can start without a worktree `.env`: no provider key, no GitHub token, no
+  secrets. The agent gets the same test settings. They are constants in the
+  factory code and are never read from `secrets.env`.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`) and
   a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either stops the
   ticket as stuck and notifies Telegram.
@@ -324,6 +328,26 @@ lines) and the `needs-decision` label. To unblock it:
 2. Answer the open question (or edit the ticket).
 3. Remove `needs-decision`. The next run picks it up again if it is still
    `ready-for-agent`.
+
+## Preflight
+
+Run the preflight first after any machine or factory change, and before the
+first real night:
+```bash
+cd /srv/factory/repo/tools/factory
+set -a; source ~/factory/secrets.env; set +a
+uv run factory preflight
+```
+
+It uses the real tools and the real code paths, not fakes: it fetches
+`origin/main`, lists tickets through the `gh` code path, creates a throwaway
+`preflight-<timestamp>` worktree from the fresh `origin/main`, runs `check.sh`
+in it as `factory-agent` with the real check environment, verifies isolation
+and the git version, then removes the worktree and its branch even on failure.
+Any failed step sends `preflight failed: <step>: <short error>` to Telegram
+(truncated, with no environment values or secrets) and exits non-zero without
+touching a ticket. The nightly run performs the same preflight before selecting
+any ticket.
 
 ## Run once by hand
 

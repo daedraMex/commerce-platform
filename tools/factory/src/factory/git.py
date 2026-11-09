@@ -153,3 +153,6 @@ class Git:
             str(repo_dir),
             timeout=300,
         )
+
+    def delete_branch(self, repo_dir: Path, branch: str) -> None:
+        self._run(["git", "branch", "-D", branch], str(repo_dir), timeout=120)

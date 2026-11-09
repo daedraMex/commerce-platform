@@ -40,6 +40,17 @@ def test_fetch_main_raises_when_the_fetch_fails():
         Git(run=run).fetch_main(Path("/srv/factory/repo"))
 
 
+def test_delete_branch_forces_branch_removal():
+    run = RecordingRun()
+    repo = Path("/srv/factory/repo")
+
+    Git(run=run).delete_branch(repo, "preflight-42")
+
+    assert run.calls == [
+        (["git", "branch", "-D", "preflight-42"], str(repo), None, False),
+    ]
+
+
 def test_check_runs_the_script_as_the_agent_user_without_secrets():
     run = RecordingRun()
     worktree = Path("/srv/factory/worktrees/nf/1")
