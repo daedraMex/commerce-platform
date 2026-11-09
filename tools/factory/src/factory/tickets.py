@@ -49,6 +49,17 @@ def worktree_path(worktrees_dir: Path, branch: str) -> Path:
     return worktrees_dir / worktree_dir_name(branch)
 
 
+def branch_from_worktree_dir_name(name: str) -> str:
+    """Recover a factory branch from its flat worktree directory name.
+
+    Only the factory's own shapes are supported: ``nf/<n>-<slug>`` becomes
+    ``nf-<n>-<slug>`` and ``preflight-<id>`` stays as-is.
+    """
+    if name.startswith("nf-"):
+        return "nf/" + name[len("nf-") :]
+    return name
+
+
 def is_ready(ticket: Ticket) -> bool:
     if READY_LABEL not in ticket.labels:
         return False

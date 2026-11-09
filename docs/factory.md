@@ -35,7 +35,7 @@ The main clone and the worktrees live under `/srv/factory`, outside
 ├── repo/               # clone of daedraMex/commerce-platform (the factory's git source)
 └── worktrees/          # factory:factory-work, mode 2770; one worktree per ticket,
                         # flat dir names: branch nf/46-slug -> nf-46-slug, so the
-                        # sudoers check-script glob matches; cleaned after 14 days
+                        # sudoers check-script and cleanup globs match; cleaned after 14 days
 
 /home/factory/          # factory:factory, mode 700
 ├── logs/               # one log file per ticket run, cleaned after 14 days
@@ -100,11 +100,12 @@ Run these once, as the admin user unless a step says `factory`.
     sudo visudo -c
     ```
 
-    The two `Defaults>factory-agent` lines make every file `factory-agent`
-    creates group-writable, so `factory` can commit and clean up the worktree;
-    `factory.service` sets `UMask=0007` for the same reason in the other
-    direction. The setgid bit on `/srv/factory/worktrees` gives both users the
-    shared `factory-work` group. Git also refuses to operate on a worktree owned
+    The two `Defaults>factory-agent` lines make files `factory-agent` creates
+    through the agent normally group-writable, so `factory` can commit them;
+    files with tighter modes (like `uv`'s 0755/0644 `.venv`) are removed by the
+    agent-owned `rm -rf` cleanup instead. `factory.service` sets `UMask=0007`
+    for the same reason in the other direction. The setgid bit on
+    `/srv/factory/worktrees` gives both users the shared `factory-work` group. Git also refuses to operate on a worktree owned
     by another user, so trust the worktree glob for `factory-agent` (as admin):
     ```bash
     sudo -u factory-agent -H git config --global --add safe.directory '/srv/factory/worktrees/*'
@@ -333,10 +334,12 @@ Run these once, as the admin user unless a step says `factory`.
   not in it: the agent reads its own OpenCode auth store from its home, so the
   key never crosses sudo. The check runner gets the same downgrade with only
   `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret test
-  settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`) that match CI's
-  backend job so Django can start without a worktree `.env`: no provider key,
-  no GitHub token, no secrets. The agent gets the same test settings. They are
-  constants in the factory code and are never read from `secrets.env`.
+  settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`,
+  `PYTEST_ADDOPTS=-p no:cacheprovider`) that match CI's backend job so Django
+  can start without a worktree `.env`: no provider key, no GitHub token, no
+  secrets. The agent gets the same test settings. `PYTEST_ADDOPTS` keeps pytest
+  from writing a cache into the worktree. They are constants in the factory
+  code and are never read from `secrets.env`.
 - **Commit identity.** The runner stages and commits with an explicit
   `-c user.name=xolo-bot[bot] -c user.email=<id>+xolo-bot[bot]@users.noreply.github.com`
   built from `XOLO_BOT_USER_ID`, so it never depends on a machine `git config`.
@@ -363,6 +366,15 @@ Run these once, as the admin user unless a step says `factory`.
   worktree **as `factory-agent`**, with only the base env allowlist; on failure
   it feeds a truncated tail of the output back to the agent and retries, up to
   the step budget.
+- **Worktree cleanup.** Stale and expired worktrees are deleted as their owner
+  with the sudoers-allowed `rm -rf` (direct children only; paths outside the
+  worktrees directory or containing `..` are refused), then `git worktree
+  prune` runs and the local branch is deleted. Every cleanup step checks its
+  exit code and raises, so a failed cleanup stops the run instead of leaving a
+  directory that blocks the next worktree. The preflight also fails if the
+  worktrees directory contains entries that are not live git worktrees, and
+  creates an agent-owned directory with group `factory-agent` and mode `0770`
+  inside the throwaway worktree to prove the same cleanup removes it.
 - **Protected paths.** Before pushing, the factory inspects the diff. If it
   touches `.github/`, `tools/factory/`, `backend/scripts/`, `AGENTS.md`,
   `CLAUDE.md`, `opencode*.json`, `.opencode/` or `.pre-commit-config.yaml`, the
@@ -414,8 +426,11 @@ It uses the real tools and the real code paths, not fakes: it fetches
 `origin/main`, lists tickets through the `gh` code path, creates a throwaway
 `preflight-<timestamp>` worktree from the fresh `origin/main`, runs `check.sh`
 in it as `factory-agent` with the real check environment, verifies isolation,
-the git version, the bot commit identity and the sudoers `!log_allowed` line,
-then removes the worktree and its branch even on failure.
+the git version, the bot commit identity and the effective sudo `!log_allowed`
+policy, fails if the worktrees directory contains entries that are not live git
+worktrees, then proves the cleanup removes an agent-owned
+`factory-agent:factory-agent` 0770 directory and deletes the worktree and
+branch even on failure.
 Any failed step sends `preflight failed: <step>: <short error>` to Telegram
 (truncated, with no environment values or secrets) and exits non-zero without
 touching a ticket. The nightly run performs the same preflight before selecting

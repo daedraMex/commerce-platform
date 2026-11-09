@@ -95,6 +95,9 @@ class Preflight:
             step = "verify sudoers logging"
             self._verify_sudoers_logging()
 
+            step = "verify worktrees directory"
+            self.git.verify_no_leaked_worktrees(self.settings.repo_dir, self.settings.worktrees_dir)
+
             step = "create worktree"
             branch = f"preflight-{run_id}"
             worktree = worktree_path(self.settings.worktrees_dir, branch)
@@ -105,6 +108,15 @@ class Preflight:
             if not passed:
                 self._write_check_log(log_path, output)
                 raise RuntimeError(f"check.sh failed; see {log_path}")
+
+            step = "verify worktree cleanup"
+            probe = self.git.create_agent_cleanup_probe(worktree)
+            doomed_worktree, doomed_branch = worktree, branch
+            worktree = None
+            branch = None
+            self._cleanup(doomed_worktree, doomed_branch)
+            if doomed_worktree.exists() or probe.exists():
+                raise RuntimeError(f"worktree cleanup left files behind at {doomed_worktree}")
 
             return tickets
         except PreflightError:
@@ -124,12 +136,6 @@ class Preflight:
 
     def _cleanup(self, worktree, branch) -> None:
         if worktree is not None:
-            try:
-                self.git.remove_worktree(self.settings.repo_dir, worktree)
-            except Exception:
-                pass
-        if branch is not None:
-            try:
-                self.git.delete_branch(self.settings.repo_dir, branch)
-            except Exception:
-                pass
+            self.git.remove_worktree(self.settings.repo_dir, worktree, self.settings.worktrees_dir)
+        if branch is not None and self.git.branch_exists(self.settings.repo_dir, branch):
+            self.git.delete_branch(self.settings.repo_dir, branch)

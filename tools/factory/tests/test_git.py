@@ -4,13 +4,16 @@ import pytest
 
 from factory.git import (
     BOT_COMMIT_NAME,
+    CLEANUP_PROBE_SCRIPT,
     Git,
     GitIdentityError,
     GitVersionError,
+    WorktreeCleanupError,
     bot_commit_email,
     commit_identity_args,
     parse_git_version,
     verify_git_version,
+    worktree_cleanup_path,
 )
 from factory.runner import TEST_SETTINGS
 from factory.shell import CommandResult
@@ -24,6 +27,16 @@ class RecordingRun:
     def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
         self.calls.append((argv, cwd, env, replace_env))
         return self.result
+
+
+class SequenceRun:
+    def __init__(self, results):
+        self.results = list(results)
+        self.calls = []
+
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        self.calls.append((argv, cwd, env, replace_env))
+        return self.results.pop(0)
 
 
 def test_fetch_main_fetches_from_origin():
@@ -88,6 +101,187 @@ def test_delete_branch_forces_branch_removal():
     ]
 
 
+def test_delete_branch_raises_a_clear_error_on_failure():
+    run = RecordingRun(CommandResult(1, "", "error: branch 'nf/7-x' not found"))
+
+    with pytest.raises(WorktreeCleanupError, match="could not delete local branch"):
+        Git(run=run).delete_branch(Path("/srv/factory/repo"), "nf/7-x")
+
+
+def test_worktree_cleanup_path_accepts_a_direct_child(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    worktree = worktrees / "nf-7-x"
+
+    assert worktree_cleanup_path(worktrees, worktree) == worktree.resolve()
+
+
+def test_worktree_cleanup_path_refuses_a_path_outside_the_worktrees_dir(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    outside = tmp_path / "repo" / "nf-7-x"
+
+    with pytest.raises(WorktreeCleanupError, match="direct child"):
+        worktree_cleanup_path(worktrees, outside)
+
+
+def test_worktree_cleanup_path_refuses_a_path_containing_dotdot(tmp_path):
+    worktrees = tmp_path / "worktrees"
+
+    with pytest.raises(WorktreeCleanupError, match="contains '\\.\\.'"):
+        worktree_cleanup_path(worktrees, worktrees / ".." / "repo")
+
+
+def test_remove_worktree_deletes_as_the_agent_then_prunes(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    worktree = worktrees / "nf-7-x"
+    repo = tmp_path / "repo"
+    run = SequenceRun([CommandResult(0, "", ""), CommandResult(0, "", "")])
+
+    Git(run=run, agent_user="factory-agent").remove_worktree(repo, worktree, worktrees)
+
+    target = worktree.resolve()
+    assert run.calls == [
+        (
+            ["sudo", "-n", "-u", "factory-agent", "--", "/usr/bin/rm", "-rf", str(target)],
+            "/",
+            None,
+            False,
+        ),
+        (["git", "worktree", "prune"], str(repo), None, False),
+    ]
+
+
+def test_remove_worktree_raises_when_the_agent_cannot_delete(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    run = SequenceRun([CommandResult(1, "", "rm: cannot remove: Permission denied")])
+
+    with pytest.raises(WorktreeCleanupError, match="could not delete worktree"):
+        Git(run=run, agent_user="factory-agent").remove_worktree(
+            tmp_path / "repo", worktrees / "nf-7-x", worktrees
+        )
+
+    assert len(run.calls) == 1
+
+
+def test_remove_worktree_raises_when_prune_fails(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    run = SequenceRun([CommandResult(0, "", ""), CommandResult(1, "", "fatal: prune failed")])
+
+    with pytest.raises(WorktreeCleanupError, match="worktree prune failed"):
+        Git(run=run, agent_user="factory-agent").remove_worktree(
+            tmp_path / "repo", worktrees / "nf-7-x", worktrees
+        )
+
+
+def test_remove_worktree_requires_the_agent_user(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    run = RecordingRun()
+
+    with pytest.raises(WorktreeCleanupError, match="FACTORY_AGENT_USER"):
+        Git(run=run).remove_worktree(tmp_path / "repo", worktrees / "nf-7-x", worktrees)
+
+    assert run.calls == []
+
+
+def test_create_agent_cleanup_probe_uses_the_check_script_as_agent(tmp_path):
+    worktree = tmp_path / "worktrees" / "nf-7-x"
+    scripts = worktree / "backend" / "scripts"
+    scripts.mkdir(parents=True)
+    check = scripts / "check.sh"
+    check.write_text("#!/bin/sh\n")
+    probe = worktree / "backend" / ".cleanup-probe"
+    run = RecordingRun()
+
+    result = Git(
+        run=run,
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        base_env={"PATH": "/usr/bin", "HOME": "/home/factory", "LANG": "C"},
+    ).create_agent_cleanup_probe(worktree)
+
+    assert result == probe
+    assert check.read_text() == CLEANUP_PROBE_SCRIPT
+    assert check.stat().st_mode & 0o777 == 0o755
+    argv, cwd, env, replace_env = run.calls[0]
+    assert argv == [
+        "sudo",
+        "-n",
+        "--preserve-env=PATH,HOME,LANG,SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL,PYTEST_ADDOPTS",
+        "-u",
+        "factory-agent",
+        "--",
+        str(check),
+    ]
+    assert cwd == str(scripts)
+    assert replace_env is True
+    assert env["HOME"] == "/home/factory-agent"
+    assert env["PYTEST_ADDOPTS"] == "-p no:cacheprovider"
+    assert "mkdir -m 0770" in CLEANUP_PROBE_SCRIPT
+    assert "chgrp" in CLEANUP_PROBE_SCRIPT
+    assert 'mv "$probe" "$worktree/backend/.cleanup-probe"' in CLEANUP_PROBE_SCRIPT
+
+
+def test_create_agent_cleanup_probe_raises_on_failure(tmp_path):
+    worktree = tmp_path / "worktrees" / "nf-7-x"
+    (worktree / "backend" / "scripts").mkdir(parents=True)
+    run = RecordingRun(CommandResult(1, "", "probe failed"))
+
+    with pytest.raises(WorktreeCleanupError, match="could not create the cleanup probe"):
+        Git(run=run, agent_user="factory-agent").create_agent_cleanup_probe(worktree)
+
+
+def test_create_agent_cleanup_probe_requires_the_agent_user(tmp_path):
+    run = RecordingRun()
+
+    with pytest.raises(WorktreeCleanupError, match="FACTORY_AGENT_USER"):
+        Git(run=run).create_agent_cleanup_probe(tmp_path / "worktrees" / "nf-7-x")
+
+    assert run.calls == []
+
+
+def test_verify_no_leaked_worktrees_accepts_only_live_entries(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    live = worktrees / "nf-7-x"
+    leaked = worktrees / "nf-6-old"
+    live.mkdir(parents=True)
+    leaked.mkdir()
+    stdout = f"worktree {live.resolve()}\nbranch refs/heads/nf/7-x\n"
+    run = RecordingRun(CommandResult(0, stdout, ""))
+
+    with pytest.raises(WorktreeCleanupError, match="nf-6-old"):
+        Git(run=run).verify_no_leaked_worktrees(tmp_path / "repo", worktrees)
+
+
+def test_verify_no_leaked_worktrees_passes_when_every_entry_is_live(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    live = worktrees / "nf-7-x"
+    live.mkdir(parents=True)
+    stdout = f"worktree {live.resolve()}\nbranch refs/heads/nf/7-x\n"
+    run = RecordingRun(CommandResult(0, stdout, ""))
+
+    Git(run=run).verify_no_leaked_worktrees(tmp_path / "repo", worktrees)
+
+
+def test_verify_no_leaked_worktrees_raises_when_listing_fails(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    worktrees.mkdir()
+    run = RecordingRun(CommandResult(1, "", "not a git repository"))
+
+    with pytest.raises(WorktreeCleanupError, match="could not list git worktrees"):
+        Git(run=run).verify_no_leaked_worktrees(tmp_path / "repo", worktrees)
+
+
+def test_live_worktree_paths_parses_the_porcelain_list(tmp_path):
+    first = tmp_path / "repo"
+    second = tmp_path / "worktrees" / "nf-7-x"
+    stdout = (
+        f"worktree {first}\nHEAD abc\nbranch refs/heads/main\n\n"
+        f"worktree {second}\nHEAD def\nbranch refs/heads/nf/7-x\n"
+    )
+    run = RecordingRun(CommandResult(0, stdout, ""))
+
+    assert Git(run=run).live_worktree_paths(first) == {first.resolve(), second.resolve()}
+
+
 def test_check_runs_the_script_as_the_agent_user_without_secrets():
     run = RecordingRun()
     worktree = Path("/srv/factory/worktrees/nf/1")
@@ -110,7 +304,7 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
     assert argv == [
         "sudo",
         "-n",
-        "--preserve-env=PATH,HOME,LANG,DATABASE_URL,SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL",
+        "--preserve-env=PATH,HOME,LANG,DATABASE_URL,SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL,PYTEST_ADDOPTS",
         "-u",
         "factory-agent",
         "--",

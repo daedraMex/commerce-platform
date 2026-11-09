@@ -25,6 +25,7 @@ TEST_SETTINGS = {
     "DEBUG": "False",
     "ALLOWED_HOSTS": "localhost,127.0.0.1",
     "REDIS_URL": "redis://localhost:6379/0",
+    "PYTEST_ADDOPTS": "-p no:cacheprovider",
 }
 
 

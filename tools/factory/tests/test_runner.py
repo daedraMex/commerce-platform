@@ -91,6 +91,7 @@ def test_check_env_uses_the_values_matching_ci():
         "DEBUG": "False",
         "ALLOWED_HOSTS": "localhost,127.0.0.1",
         "REDIS_URL": "redis://localhost:6379/0",
+        "PYTEST_ADDOPTS": "-p no:cacheprovider",
     }
 
 
@@ -151,7 +152,7 @@ def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
         "sudo",
         "-n",
         "--preserve-env=OPENCODE_CONFIG,PATH,HOME,LANG,DATABASE_URL,"
-        "SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL",
+        "SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL,PYTEST_ADDOPTS",
         "-u",
         "factory-agent",
         "--",

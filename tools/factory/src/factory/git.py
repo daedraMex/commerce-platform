@@ -20,10 +20,51 @@ class GitVersionError(RuntimeError):
 
 BOT_COMMIT_NAME = "xolo-bot[bot]"
 BOT_COMMIT_EMAIL_DOMAIN = "users.noreply.github.com"
+RM_BIN = "/usr/bin/rm"
+CHECK_SCRIPT_RELATIVE = Path("backend") / "scripts" / "check.sh"
+CLEANUP_PROBE_RELATIVE = Path("backend") / ".cleanup-probe"
+CLEANUP_PROBE_SCRIPT = """#!/usr/bin/env bash
+set -euo pipefail
+worktree="$(cd "$(dirname "$0")/../.." && pwd)"
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+probe="$tmp/.cleanup-probe"
+mkdir -m 0770 "$probe"
+chgrp "$(id -gn)" "$probe"
+chmod 0770 "$probe"
+printf 'cleanup probe\\n' > "$probe/file"
+chmod 0644 "$probe/file"
+mv "$probe" "$worktree/backend/.cleanup-probe"
+"""
 
 
 class GitIdentityError(RuntimeError):
     """Raised when the bot commit identity cannot be built or used."""
+
+
+class WorktreeCleanupError(RuntimeError):
+    """Raised when a worktree or branch cannot be cleaned up."""
+
+
+def worktree_cleanup_path(worktrees_dir: Path, worktree: Path) -> Path:
+    """Return the resolved path, refusing anything but a direct child.
+
+    The sudoers rule only allows ``rm -rf`` on direct children of the
+    worktrees directory; this check mirrors that rule in code so a bad path
+    never reaches sudo.
+    """
+    if ".." in worktree.parts:
+        raise WorktreeCleanupError(f"refusing to remove {worktree}: path contains '..'.")
+    try:
+        base = worktrees_dir.resolve()
+        target = worktree.resolve()
+    except OSError as exc:
+        raise WorktreeCleanupError(f"could not resolve worktree path {worktree}: {exc}") from exc
+    if target == base or target.parent != base:
+        raise WorktreeCleanupError(
+            f"refusing to remove {target}: it is not a direct child of {base}."
+        )
+    return target
 
 
 def bot_commit_email(user_id: str) -> str:
@@ -103,6 +144,32 @@ class Git:
             return False
         target = f"worktree {worktree}"
         return any(line.strip() == target for line in result.stdout.splitlines())
+
+    def live_worktree_paths(self, repo_dir: Path) -> set[Path]:
+        """Return every path ``git worktree list`` reports as live."""
+        result = self._run(["git", "worktree", "list", "--porcelain"], str(repo_dir), timeout=120)
+        if result.exit_code != 0:
+            raise WorktreeCleanupError(
+                f"could not list git worktrees: {result.stderr.strip() or result.exit_code}"
+            )
+        return {
+            Path(line[len("worktree ") :]).resolve()
+            for line in result.stdout.splitlines()
+            if line.startswith("worktree ")
+        }
+
+    def verify_no_leaked_worktrees(self, repo_dir: Path, worktrees_dir: Path) -> None:
+        """Fail if the worktrees directory has entries git does not know about."""
+        if not worktrees_dir.exists():
+            return
+        live = self.live_worktree_paths(repo_dir)
+        leaked = sorted(entry for entry in worktrees_dir.iterdir() if entry.resolve() not in live)
+        if leaked:
+            shown = ", ".join(str(entry) for entry in leaked)
+            raise WorktreeCleanupError(
+                "the worktrees directory contains entries that are not live git worktrees: "
+                f"{shown}. Remove them before running the factory."
+            )
 
     def branch_exists(self, repo_dir: Path, branch: str) -> bool:
         result = self._run(
@@ -216,12 +283,75 @@ class Git:
         path = worktree / relpath
         path.write_text(content)
 
-    def remove_worktree(self, repo_dir: Path, worktree: Path) -> None:
-        self._run(
-            ["git", "worktree", "remove", "--force", str(worktree)],
-            str(repo_dir),
+    def create_agent_cleanup_probe(self, worktree: Path) -> Path:
+        """Create an agent-owned 0770 directory inside ``worktree``.
+
+        The allowed ``check.sh`` path is used as a one-shot trampoline: it
+        creates the probe in a temp dir (so its group is ``factory-agent``, not
+        the worktree's setgid group) and renames it into the worktree, exactly
+        like pytest's cache. This must run after the real check script.
+        """
+        if not self._agent_user:
+            raise WorktreeCleanupError(
+                "FACTORY_AGENT_USER is not set; cannot create the cleanup probe as the agent."
+            )
+        probe_dir = worktree / CLEANUP_PROBE_RELATIVE
+        script_path = worktree / CHECK_SCRIPT_RELATIVE
+        script_path.write_text(CLEANUP_PROBE_SCRIPT)
+        script_path.chmod(0o755)
+        env = build_check_env(
+            self._base_env,
+            agent_user=self._agent_user,
+            agent_home=self._agent_home,
+        )
+        argv = sudo_argv(self._agent_user, [str(script_path)], env)
+        result = self._run(
+            argv,
+            str(script_path.parent),
+            timeout=120,
+            env=env,
+            replace_env=True,
+        )
+        if result.exit_code != 0:
+            raise WorktreeCleanupError(
+                f"could not create the cleanup probe at {probe_dir}: "
+                f"{result.stderr.strip() or result.exit_code}"
+            )
+        return probe_dir
+
+    def remove_worktree(self, repo_dir: Path, worktree: Path, worktrees_dir: Path) -> None:
+        """Delete the worktree as its owner, then prune git's metadata.
+
+        The agent creates files with modes the factory cannot remove, so the
+        contents are deleted by ``factory-agent`` via the sudoers-allowed
+        ``rm -rf`` rule, restricted to a direct child of ``worktrees_dir``.
+        """
+        if not self._agent_user:
+            raise WorktreeCleanupError(
+                "FACTORY_AGENT_USER is not set; cannot delete the worktree as its owner."
+            )
+        target = worktree_cleanup_path(worktrees_dir, worktree)
+        result = self._run(
+            ["sudo", "-n", "-u", self._agent_user, "--", RM_BIN, "-rf", str(target)],
+            cwd="/",
             timeout=300,
         )
+        if result.exit_code != 0:
+            raise WorktreeCleanupError(
+                f"could not delete worktree {target} as {self._agent_user}: "
+                f"{result.stderr.strip() or result.exit_code}"
+            )
+        pruned = self._run(["git", "worktree", "prune"], str(repo_dir), timeout=120)
+        if pruned.exit_code != 0:
+            raise WorktreeCleanupError(
+                f"git worktree prune failed after deleting {target}: "
+                f"{pruned.stderr.strip() or pruned.exit_code}"
+            )
 
     def delete_branch(self, repo_dir: Path, branch: str) -> None:
-        self._run(["git", "branch", "-D", branch], str(repo_dir), timeout=120)
+        result = self._run(["git", "branch", "-D", branch], str(repo_dir), timeout=120)
+        if result.exit_code != 0:
+            raise WorktreeCleanupError(
+                f"could not delete local branch {branch!r}: "
+                f"{result.stderr.strip() or result.exit_code}"
+            )

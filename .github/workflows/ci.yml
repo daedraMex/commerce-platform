@@ -46,6 +46,7 @@ jobs:
       ALLOWED_HOSTS: localhost,127.0.0.1
       DATABASE_URL: postgres://shop:shop@localhost:5432/shop
       REDIS_URL: redis://localhost:6379/0
+      PYTEST_ADDOPTS: "-p no:cacheprovider"
 
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0

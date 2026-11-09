@@ -32,7 +32,13 @@ from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, read_command_body
 from .runner import AgentRunner
 from .sudoers import verify_sudoers_logging
-from .tickets import Ticket, branch_name, select_tickets, worktree_path
+from .tickets import (
+    Ticket,
+    branch_from_worktree_dir_name,
+    branch_name,
+    select_tickets,
+    worktree_path,
+)
 
 DECISIONS_FILE = "DECISIONS.md"
 IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
@@ -85,7 +91,11 @@ class Factory:
         self._preflight_clock = preflight_clock
 
     def run(self) -> list[TicketResult]:
-        cleanup_old(self.settings.worktrees_dir, keep_days=self.settings.keep_days)
+        cleanup_old(
+            self.settings.worktrees_dir,
+            keep_days=self.settings.keep_days,
+            remove_dir=self._remove_expired_worktree,
+        )
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
         tickets = select_tickets(self.run_preflight(), max_tickets=self.settings.max_tickets)
         results: list[TicketResult] = []
@@ -113,10 +123,17 @@ class Factory:
             verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
         ).run()
 
+    def _remove_expired_worktree(self, worktree: Path) -> None:
+        """Delete an expired worktree as its owner, then its local branch."""
+        branch = branch_from_worktree_dir_name(worktree.name)
+        self.git.remove_worktree(self.settings.repo_dir, worktree, self.settings.worktrees_dir)
+        if self.git.branch_exists(self.settings.repo_dir, branch):
+            self.git.delete_branch(self.settings.repo_dir, branch)
+
     def _remove_stale_ticket_worktree(self, worktree: Path, branch: str) -> None:
         """Drop a previous stuck run's worktree and local branch, never the remote."""
-        if self.git.worktree_exists(self.settings.repo_dir, worktree):
-            self.git.remove_worktree(self.settings.repo_dir, worktree)
+        if worktree.exists() or self.git.worktree_exists(self.settings.repo_dir, worktree):
+            self.git.remove_worktree(self.settings.repo_dir, worktree, self.settings.worktrees_dir)
         if self.git.branch_exists(self.settings.repo_dir, branch):
             self.git.delete_branch(self.settings.repo_dir, branch)
 

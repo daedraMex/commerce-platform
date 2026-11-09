@@ -64,6 +64,17 @@ def test_runbook_documents_the_bot_commit_identity():
     assert "the bot commit identity" in text
 
 
+def test_runbook_documents_agent_owned_worktree_cleanup():
+    text = RUNBOOK.read_text()
+    flat = " ".join(text.split())
+
+    assert "sudoers-allowed `rm -rf`" in flat
+    assert "not live git worktrees" in flat
+    assert "group `factory-agent` and mode `0770`" in flat
+    assert "git worktree prune" in flat
+    assert "PYTEST_ADDOPTS=-p no:cacheprovider" in text
+
+
 def test_runbook_documents_the_safe_repo_group_and_fix_commands():
     text = RUNBOOK.read_text()
 

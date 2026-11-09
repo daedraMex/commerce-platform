@@ -54,13 +54,16 @@ class FakeGit:
     def verify_commit_identity(self, repo_dir):
         self.events.append("verify_commit_identity")
 
+    def verify_no_leaked_worktrees(self, repo_dir, worktrees_dir):
+        self.events.append("verify_no_leaked_worktrees")
+
     def worktree_exists(self, repo_dir, worktree):
         self.operations.append(("worktree_exists", str(worktree)))
         return str(worktree) in self.existing_worktrees
 
     def branch_exists(self, repo_dir, branch):
         self.operations.append(("branch_exists", branch))
-        return branch in self.existing_branches
+        return branch in self.existing_branches or branch.startswith("preflight-")
 
     def create_worktree(self, repo_dir, worktree, branch):
         self.events.append("create_worktree")
@@ -68,7 +71,7 @@ class FakeGit:
         self.worktrees.append((branch, worktree))
         return worktree
 
-    def remove_worktree(self, repo_dir, worktree):
+    def remove_worktree(self, repo_dir, worktree, worktrees_dir):
         self.events.append("remove_worktree")
         self.operations.append(("remove_worktree", str(worktree)))
         self.removed_worktrees.append(worktree)
@@ -77,6 +80,10 @@ class FakeGit:
         self.events.append("delete_branch")
         self.operations.append(("delete_branch", branch))
         self.deleted_branches.append(branch)
+
+    def create_agent_cleanup_probe(self, worktree):
+        self.events.append("create_agent_cleanup_probe")
+        return worktree / "backend" / ".cleanup-probe"
 
     def write_file(self, worktree, relpath, content):
         return None
