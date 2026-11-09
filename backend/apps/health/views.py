@@ -121,13 +121,16 @@ class LivenessView(APIView):
             200: OpenApiResponse(
                 response=inline_serializer(
                     name="LivenessResponse",
-                    fields={"status": serializers.CharField()},
+                    fields={
+                        "status": serializers.CharField(),
+                        "version": serializers.CharField(),
+                    },
                 ),
                 description="The API process is running.",
                 examples=[
                     OpenApiExample(
                         "Liveness success",
-                        value={"status": "ok"},
+                        value={"status": "ok", "version": settings.APP_VERSION},
                         response_only=True,
                     )
                 ],
@@ -136,7 +139,7 @@ class LivenessView(APIView):
         }
     )
     def get(self, request, *args, **kwargs):
-        return Response({"status": "ok"})
+        return Response({"status": "ok", "version": settings.APP_VERSION})
 
 
 class ReadinessView(APIView):

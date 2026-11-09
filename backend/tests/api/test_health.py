@@ -2,27 +2,37 @@ import logging
 import time
 
 import pytest
+from django.test import override_settings
 
 from tests.api.helpers import assert_problem_details
 
 pytestmark = pytest.mark.django_db
 
+LIVE_URL = "/api/v1/health/live/"
 READY_URL = "/api/v1/health/ready/"
 
 
 def test_liveness_returns_200_without_credentials(client):
-    response = client.get("/api/v1/health/live/")
+    response = client.get(LIVE_URL)
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "version": "dev"}
 
 
 @pytest.mark.parametrize("store_header", ["anime", "Not A Slug"])
 def test_liveness_ignores_the_store_header(client, store_header):
-    response = client.get("/api/v1/health/live/", HTTP_X_STORE=store_header)
+    response = client.get(LIVE_URL, HTTP_X_STORE=store_header)
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json() == {"status": "ok", "version": "dev"}
+
+
+@override_settings(APP_VERSION="1.2.3")
+def test_liveness_reports_the_configured_app_version(client):
+    response = client.get(LIVE_URL)
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "version": "1.2.3"}
 
 
 def test_readiness_returns_200_when_dependencies_are_up(client):

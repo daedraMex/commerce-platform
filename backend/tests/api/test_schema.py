@@ -42,7 +42,13 @@ def test_schema_documents_liveness_success_with_example(schema):
     response = operation["responses"]["200"]
     examples = response["content"]["application/json"]["examples"].values()
 
-    assert any(example["value"] == {"status": "ok"} for example in examples)
+    assert any(example["value"] == {"status": "ok", "version": "dev"} for example in examples)
+
+
+def test_schema_documents_the_liveness_version_field(schema):
+    properties = schema["components"]["schemas"]["LivenessResponse"]["properties"]
+
+    assert set(properties) == {"status", "version"}
 
 
 def test_schema_documents_liveness_internal_error_with_problem_details(schema):
