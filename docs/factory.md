@@ -309,6 +309,13 @@ Run these once, as the admin user unless a step says `factory`.
 - **Stuck handoff.** A stuck ticket keeps its worktree; the Telegram message
   includes the `ssh` + `cd` command to enter it.
 
+## Ratchet rule
+
+Every bug found in a factory PR review or a failed night becomes a test or a
+preflight step in the same fix, so that class of error cannot recur silently.
+A fix that only changes the code, without adding the failing test or preflight
+step that would have caught it, is not finished.
+
 ## Reading logs and decisions
 
 - Each run writes `~/factory/logs/<ticket>.log`. Read the tail of the log to
