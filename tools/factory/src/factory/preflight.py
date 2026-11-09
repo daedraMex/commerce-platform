@@ -73,16 +73,6 @@ class Preflight:
             token = self.token_provider.mint(self.settings.repo)
             tickets = self.github.list_tickets(token)
 
-            step = "create worktree"
-            branch = f"preflight-{self._clock()}"
-            worktree = worktree_path(self.settings.worktrees_dir, branch)
-            self.git.create_worktree(self.settings.repo_dir, worktree, branch)
-
-            step = "check.sh"
-            passed, _output = self.git.check(worktree)
-            if not passed:
-                raise RuntimeError("check.sh failed")
-
             step = "verify isolation"
             self._verify_isolation(
                 agent_user=self.settings.agent_user,
@@ -92,6 +82,16 @@ class Preflight:
 
             step = "verify git version"
             self._verify_git_version()
+
+            step = "create worktree"
+            branch = f"preflight-{self._clock()}"
+            worktree = worktree_path(self.settings.worktrees_dir, branch)
+            self.git.create_worktree(self.settings.repo_dir, worktree, branch)
+
+            step = "check.sh"
+            passed, _output = self.git.check(worktree)
+            if not passed:
+                raise RuntimeError("check.sh failed")
 
             return tickets
         except PreflightError:

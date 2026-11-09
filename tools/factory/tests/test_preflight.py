@@ -8,10 +8,10 @@ from factory.tickets import Ticket
 
 
 class FakeGit:
-    def __init__(self, *, check_passed=True, fetch_error=None):
+    def __init__(self, *, check_passed=True, fetch_error=None, events=None):
         self.check_passed = check_passed
         self.fetch_error = fetch_error
-        self.calls = []
+        self.calls = events if events is not None else []
 
     def fetch_main(self, repo_dir):
         self.calls.append(("fetch_main", repo_dir))
@@ -85,9 +85,10 @@ def make_settings(tmp_path):
     )
 
 
-def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=None):
+def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=None, events=None):
     settings = make_settings(tmp_path)
-    verified = verified if verified is not None else []
+    events = events if events is not None else []
+    verified = verified if verified is not None else events
 
     def verify_isolation(**kwargs):
         verified.append(("verify_isolation", kwargs))
@@ -97,7 +98,7 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
 
     return Preflight(
         settings,
-        git=git or FakeGit(),
+        git=git or FakeGit(events=events),
         github=github or FakeGitHub(),
         notifier=notifier or RecordingNotifier(),
         token_provider=FakeTokenProvider(),
@@ -109,28 +110,28 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
 
 def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
     tickets = [Ticket(number=7, title="Ready", labels=frozenset({"ready-for-agent"}))]
-    git = FakeGit()
+    events = []
+    git = FakeGit(events=events)
     github = FakeGitHub(tickets)
-    verified = []
 
-    result = build_preflight(tmp_path, git=git, github=github, verified=verified).run()
+    result = build_preflight(tmp_path, git=git, github=github, events=events).run()
 
     assert result == tickets
     assert github.listed_with == "MINTED-TOKEN"
-    steps = [call[0] for call in git.calls]
-    assert steps == [
+    assert [event[0] for event in events] == [
         "fetch_main",
+        "verify_isolation",
+        "verify_git_version",
         "create_worktree",
         "check",
         "remove_worktree",
         "delete_branch",
     ]
-    assert git.calls[1] == (
+    assert events[3] == (
         "create_worktree",
         Path(tmp_path / "worktrees" / "preflight-42"),
         "preflight-42",
     )
-    assert [step[0] for step in verified] == ["verify_isolation", "verify_git_version"]
 
 
 def test_preflight_failure_notifies_cleans_up_and_stops(tmp_path):
@@ -174,7 +175,7 @@ def test_preflight_shortens_errors_and_never_includes_settings_secrets(tmp_path)
     assert settings.github_private_key not in reason
 
 
-def test_preflight_cleans_up_even_when_isolation_fails(tmp_path):
+def test_preflight_stops_before_creating_a_worktree_when_isolation_fails(tmp_path):
     git = FakeGit()
 
     def failing_isolation(**_kwargs):
@@ -194,4 +195,4 @@ def test_preflight_cleans_up_even_when_isolation_fails(tmp_path):
     with pytest.raises(PreflightError, match="verify isolation"):
         preflight.run()
 
-    assert [call[0] for call in git.calls][-2:] == ["remove_worktree", "delete_branch"]
+    assert [call[0] for call in git.calls] == ["fetch_main"]
