@@ -1,11 +1,14 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
-from factory.main import Factory
+from factory.main import Factory, RunFailed
+from factory.preflight import PreflightError
 from factory.runner import AgentResult
-from factory.tickets import Ticket
+from factory.tickets import Ticket, worktree_path
 
 OVERLAY = "Model: {{MODEL}}. Branch: {{BRANCH}}."
 
@@ -23,19 +26,54 @@ class FakeGit:
         decisions="",
         diff=None,
         command_body=COMMAND_BODY,
+        fetch_error=None,
+        preflight_check_passed=True,
     ):
         self.check_result = check_passed
         self.check_output = check_output
         self.decisions = decisions
         self.diff = diff or DiffStats()
         self.command_body = command_body
+        self.fetch_error = fetch_error
+        self.preflight_check_passed = preflight_check_passed
         self.committed = []
         self.pushed = []
         self.worktrees = []
+        self.removed_worktrees = []
+        self.deleted_branches = []
+        self.events = []
+        self.operations = []
+        self.existing_worktrees = set()
+        self.existing_branches = set()
+
+    def fetch_main(self, repo_dir):
+        self.events.append("fetch_main")
+        if self.fetch_error is not None:
+            raise self.fetch_error
+
+    def worktree_exists(self, repo_dir, worktree):
+        self.operations.append(("worktree_exists", str(worktree)))
+        return str(worktree) in self.existing_worktrees
+
+    def branch_exists(self, repo_dir, branch):
+        self.operations.append(("branch_exists", branch))
+        return branch in self.existing_branches
 
     def create_worktree(self, repo_dir, worktree, branch):
+        self.events.append("create_worktree")
+        self.operations.append(("create_worktree", branch))
         self.worktrees.append((branch, worktree))
         return worktree
+
+    def remove_worktree(self, repo_dir, worktree):
+        self.events.append("remove_worktree")
+        self.operations.append(("remove_worktree", str(worktree)))
+        self.removed_worktrees.append(worktree)
+
+    def delete_branch(self, repo_dir, branch):
+        self.events.append("delete_branch")
+        self.operations.append(("delete_branch", branch))
+        self.deleted_branches.append(branch)
 
     def write_file(self, worktree, relpath, content):
         return None
@@ -48,6 +86,9 @@ class FakeGit:
         return ""
 
     def check(self, worktree):
+        self.events.append("check")
+        if "preflight" in str(worktree):
+            return (self.preflight_check_passed, "")
         return (self.check_result, self.check_output)
 
     def commit_all(self, worktree, message):
@@ -110,16 +151,28 @@ class FakeRunner:
         return self.result
 
 
+class ExplodingRunner:
+    def __init__(self, error):
+        self.error = error
+
+    def run(self, *, worktree, model, prompt, timeout_seconds):
+        raise self.error
+
+
 class RecordingNotifier:
     def __init__(self):
         self.pr_ready = []
         self.stuck = []
+        self.run_failed = []
 
     def send_pr_ready(self, info):
         self.pr_ready.append(info)
 
     def send_stuck(self, info):
         self.stuck.append(info)
+
+    def send_run_failed(self, info):
+        self.run_failed.append(info)
 
 
 def make_settings(tmp_path):
@@ -150,6 +203,14 @@ def make_ticket(number, *, labels=()):
     )
 
 
+def _noop_verify_isolation(**_kwargs):
+    return None
+
+
+def _noop_verify_git_version():
+    return None
+
+
 def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, token_provider=None):
     return Factory(
         settings or make_settings(tmp_path),
@@ -159,6 +220,9 @@ def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, tok
         notifier=notifier,
         token_provider=token_provider or FakeTokenProvider(),
         overlay=OVERLAY,
+        preflight_verify_isolation=_noop_verify_isolation,
+        preflight_verify_git_version=_noop_verify_git_version,
+        preflight_clock=lambda: 42,
     )
 
 
@@ -181,6 +245,122 @@ def test_success_opens_draft_pr_and_notifies(tmp_path):
     assert "Chose A." in body
     assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
     assert len(notifier.pr_ready) == 1
+
+
+def test_fetch_main_runs_before_any_worktree_is_created(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert "fetch_main" in git.events
+    assert git.events.index("fetch_main") < git.events.index("create_worktree")
+
+
+def test_fetch_failure_aborts_the_run_and_notifies(tmp_path):
+    git = FakeGit(fetch_error=RuntimeError("git fetch failed: no network"))
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    with pytest.raises(RuntimeError, match="git fetch failed"):
+        factory.run()
+
+    assert git.worktrees == []
+    assert github.listed_with is None
+    assert len(notifier.run_failed) == 1
+    assert notifier.run_failed[0].reason.startswith("preflight failed: fetch origin/main:")
+    assert "git fetch failed" in notifier.run_failed[0].reason
+
+
+def test_unexpected_ticket_exception_becomes_a_run_failure_with_the_ticket(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=ExplodingRunner(RuntimeError("agent process exploded")),
+        notifier=RecordingNotifier(),
+    )
+
+    with pytest.raises(RunFailed) as caught:
+        factory.run()
+
+    assert caught.value.phase == "#7 Ticket 7"
+    assert caught.value.detail == "agent process exploded"
+
+
+def test_preflight_check_failure_aborts_before_running_a_ticket(tmp_path):
+    git = FakeGit(preflight_check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(tmp_path, git=git, github=github, runner=runner, notifier=notifier)
+
+    with pytest.raises(PreflightError, match="check.sh"):
+        factory.run()
+
+    assert runner.calls == []
+    assert git.committed == []
+    assert len(notifier.run_failed) == 1
+    assert notifier.run_failed[0].reason.startswith("preflight failed: check.sh:")
+    assert git.removed_worktrees
+    assert git.deleted_branches
+
+
+def test_preflight_cleans_up_its_throwaway_worktree_and_branch(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert git.removed_worktrees[0] == git.worktrees[0][1]
+    assert git.deleted_branches == ["preflight-42"]
+
+
+def test_retry_removes_existing_ticket_worktree_and_branch(tmp_path):
+    branch = "nf/7-ticket-7"
+    worktree = worktree_path(tmp_path / "worktrees", branch)
+    git = FakeGit(check_passed=True)
+    git.existing_worktrees = {str(worktree)}
+    git.existing_branches = {branch}
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    create = git.operations.index(("create_worktree", branch))
+    assert git.operations.index(("remove_worktree", str(worktree))) < create
+    assert git.operations.index(("delete_branch", branch)) < create
+
+
+def test_retry_removes_only_the_existing_branch(tmp_path):
+    branch = "nf/7-ticket-7"
+    worktree = worktree_path(tmp_path / "worktrees", branch)
+    git = FakeGit(check_passed=True)
+    git.existing_branches = {branch}
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert ("remove_worktree", str(worktree)) not in git.operations
+    assert git.operations.index(("delete_branch", branch)) < git.operations.index(
+        ("create_worktree", branch)
+    )
 
 
 def test_success_labels_migration_when_migrations_changed(tmp_path):
@@ -409,6 +589,81 @@ def test_fix_loop_feeds_check_output_back_to_agent(tmp_path):
     assert len(runner.calls) == 5
     assert "E   AssertionError" not in runner.calls[0]["prompt"]
     assert "E   AssertionError" in runner.calls[1]["prompt"]
+
+
+class FakePreflightFactory:
+    def __init__(self, *, tickets=None, error=None, run_error=None):
+        self.tickets = tickets or []
+        self.error = error
+        self.run_error = run_error
+
+    def run_preflight(self):
+        if self.error is not None:
+            raise self.error
+        return self.tickets
+
+    def run(self):
+        if self.run_error is not None:
+            raise self.run_error
+        raise AssertionError("the preflight CLI must not run tickets")
+
+
+def test_preflight_cli_reports_success(monkeypatch, capsys, tmp_path):
+    import factory.main as main_module
+
+    fake = FakePreflightFactory(tickets=[make_ticket(7)])
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+
+    assert main_module.main(["preflight"]) == 0
+    assert "preflight ok (1 tickets listed)" in capsys.readouterr().out
+
+
+def test_preflight_cli_reports_failure_and_exits_nonzero(monkeypatch, capsys, tmp_path):
+    import factory.main as main_module
+
+    fake = FakePreflightFactory(error=PreflightError("check.sh", "check.sh failed"))
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+
+    assert main_module.main(["preflight"]) == 1
+    assert "preflight failed: check.sh: check.sh failed" in capsys.readouterr().out
+
+
+def test_main_reports_an_unexpected_run_error_and_notifies(monkeypatch, capsys, tmp_path):
+    import factory.main as main_module
+
+    notifier = RecordingNotifier()
+    fake = FakePreflightFactory(run_error=RuntimeError("kaboom"))
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
+    monkeypatch.setattr(main_module, "_build_notifier", lambda settings: notifier)
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+
+    assert main_module.main([]) == 1
+    assert notifier.run_failed[0].reason == "run failed: run: kaboom"
+    assert "run failed: run: kaboom" in capsys.readouterr().out
+
+
+def test_main_reports_a_settings_failure_and_notifies(monkeypatch, capsys):
+    import factory.main as main_module
+
+    notifier = RecordingNotifier()
+
+    def fail(_cls):
+        raise RuntimeError("FACTORY_MODEL is not set")
+
+    monkeypatch.setattr(main_module.Settings, "from_env", classmethod(fail))
+    monkeypatch.setattr(main_module, "_startup_notifier", lambda: notifier)
+
+    assert main_module.main([]) == 1
+    assert notifier.run_failed[0].reason == "run failed: startup: FACTORY_MODEL is not set"
+    assert "run failed: startup: FACTORY_MODEL is not set" in capsys.readouterr().out
 
 
 def test_stuck_keeps_worktree_and_includes_handoff(tmp_path):

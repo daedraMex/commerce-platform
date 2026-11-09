@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -14,18 +15,20 @@ from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_questio
 from .diff import touches_protected_paths
 from .git import Git, verify_git_version
 from .github import GitHub
-from .isolation import sensitive_paths, verify_isolation, write_protected_paths
+from .isolation import verify_isolation
 from .models import select_model
 from .notify import (
     Notifier,
     NullNotifier,
     PrReadyInfo,
+    RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
     build_handoff_command,
 )
 from .outcomes import build_issue_comment
 from .pr_body import build_pr_body
+from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, read_command_body
 from .runner import AgentRunner
 from .tickets import Ticket, branch_name, select_tickets, worktree_path
@@ -43,6 +46,15 @@ class TicketResult:
     ok: bool
 
 
+class RunFailed(RuntimeError):
+    """An unexpected failure while running the factory or a single ticket."""
+
+    def __init__(self, phase: str, detail: str):
+        self.phase = phase
+        self.detail = detail
+        super().__init__(f"{phase}: {detail}")
+
+
 class Factory:
     def __init__(
         self,
@@ -54,6 +66,9 @@ class Factory:
         notifier: Notifier,
         token_provider: TokenProvider,
         overlay: str,
+        preflight_verify_isolation=verify_isolation,
+        preflight_verify_git_version=verify_git_version,
+        preflight_clock=None,
     ):
         self.settings = settings
         self.github = github
@@ -62,21 +77,44 @@ class Factory:
         self.notifier = notifier
         self.token_provider = token_provider
         self.overlay = overlay
+        self._preflight_verify_isolation = preflight_verify_isolation
+        self._preflight_verify_git_version = preflight_verify_git_version
+        self._preflight_clock = preflight_clock
 
     def run(self) -> list[TicketResult]:
         cleanup_old(self.settings.worktrees_dir, keep_days=self.settings.keep_days)
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
-        token = self.token_provider.mint(self.settings.repo)
-        tickets = select_tickets(
-            self.github.list_tickets(token), max_tickets=self.settings.max_tickets
-        )
+        tickets = select_tickets(self.run_preflight(), max_tickets=self.settings.max_tickets)
         results: list[TicketResult] = []
         for ticket in tickets:
-            result = self._run_ticket(ticket)
+            try:
+                result = self._run_ticket(ticket)
+            except Exception as exc:
+                raise RunFailed(f"#{ticket.number} {ticket.title}", short_error(exc)) from exc
             results.append(result)
             if not result.ok:
                 break
         return results
+
+    def run_preflight(self) -> list[Ticket]:
+        """Run the real-tool preflight and return the tickets it listed."""
+        return Preflight(
+            self.settings,
+            git=self.git,
+            github=self.github,
+            notifier=self.notifier,
+            token_provider=self.token_provider,
+            clock=self._preflight_clock,
+            verify_isolation_fn=self._preflight_verify_isolation,
+            verify_git_version_fn=self._preflight_verify_git_version,
+        ).run()
+
+    def _remove_stale_ticket_worktree(self, worktree: Path, branch: str) -> None:
+        """Drop a previous stuck run's worktree and local branch, never the remote."""
+        if self.git.worktree_exists(self.settings.repo_dir, worktree):
+            self.git.remove_worktree(self.settings.repo_dir, worktree)
+        if self.git.branch_exists(self.settings.repo_dir, branch):
+            self.git.delete_branch(self.settings.repo_dir, branch)
 
     def _run_ticket(self, ticket: Ticket) -> TicketResult:
         model = select_model(
@@ -85,11 +123,9 @@ class Factory:
             strong_model=self.settings.factory_strong_model,
         )
         branch = branch_name(ticket)
-        worktree = self.git.create_worktree(
-            self.settings.repo_dir,
-            worktree_path(self.settings.worktrees_dir, branch),
-            branch,
-        )
+        worktree = worktree_path(self.settings.worktrees_dir, branch)
+        self._remove_stale_ticket_worktree(worktree, branch)
+        worktree = self.git.create_worktree(self.settings.repo_dir, worktree, branch)
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
         log_path = self._log_path(ticket)
@@ -326,16 +362,8 @@ def _load_private_key(value: str | None) -> str | None:
     return value
 
 
-def main(argv: list[str] | None = None) -> int:
-    settings = Settings.from_env()
-    verify_isolation(
-        agent_user=settings.agent_user,
-        paths=sensitive_paths(settings),
-        write_paths=write_protected_paths(settings),
-    )
-    verify_git_version()
-    overlay = read_overlay()
-    factory = Factory(
+def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> Factory:
+    return Factory(
         settings,
         github=GitHub(settings.repo),
         git=Git(
@@ -347,11 +375,69 @@ def main(argv: list[str] | None = None) -> int:
             agent_home=settings.agent_home,
             provider_env_vars=settings.provider_env_vars,
         ),
-        notifier=_build_notifier(settings),
+        notifier=notifier or _build_notifier(settings),
         token_provider=_build_token_provider(settings),
-        overlay=overlay,
+        overlay=read_overlay(),
     )
-    results = factory.run()
+
+
+def _startup_notifier() -> Notifier:
+    """Best-effort notifier before Settings has been read successfully."""
+    token = os.environ.get("FACTORY_TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("FACTORY_TELEGRAM_CHAT_ID")
+    if token and chat_id:
+        return TelegramNotifier(token, chat_id)
+    return NullNotifier()
+
+
+def _notify_failure(notifier: Notifier, reason: str) -> None:
+    try:
+        notifier.send_run_failed(RunFailedInfo(reason=reason))
+    except Exception:
+        pass
+
+
+def _report_failure(notifier: Notifier, reason: str) -> int:
+    _notify_failure(notifier, reason)
+    print(reason)
+    return 1
+
+
+def preflight_main() -> int:
+    """Run the real-tool preflight by hand and report the result."""
+    notifier = _startup_notifier()
+    try:
+        settings = Settings.from_env()
+        notifier = _build_notifier(settings)
+        tickets = _build_factory(settings, notifier=notifier).run_preflight()
+    except PreflightError as exc:
+        print(f"preflight failed: {exc}")
+        return 1
+    except Exception as exc:
+        return _report_failure(notifier, f"run failed: preflight: {short_error(exc)}")
+    print(f"preflight ok ({len(tickets)} tickets listed)")
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = sys.argv[1:] if argv is None else argv
+    if args and args[0] == "preflight":
+        return preflight_main()
+    notifier = _startup_notifier()
+    phase = "startup"
+    try:
+        settings = Settings.from_env()
+        notifier = _build_notifier(settings)
+        factory = _build_factory(settings, notifier=notifier)
+        phase = "run"
+        results = factory.run()
+    except PreflightError as exc:
+        print(f"preflight failed: {exc}")
+        return 1
+    except RunFailed as exc:
+        return _report_failure(notifier, f"run failed: {exc.phase}: {exc.detail}")
+    except Exception as exc:
+        return _report_failure(notifier, f"run failed: {phase}: {short_error(exc)}")
     for result in results:
         outcome = "ok" if result.ok else "stuck"
         print(f"#{result.ticket.number}: {outcome}")

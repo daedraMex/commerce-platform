@@ -107,7 +107,7 @@ class GitHub:
             number=int(obj["number"]),
             title=obj.get("title", ""),
             body=obj.get("body", "") or "",
-            labels=frozenset(obj.get("labels", [])),
+            labels=frozenset(label["name"] for label in obj.get("labels", [])),
         )
 
     def _resolve(self, tickets: list[Ticket], token: str | None) -> list[Ticket]:

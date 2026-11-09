@@ -1,20 +1,40 @@
+from pathlib import Path
+
 from factory.github import GitHub
 from factory.shell import CommandResult
 
+REPO = "daedraMex/commerce-platform"
+FIXTURES = Path(__file__).parent / "fixtures"
 
-class RecordingRun:
-    def __init__(self, stdout="[]"):
-        self.stdout = stdout
+
+def read_fixture(name: str) -> str:
+    return (FIXTURES / name).read_text()
+
+
+class FakeGh:
+    """Answer the gh calls with outputs recorded from the real CLI."""
+
+    def __init__(self):
         self.calls = []
 
     def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
         self.calls.append((argv, cwd, env))
-        return CommandResult(exit_code=0, stdout=self.stdout, stderr="")
+        if argv[:3] == ["gh", "issue", "list"]:
+            stdout = read_fixture("gh_issue_list.json")
+        elif argv[:3] == ["gh", "issue", "view"]:
+            stdout = read_fixture("gh_issue_view_open.json")
+        elif argv[:3] == ["gh", "pr", "list"]:
+            stdout = read_fixture("gh_pr_list.json")
+        elif argv[:3] == ["gh", "pr", "create"]:
+            stdout = read_fixture("gh_pr_create.txt")
+        else:
+            stdout = "{}"
+        return CommandResult(exit_code=0, stdout=stdout, stderr="")
 
 
 def test_list_tickets_uses_gh_token_for_every_read():
-    run = RecordingRun()
-    GitHub("daedraMex/commerce-platform", run=run).list_tickets("TOKEN")
+    run = FakeGh()
+    GitHub(REPO, run=run).list_tickets("TOKEN")
 
     assert run.calls[0][0][:3] == ["gh", "issue", "list"]
     assert run.calls[1][0][:3] == ["gh", "pr", "list"]
@@ -22,7 +42,43 @@ def test_list_tickets_uses_gh_token_for_every_read():
 
 
 def test_list_tickets_without_token_leaves_env_to_gh():
-    run = RecordingRun()
-    GitHub("daedraMex/commerce-platform", run=run).list_tickets()
+    run = FakeGh()
+    GitHub(REPO, run=run).list_tickets()
 
     assert all(env is None for _argv, _cwd, env in run.calls)
+
+
+def test_list_tickets_reads_label_names_from_recorded_label_objects():
+    # `gh issue list --json labels` returns label objects, not strings.
+    tickets = GitHub(REPO, run=FakeGh()).list_tickets("TOKEN")
+    by_number = {ticket.number: ticket for ticket in tickets}
+
+    assert by_number[50].title == "Phase 4 / 08: import_catalog --images"
+    assert by_number[50].labels == frozenset({"ready-for-agent"})
+    assert by_number[50].has_open_pr is False
+
+
+def test_list_tickets_marks_a_ticket_closed_by_a_recorded_pr():
+    tickets = GitHub(REPO, run=FakeGh()).list_tickets("TOKEN")
+    by_number = {ticket.number: ticket for ticket in tickets}
+
+    assert by_number[49].has_open_pr is True
+
+
+def test_is_open_reads_recorded_state():
+    run = FakeGh()
+
+    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+    assert run.calls[-1][0] == ["gh", "issue", "view", "21", "--repo", REPO, "--json", "state"]
+
+
+def test_create_draft_pr_reads_the_number_from_recorded_output():
+    run = FakeGh()
+
+    number = GitHub(REPO, run=run).create_draft_pr(
+        branch="nf/7-test", title="#7: Test", body="Closes #7", token="TOKEN"
+    )
+
+    assert number == 63
+    assert run.calls[-1][0][:3] == ["gh", "pr", "create"]
+    assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}

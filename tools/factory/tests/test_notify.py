@@ -1,9 +1,11 @@
 from factory.notify import (
     PrReadyInfo,
+    RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
     build_handoff_command,
     build_pr_ready_message,
+    build_run_failed_message,
     build_stuck_message,
     escape_html,
 )
@@ -102,6 +104,15 @@ def test_stuck_message_includes_handoff_command():
     msg = build_stuck_message(_stuck())
     assert "/home/factory/factory/worktrees/nf/7-add-widget" in msg
     assert "ssh factory@host &amp;&amp; cd /home/factory/factory/worktrees/nf/7-add-widget" in msg
+
+
+def test_run_failed_message_names_the_reason_and_escapes_html():
+    msg = build_run_failed_message(
+        RunFailedInfo(reason="could not fetch origin/main: fatal <no network>")
+    )
+    assert "Night factory aborted" in msg
+    assert "could not fetch origin/main" in msg
+    assert "&lt;no network&gt;" in msg
 
 
 def test_build_handoff_command_with_and_without_host():

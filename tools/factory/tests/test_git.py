@@ -8,6 +8,7 @@ from factory.git import (
     parse_git_version,
     verify_git_version,
 )
+from factory.runner import TEST_SETTINGS
 from factory.shell import CommandResult
 
 
@@ -29,6 +30,57 @@ def test_fetch_main_fetches_from_origin():
 
     assert run.calls == [
         (["git", "fetch", "origin", "main"], str(repo), None, False),
+    ]
+
+
+def test_fetch_main_raises_when_the_fetch_fails():
+    run = RecordingRun(CommandResult(exit_code=128, stdout="", stderr="could not read from remote"))
+
+    with pytest.raises(RuntimeError, match="git fetch failed: could not read from remote"):
+        Git(run=run).fetch_main(Path("/srv/factory/repo"))
+
+
+def test_worktree_exists_reads_the_porcelain_list():
+    stdout = "worktree /srv/factory/repo\n\nworktree /srv/factory/worktrees/nf-7-x\n"
+    run = RecordingRun(CommandResult(0, stdout, ""))
+    repo = Path("/srv/factory/repo")
+
+    assert Git(run=run).worktree_exists(repo, Path("/srv/factory/worktrees/nf-7-x")) is True
+    assert Git(run=run).worktree_exists(repo, Path("/srv/factory/worktrees/other")) is False
+    assert run.calls[0][0] == ["git", "worktree", "list", "--porcelain"]
+
+
+def test_branch_exists_checks_the_local_branch_only():
+    run = RecordingRun(CommandResult(0, "", ""))
+    repo = Path("/srv/factory/repo")
+
+    assert Git(run=run).branch_exists(repo, "nf/7-x") is True
+    assert run.calls[0][0] == [
+        "git",
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/heads/nf/7-x",
+    ]
+
+
+def test_create_worktree_raises_a_clear_error_on_failure():
+    run = RecordingRun(CommandResult(128, "", "fatal: a branch named 'nf/7-x' already exists"))
+    repo = Path("/srv/factory/repo")
+    worktree = Path("/srv/factory/worktrees/nf-7-x")
+
+    with pytest.raises(RuntimeError, match="could not create worktree for nf/7-x"):
+        Git(run=run).create_worktree(repo, worktree, "nf/7-x")
+
+
+def test_delete_branch_forces_branch_removal():
+    run = RecordingRun()
+    repo = Path("/srv/factory/repo")
+
+    Git(run=run).delete_branch(repo, "preflight-42")
+
+    assert run.calls == [
+        (["git", "branch", "-D", "preflight-42"], str(repo), None, False),
     ]
 
 
@@ -54,7 +106,7 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
     assert argv == [
         "sudo",
         "-n",
-        "--preserve-env=PATH,HOME,LANG,DATABASE_URL",
+        "--preserve-env=PATH,HOME,LANG,DATABASE_URL,SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL",
         "-u",
         "factory-agent",
         "--",
@@ -67,6 +119,7 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
         "HOME": "/home/factory-agent",
         "LANG": "C",
         "DATABASE_URL": "postgres://db",
+        **TEST_SETTINGS,
     }
 
 

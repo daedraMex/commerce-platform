@@ -59,14 +59,33 @@ class Git:
         self._base_env = dict(base_env if base_env is not None else os.environ)
 
     def fetch_main(self, repo_dir: Path) -> None:
-        self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
+        result = self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
+        if result.exit_code != 0:
+            raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
+
+    def worktree_exists(self, repo_dir: Path, worktree: Path) -> bool:
+        result = self._run(["git", "worktree", "list", "--porcelain"], str(repo_dir), timeout=120)
+        if result.exit_code != 0:
+            return False
+        target = f"worktree {worktree}"
+        return any(line.strip() == target for line in result.stdout.splitlines())
+
+    def branch_exists(self, repo_dir: Path, branch: str) -> bool:
+        result = self._run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            str(repo_dir),
+            timeout=120,
+        )
+        return result.exit_code == 0
 
     def create_worktree(self, repo_dir: Path, worktree: Path, branch: str) -> Path:
-        self._run(
+        result = self._run(
             ["git", "worktree", "add", "-b", branch, str(worktree), "origin/main"],
             str(repo_dir),
             timeout=300,
         )
+        if result.exit_code != 0:
+            raise RuntimeError(f"could not create worktree for {branch}: {result.stderr.strip()}")
         return worktree
 
     def commit_all(self, worktree: Path, message: str) -> bool:
@@ -151,3 +170,6 @@ class Git:
             str(repo_dir),
             timeout=300,
         )
+
+    def delete_branch(self, repo_dir: Path, branch: str) -> None:
+        self._run(["git", "branch", "-D", branch], str(repo_dir), timeout=120)
