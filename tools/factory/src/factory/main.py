@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import time
 from dataclasses import dataclass
@@ -20,13 +21,14 @@ from .notify import (
     Notifier,
     NullNotifier,
     PrReadyInfo,
+    RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
     build_handoff_command,
 )
 from .outcomes import build_issue_comment
 from .pr_body import build_pr_body
-from .preflight import Preflight, PreflightError
+from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, read_command_body
 from .runner import AgentRunner
 from .tickets import Ticket, branch_name, select_tickets, worktree_path
@@ -42,6 +44,15 @@ LOG_TAIL_LINES = 30
 class TicketResult:
     ticket: Ticket
     ok: bool
+
+
+class RunFailed(RuntimeError):
+    """An unexpected failure while running the factory or a single ticket."""
+
+    def __init__(self, phase: str, detail: str):
+        self.phase = phase
+        self.detail = detail
+        super().__init__(f"{phase}: {detail}")
 
 
 class Factory:
@@ -76,7 +87,10 @@ class Factory:
         tickets = select_tickets(self.run_preflight(), max_tickets=self.settings.max_tickets)
         results: list[TicketResult] = []
         for ticket in tickets:
-            result = self._run_ticket(ticket)
+            try:
+                result = self._run_ticket(ticket)
+            except Exception as exc:
+                raise RunFailed(f"#{ticket.number} {ticket.title}", short_error(exc)) from exc
             results.append(result)
             if not result.ok:
                 break
@@ -343,7 +357,7 @@ def _load_private_key(value: str | None) -> str | None:
     return value
 
 
-def _build_factory(settings: Settings) -> Factory:
+def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> Factory:
     return Factory(
         settings,
         github=GitHub(settings.repo),
@@ -356,20 +370,46 @@ def _build_factory(settings: Settings) -> Factory:
             agent_home=settings.agent_home,
             provider_env_vars=settings.provider_env_vars,
         ),
-        notifier=_build_notifier(settings),
+        notifier=notifier or _build_notifier(settings),
         token_provider=_build_token_provider(settings),
         overlay=read_overlay(),
     )
 
 
+def _startup_notifier() -> Notifier:
+    """Best-effort notifier before Settings has been read successfully."""
+    token = os.environ.get("FACTORY_TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("FACTORY_TELEGRAM_CHAT_ID")
+    if token and chat_id:
+        return TelegramNotifier(token, chat_id)
+    return NullNotifier()
+
+
+def _notify_failure(notifier: Notifier, reason: str) -> None:
+    try:
+        notifier.send_run_failed(RunFailedInfo(reason=reason))
+    except Exception:
+        pass
+
+
+def _report_failure(notifier: Notifier, reason: str) -> int:
+    _notify_failure(notifier, reason)
+    print(reason)
+    return 1
+
+
 def preflight_main() -> int:
     """Run the real-tool preflight by hand and report the result."""
-    factory = _build_factory(Settings.from_env())
+    notifier = _startup_notifier()
     try:
-        tickets = factory.run_preflight()
+        settings = Settings.from_env()
+        notifier = _build_notifier(settings)
+        tickets = _build_factory(settings, notifier=notifier).run_preflight()
     except PreflightError as exc:
         print(f"preflight failed: {exc}")
         return 1
+    except Exception as exc:
+        return _report_failure(notifier, f"run failed: preflight: {short_error(exc)}")
     print(f"preflight ok ({len(tickets)} tickets listed)")
     return 0
 
@@ -378,12 +418,21 @@ def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if args and args[0] == "preflight":
         return preflight_main()
-    factory = _build_factory(Settings.from_env())
+    notifier = _startup_notifier()
+    phase = "startup"
     try:
+        settings = Settings.from_env()
+        notifier = _build_notifier(settings)
+        factory = _build_factory(settings, notifier=notifier)
+        phase = "run"
         results = factory.run()
     except PreflightError as exc:
         print(f"preflight failed: {exc}")
         return 1
+    except RunFailed as exc:
+        return _report_failure(notifier, f"run failed: {exc.phase}: {exc.detail}")
+    except Exception as exc:
+        return _report_failure(notifier, f"run failed: {phase}: {short_error(exc)}")
     for result in results:
         outcome = "ok" if result.ok else "stuck"
         print(f"#{result.ticket.number}: {outcome}")

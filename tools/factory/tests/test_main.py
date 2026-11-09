@@ -5,7 +5,7 @@ import pytest
 
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
-from factory.main import Factory
+from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
 from factory.runner import AgentResult
 from factory.tickets import Ticket
@@ -137,6 +137,14 @@ class FakeRunner:
         return self.result
 
 
+class ExplodingRunner:
+    def __init__(self, error):
+        self.error = error
+
+    def run(self, *, worktree, model, prompt, timeout_seconds):
+        raise self.error
+
+
 class RecordingNotifier:
     def __init__(self):
         self.pr_ready = []
@@ -254,6 +262,24 @@ def test_fetch_failure_aborts_the_run_and_notifies(tmp_path):
     assert len(notifier.run_failed) == 1
     assert notifier.run_failed[0].reason.startswith("preflight failed: fetch origin/main:")
     assert "git fetch failed" in notifier.run_failed[0].reason
+
+
+def test_unexpected_ticket_exception_becomes_a_run_failure_with_the_ticket(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=ExplodingRunner(RuntimeError("agent process exploded")),
+        notifier=RecordingNotifier(),
+    )
+
+    with pytest.raises(RunFailed) as caught:
+        factory.run()
+
+    assert caught.value.phase == "#7 Ticket 7"
+    assert caught.value.detail == "agent process exploded"
 
 
 def test_preflight_check_failure_aborts_before_running_a_ticket(tmp_path):
@@ -516,9 +542,10 @@ def test_fix_loop_feeds_check_output_back_to_agent(tmp_path):
 
 
 class FakePreflightFactory:
-    def __init__(self, *, tickets=None, error=None):
+    def __init__(self, *, tickets=None, error=None, run_error=None):
         self.tickets = tickets or []
         self.error = error
+        self.run_error = run_error
 
     def run_preflight(self):
         if self.error is not None:
@@ -526,6 +553,8 @@ class FakePreflightFactory:
         return self.tickets
 
     def run(self):
+        if self.run_error is not None:
+            raise self.run_error
         raise AssertionError("the preflight CLI must not run tickets")
 
 
@@ -533,7 +562,7 @@ def test_preflight_cli_reports_success(monkeypatch, capsys, tmp_path):
     import factory.main as main_module
 
     fake = FakePreflightFactory(tickets=[make_ticket(7)])
-    monkeypatch.setattr(main_module, "_build_factory", lambda settings: fake)
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
     monkeypatch.setattr(
         main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
     )
@@ -546,13 +575,45 @@ def test_preflight_cli_reports_failure_and_exits_nonzero(monkeypatch, capsys, tm
     import factory.main as main_module
 
     fake = FakePreflightFactory(error=PreflightError("check.sh", "check.sh failed"))
-    monkeypatch.setattr(main_module, "_build_factory", lambda settings: fake)
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
     monkeypatch.setattr(
         main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
     )
 
     assert main_module.main(["preflight"]) == 1
     assert "preflight failed: check.sh: check.sh failed" in capsys.readouterr().out
+
+
+def test_main_reports_an_unexpected_run_error_and_notifies(monkeypatch, capsys, tmp_path):
+    import factory.main as main_module
+
+    notifier = RecordingNotifier()
+    fake = FakePreflightFactory(run_error=RuntimeError("kaboom"))
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
+    monkeypatch.setattr(main_module, "_build_notifier", lambda settings: notifier)
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+
+    assert main_module.main([]) == 1
+    assert notifier.run_failed[0].reason == "run failed: run: kaboom"
+    assert "run failed: run: kaboom" in capsys.readouterr().out
+
+
+def test_main_reports_a_settings_failure_and_notifies(monkeypatch, capsys):
+    import factory.main as main_module
+
+    notifier = RecordingNotifier()
+
+    def fail(_cls):
+        raise RuntimeError("FACTORY_MODEL is not set")
+
+    monkeypatch.setattr(main_module.Settings, "from_env", classmethod(fail))
+    monkeypatch.setattr(main_module, "_startup_notifier", lambda: notifier)
+
+    assert main_module.main([]) == 1
+    assert notifier.run_failed[0].reason == "run failed: startup: FACTORY_MODEL is not set"
+    assert "run failed: startup: FACTORY_MODEL is not set" in capsys.readouterr().out
 
 
 def test_stuck_keeps_worktree_and_includes_handoff(tmp_path):

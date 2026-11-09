@@ -40,6 +40,15 @@ def test_fetch_main_raises_when_the_fetch_fails():
         Git(run=run).fetch_main(Path("/srv/factory/repo"))
 
 
+def test_create_worktree_raises_a_clear_error_on_failure():
+    run = RecordingRun(CommandResult(128, "", "fatal: a branch named 'nf/7-x' already exists"))
+    repo = Path("/srv/factory/repo")
+    worktree = Path("/srv/factory/worktrees/nf-7-x")
+
+    with pytest.raises(RuntimeError, match="could not create worktree for nf/7-x"):
+        Git(run=run).create_worktree(repo, worktree, "nf/7-x")
+
+
 def test_delete_branch_forces_branch_removal():
     run = RecordingRun()
     repo = Path("/srv/factory/repo")

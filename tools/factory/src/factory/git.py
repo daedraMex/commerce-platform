@@ -64,11 +64,13 @@ class Git:
             raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
 
     def create_worktree(self, repo_dir: Path, worktree: Path, branch: str) -> Path:
-        self._run(
+        result = self._run(
             ["git", "worktree", "add", "-b", branch, str(worktree), "origin/main"],
             str(repo_dir),
             timeout=300,
         )
+        if result.exit_code != 0:
+            raise RuntimeError(f"could not create worktree for {branch}: {result.stderr.strip()}")
         return worktree
 
     def commit_all(self, worktree: Path, message: str) -> bool:
