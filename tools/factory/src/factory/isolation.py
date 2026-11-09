@@ -73,6 +73,8 @@ def repo_tree_violations(
     Runs as the factory user with plain ``os.walk`` and ``lstat``: a path is
     unsafe when it is owned by ``factory-agent``, belongs to a group that user
     is in, is world-writable, or is a setgid directory in an agent group.
+    Symlinks are never followed; their mode bits are meaningless, so only
+    their owner and group are checked.
     """
     if agent_uid is None or agent_gids is None:
         entry = pwd.getpwnam(agent_user)
@@ -89,15 +91,19 @@ def repo_tree_violations(
         except OSError:
             return False
         mode = info.st_mode
+        is_symlink = stat.S_ISLNK(mode)
         agent_group = info.st_gid in agent_gids
-        setgid_agent_group = stat.S_ISDIR(mode) and bool(mode & stat.S_ISGID) and agent_group
-        if info.st_uid == agent_uid or agent_group or mode & stat.S_IWOTH or setgid_agent_group:
+        world_writable = not is_symlink and bool(mode & stat.S_IWOTH)
+        setgid_agent_group = (
+            not is_symlink and stat.S_ISDIR(mode) and bool(mode & stat.S_ISGID) and agent_group
+        )
+        if info.st_uid == agent_uid or agent_group or world_writable or setgid_agent_group:
             violations.append(path)
         return len(violations) >= limit
 
     if unsafe(repo_dir):
         return violations
-    for root, dirnames, filenames in os.walk(repo_dir):
+    for root, dirnames, filenames in os.walk(repo_dir, followlinks=False):
         for name in (*dirnames, *filenames):
             if unsafe(Path(root) / name):
                 return violations
