@@ -2,56 +2,65 @@ from pathlib import Path
 
 import pytest
 
-from factory.sudoers import (
-    REQUIRED_LINE,
-    SUDOERS_PATH,
-    SudoersError,
-    has_no_log_allowed,
-    verify_sudoers_logging,
-)
+from factory.shell import CommandResult
+from factory.sudoers import SudoersError, has_no_log_allowed, verify_sudoers_logging
+
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
-def test_required_line_and_path_are_the_documented_ones():
-    assert SUDOERS_PATH == Path("/etc/sudoers.d/factory-agent")
-    assert REQUIRED_LINE == "Defaults:factory !log_allowed"
+class FakeRun:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        self.calls.append((argv, cwd, env, replace_env))
+        return self.result
 
 
-def test_accepts_the_exact_line(tmp_path):
-    path = tmp_path / "factory-agent"
-    path.write_text(f"{REQUIRED_LINE}\n")
-
-    verify_sudoers_logging(path)
+def recorded(name: str) -> str:
+    return (FIXTURES / name).read_text()
 
 
-def test_accepts_extra_spacing_and_comments(tmp_path):
-    path = tmp_path / "factory-agent"
-    path.write_text(
-        "# managed by the night factory setup\n"
-        "Defaults : factory    !log_allowed   # keep successful commands out of the journal\n"
-        "Defaults>factory-agent umask=0007\n"
+def test_accepts_recorded_sudo_l_output_with_no_log_allowed():
+    run = FakeRun(CommandResult(0, recorded("sudo_l_no_log_allowed.txt"), ""))
+
+    verify_sudoers_logging(run)
+
+
+def test_rejects_recorded_sudo_l_output_with_log_allowed():
+    run = FakeRun(CommandResult(0, recorded("sudo_l_log_allowed.txt"), ""))
+
+    with pytest.raises(SudoersError, match="!log_allowed"):
+        verify_sudoers_logging(run)
+
+
+def test_fails_closed_when_sudo_l_returns_nonzero():
+    run = FakeRun(CommandResult(1, "", "sudo: a password is required"))
+
+    with pytest.raises(SudoersError, match="sudo -n -l"):
+        verify_sudoers_logging(run)
+
+
+def test_fails_closed_when_the_defaults_block_is_missing():
+    run = FakeRun(CommandResult(0, "User factory may run the following commands:\n", ""))
+
+    with pytest.raises(SudoersError, match="Matching Defaults"):
+        verify_sudoers_logging(run)
+
+
+def test_only_the_matching_defaults_block_counts():
+    text = (
+        "User factory may run the following commands on factory-host:\n"
+        "    (factory-agent) NOPASSWD: /usr/bin/true !log_allowed\n"
     )
 
-    assert has_no_log_allowed(path.read_text())
+    assert has_no_log_allowed(text) is False
 
 
-def test_rejects_a_file_without_the_line(tmp_path):
-    path = tmp_path / "factory-agent"
-    path.write_text("Defaults>factory-agent umask=0007\n")
+def test_runs_non_interactive_sudo_l_with_a_stable_locale():
+    run = FakeRun(CommandResult(0, recorded("sudo_l_no_log_allowed.txt"), ""))
 
-    with pytest.raises(SudoersError, match="must contain"):
-        verify_sudoers_logging(path)
+    verify_sudoers_logging(run)
 
-
-def test_rejects_a_commented_out_line(tmp_path):
-    path = tmp_path / "factory-agent"
-    path.write_text(f"# {REQUIRED_LINE}\n")
-
-    with pytest.raises(SudoersError, match="must contain"):
-        verify_sudoers_logging(path)
-
-
-def test_missing_file_fails_closed_with_the_permission_hint(tmp_path):
-    path = tmp_path / "factory-agent"
-
-    with pytest.raises(SudoersError, match="root:factory"):
-        verify_sudoers_logging(path)
+    assert run.calls == [(["sudo", "-n", "-l"], "/", {"LC_ALL": "C"}, False)]

@@ -2,56 +2,69 @@
 
 sudo writes every allowed command — including the environment named in
 ``--preserve-env`` and the prompt passed to OpenCode — to the journal. The
-factory therefore requires ``Defaults:factory !log_allowed`` in its sudoers
-drop-in: successful commands stay out of the journal, denied commands are still
-logged. The preflight checks this line so the setting cannot silently regress.
+factory therefore requires ``Defaults:factory !log_allowed``: successful
+commands stay out of the journal, denied commands are still logged. The
+preflight checks the *effective* policy with ``sudo -n -l`` (no password is
+needed because the rules are NOPASSWD) so the setting cannot silently regress.
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
-SUDOERS_PATH = Path("/etc/sudoers.d/factory-agent")
-REQUIRED_LINE = "Defaults:factory !log_allowed"
+from .shell import CommandResult, RunCommand, run_command
 
-_REQUIRED_RE = re.compile(r"^Defaults\s*:\s*factory\s+!log_allowed$")
+REQUIRED_FLAG = "!log_allowed"
+DEFAULTS_HEADER = "matching defaults entries"
+
+_TOKENS_RE = re.compile(r"[\s,]+")
 
 
 class SudoersError(RuntimeError):
-    """Raised when the sudoers drop-in would log successful command details."""
+    """Raised when the effective sudo policy would log successful commands."""
 
 
-def _directives(text: str) -> list[str]:
-    """Return the live sudoers lines, dropping comments and blank lines."""
-    lines: list[str] = []
-    for line in text.splitlines():
-        directive = line.split("#", 1)[0].strip()
-        if directive:
-            lines.append(directive)
-    return lines
+def _matching_defaults(text: str) -> str:
+    """Return the "Matching Defaults entries" block, wrapped lines included."""
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        if line.strip().lower().startswith(DEFAULTS_HEADER):
+            section = [line]
+            for following in lines[index + 1 :]:
+                if not following.strip():
+                    break
+                section.append(following)
+            return "\n".join(section)
+    return ""
 
 
 def has_no_log_allowed(text: str) -> bool:
-    """Return whether ``text`` sets ``!log_allowed`` for the factory user."""
-    return any(_REQUIRED_RE.match(line) for line in _directives(text))
+    """Return whether the effective defaults contain the ``!log_allowed`` flag."""
+    return REQUIRED_FLAG in _TOKENS_RE.split(_matching_defaults(text))
 
 
-def verify_sudoers_logging(path: Path = SUDOERS_PATH) -> None:
-    """Fail unless the sudoers drop-in contains the no-logging default.
+def verify_sudoers_logging(run: RunCommand = run_command) -> None:
+    """Fail unless ``sudo -n -l`` reports ``!log_allowed`` for the factory user.
 
-    The file must be readable by the factory user (for example ``root:factory``
-    mode ``0440``); otherwise this check fails closed and the run stops.
+    The factory process already runs as ``factory``; ``-n`` makes a missing
+    NOPASSWD rule fail fast instead of waiting for a password. Any non-zero
+    exit or a listing without the flag aborts the run.
     """
-    try:
-        text = path.read_text()
-    except OSError as exc:
+    result: CommandResult = run(
+        ["sudo", "-n", "-l"],
+        cwd="/",
+        timeout=60,
+        env={"LC_ALL": "C"},
+    )
+    if result.exit_code != 0:
         raise SudoersError(
-            f"cannot read {path}: {exc}. Make it readable by the factory user "
-            f"(root:factory, mode 0440) and add '{REQUIRED_LINE}'."
-        ) from exc
-    if not has_no_log_allowed(text):
+            "could not read the effective sudo policy with 'sudo -n -l': "
+            f"{result.stderr.strip() or result.exit_code}"
+        )
+    if not has_no_log_allowed(result.stdout):
         raise SudoersError(
-            f"{path} must contain '{REQUIRED_LINE}' so successful sudo commands "
-            "(environment and prompt included) are not written to the journal."
+            "the effective sudo policy lacks '!log_allowed' in its Matching "
+            "Defaults entries; successful commands (environment and prompt "
+            "included) would be written to the journal. Add "
+            "'Defaults:factory !log_allowed' to /etc/sudoers.d/factory-agent."
         )

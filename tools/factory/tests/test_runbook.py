@@ -37,13 +37,15 @@ def test_runbook_documents_the_agent_owned_provider_key():
     assert "DEEPSEEK_API_KEY=" not in text
 
 
-def test_runbook_documents_the_no_logging_sudoers_line_and_permission():
+def test_runbook_documents_the_effective_no_logging_policy_check():
     text = RUNBOOK.read_text()
 
     assert "Defaults:factory !log_allowed" in text
-    assert "sudo chown root:factory /etc/sudoers.d/factory-agent" in text
-    assert "sudo chmod 0440 /etc/sudoers.d/factory-agent" in text
-    assert "sudoers `!log_allowed` line" in text
+    assert "sudo -n -l" in text
+    assert "Matching Defaults entries" in text
+    assert "stay `root:root`" in text
+    assert "sudo chown root:factory /etc/sudoers.d/factory-agent" not in text
+    assert "sudo chmod 0440 /etc/sudoers.d/factory-agent" not in text
 
 
 def test_runbook_says_rotate_any_secret_that_appeared_in_logs():

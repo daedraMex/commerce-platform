@@ -89,16 +89,14 @@ Run these once, as the admin user unless a step says `factory`.
     still logged. This is why the provider key is never passed through sudo:
     the agent holds it itself (step 7).
 
-    The rules live in `/etc/sudoers.d/factory-agent`. The preflight reads that
-    file to check the `!log_allowed` line, so make it readable by `factory`
-    (root-owned and never group-writable): if an older install left
-    a `/etc/sudoers.d/factory` file behind, remove it so its stale rules cannot
-    linger, then set permissions and validate the sudoers files before relying
-    on them:
+    The rules live in `/etc/sudoers.d/factory-agent` and stay `root:root`; do
+    not loosen its group or mode. The preflight runs `sudo -n -l` as `factory`
+    (no password, because the rules are NOPASSWD) and checks the effective
+    "Matching Defaults entries" for `!log_allowed`. If an older install left a
+    `/etc/sudoers.d/factory` file behind, remove it so its stale rules cannot
+    linger, then validate the sudoers files before relying on them:
     ```bash
     sudo rm -f /etc/sudoers.d/factory
-    sudo chown root:factory /etc/sudoers.d/factory-agent
-    sudo chmod 0440 /etc/sudoers.d/factory-agent
     sudo visudo -c
     ```
 
@@ -345,11 +343,12 @@ Run these once, as the admin user unless a step says `factory`.
   The preflight runs `git var GIT_AUTHOR_IDENT`/`GIT_COMMITTER_IDENT` with the
   same args (a dry check that creates no commit) and fails if the id is missing
   or unusable. The agent never commits; it leaves its changes in the worktree.
-- **Sudo journal.** The preflight reads `/etc/sudoers.d/factory-agent` and fails
-  unless it contains `Defaults:factory !log_allowed`, so successful downgrade
-  commands (with their environment and prompt) stay out of the journal. The
-  file must stay readable by `factory` (`root:factory`, mode `0440`) for that
-  check; if it is not, the run stops instead of proceeding unverified.
+- **Sudo journal.** The preflight runs `sudo -n -l` as `factory` and fails on a
+  non-zero exit or unless the effective "Matching Defaults entries" contain
+  `!log_allowed`, so successful downgrade commands (with their environment and
+  prompt) stay out of the journal. Denied commands are still logged. If
+  `sudo -n -l` would need a password, the run stops instead of proceeding
+  unverified.
 - **Secret rotation.** If any secret (the model provider key, the Telegram bot
   token or the xolo-bot private key) ever appears in the journal, a log file, a
   pull request or anywhere else it should not, treat it as compromised and
