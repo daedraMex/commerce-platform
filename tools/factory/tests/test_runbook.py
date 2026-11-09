@@ -91,3 +91,23 @@ def test_runbook_records_the_ratchet_rule():
         "every bug found in a factory pr review or a failed night becomes a test "
         "or a preflight step in the same fix" in text
     )
+
+
+def test_runbook_documents_the_final_sudoers_file_exactly():
+    text = RUNBOOK.read_text()
+    flat = " ".join(text.split())
+    lines = (
+        "Defaults:factory !log_allowed",
+        "Defaults>factory-agent umask=0007",
+        "Defaults>factory-agent umask_override",
+        "factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, "
+        "/usr/bin/cat, /usr/bin/test, "
+        "/srv/factory/worktrees/*/backend/scripts/check.sh, "
+        "/usr/bin/rm -rf /srv/factory/worktrees/*",
+    )
+    sudoers = "\n".join(f"    {line}" for line in lines)
+
+    assert sudoers in text
+    assert "Sudo's `*` does not cross `/`" in flat
+    assert "a sudoers glob is not a security boundary for `rm`" in flat
+    assert "/usr/bin/install" not in text

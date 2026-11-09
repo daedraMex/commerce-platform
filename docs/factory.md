@@ -76,12 +76,16 @@ Run these once, as the admin user unless a step says `factory`.
     and name every variable in `--preserve-env` because sudo's `env_reset`
     would otherwise drop it. The `SETENV` tag is what allows that:
     ```
-    # /etc/sudoers.d/factory-agent
     Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
-    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*
     ```
+
+    The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
+    cross `/`, so the two worktree globs match exactly one flat worktree
+    directory. The code still validates every cleanup path itself: a sudoers
+    glob is not a security boundary for `rm`.
 
     `Defaults:factory !log_allowed` stops sudo from writing the successful
     downgrade commands to the journal, including the environment named in
