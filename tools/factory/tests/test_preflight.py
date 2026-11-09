@@ -135,6 +135,7 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
         Path(tmp_path / "worktrees" / "preflight-42"),
         "preflight-42",
     )
+    assert events[1][1]["repo_dir"] == tmp_path / "repo"
 
 
 def test_preflight_failure_notifies_cleans_up_and_stops(tmp_path):

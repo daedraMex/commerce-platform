@@ -28,6 +28,15 @@ def test_runbook_says_run_the_preflight_after_any_change():
     assert "first after any machine or factory change" in text
 
 
+def test_runbook_documents_the_safe_repo_group_and_fix_commands():
+    text = RUNBOOK.read_text()
+
+    assert "clone must belong to group `factory`" in text
+    assert "sudo chgrp -R factory /srv/factory/repo" in text
+    assert "sudo chmod -R g-s /srv/factory/repo" in text
+    assert "sudo chmod -R g-w,o-w /srv/factory/repo" in text
+
+
 def test_runbook_records_the_ratchet_rule():
     text = " ".join(RUNBOOK.read_text().lower().split())
 

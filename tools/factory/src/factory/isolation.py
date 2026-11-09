@@ -12,6 +12,9 @@ other than a clean "unreadable"/"not writable" aborts the run.
 
 from __future__ import annotations
 
+import os
+import pwd
+import stat
 from pathlib import Path
 
 from .config import Settings
@@ -57,11 +60,56 @@ def _fail(agent_user: str, detail: str) -> IsolationError:
     return IsolationError(f"isolation check could not be proven for {agent_user!r}: {detail}")
 
 
+def repo_tree_violations(
+    repo_dir: Path,
+    *,
+    agent_user: str,
+    agent_uid: int | None = None,
+    agent_gids: set[int] | None = None,
+    limit: int = 5,
+) -> list[Path]:
+    """Walk ``repo_dir`` and return the first unsafe paths for the agent user.
+
+    Runs as the factory user with plain ``os.walk`` and ``lstat``: a path is
+    unsafe when it is owned by ``factory-agent``, belongs to a group that user
+    is in, is world-writable, or is a setgid directory in an agent group.
+    """
+    if agent_uid is None or agent_gids is None:
+        entry = pwd.getpwnam(agent_user)
+        if agent_uid is None:
+            agent_uid = entry.pw_uid
+        if agent_gids is None:
+            agent_gids = set(os.getgrouplist(agent_user, entry.pw_gid))
+
+    violations: list[Path] = []
+
+    def unsafe(path: Path) -> bool:
+        try:
+            info = os.lstat(path)
+        except OSError:
+            return False
+        mode = info.st_mode
+        agent_group = info.st_gid in agent_gids
+        setgid_agent_group = stat.S_ISDIR(mode) and bool(mode & stat.S_ISGID) and agent_group
+        if info.st_uid == agent_uid or agent_group or mode & stat.S_IWOTH or setgid_agent_group:
+            violations.append(path)
+        return len(violations) >= limit
+
+    if unsafe(repo_dir):
+        return violations
+    for root, dirnames, filenames in os.walk(repo_dir):
+        for name in (*dirnames, *filenames):
+            if unsafe(Path(root) / name):
+                return violations
+    return violations
+
+
 def verify_isolation(
     *,
     agent_user: str,
     paths: list[Path],
     write_paths: list[Path] | None = None,
+    repo_dir: Path | None = None,
     run: RunCommand = run_command,
 ) -> None:
     """Fail unless ``agent_user`` cannot read ``paths`` or write ``write_paths``."""
@@ -90,6 +138,14 @@ def verify_isolation(
             raise _fail(
                 agent_user,
                 f"unexpected error reading {path}: {result.stderr.strip() or result.exit_code}",
+            )
+
+    if repo_dir is not None:
+        violations = repo_tree_violations(repo_dir, agent_user=agent_user)
+        if violations:
+            shown = ", ".join(str(path) for path in violations)
+            raise IsolationError(
+                f"repo tree at {repo_dir} is unsafe for agent user {agent_user!r}: {shown}"
             )
 
     for path in write_paths or []:
