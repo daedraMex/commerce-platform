@@ -178,6 +178,18 @@ Run these once, as the admin user unless a step says `factory`.
     uv sync
     ```
 
+    The clone must belong to group `factory`, never to `factory-work` or any
+    group `factory-agent` is in. A leftover setgid `factory-work` group makes
+    the whole clone writable by the agent. Fix it with:
+    ```bash
+    sudo chgrp -R factory /srv/factory/repo
+    sudo chmod -R g-s /srv/factory/repo
+    sudo chmod -R g-w,o-w /srv/factory/repo
+    ```
+    The preflight walks the whole repo, including `.git`, and fails if any file
+    or directory is owned by `factory-agent`, belongs to a group it is in, is
+    world-writable, or is a setgid directory in an agent group.
+
 6. **Create the `xolo-bot` GitHub App and install it on the repo only.** The
    factory does **not** store any `gh` auth and does **not** set a global git
    credential helper (a global helper would leak into the OpenCode subprocess).
@@ -281,9 +293,13 @@ Run these once, as the admin user unless a step says `factory`.
   then proves it cannot read the GitHub App private key, `secrets.env` or
   `~/.ssh/commerce_deploy` (via `sudo -n -u factory-agent -- /usr/bin/cat -n
   <path>`). It also proves `factory-agent` cannot write to `/srv/factory`,
-  `/srv/factory/repo` or `repo/.git/hooks` (via `/usr/bin/test -w`). Any result
-  other than a clean "permission denied" or "not writable" aborts the run, so a
-  broken sudo rule fails closed.
+  `/srv/factory/repo` or `repo/.git/hooks` (via `/usr/bin/test -w`), then walks
+  the whole clone as the factory user with `os.walk` and `lstat` and fails if
+  any file or directory (including `.git`) is owned by `factory-agent`, belongs
+  to a group it is in, is world-writable, or is a setgid directory in an agent
+  group. Any result other than a clean "permission denied" or "not writable",
+  or any unsafe path in that walk, aborts the run, so a broken sudo rule fails
+  closed.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,

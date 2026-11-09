@@ -80,6 +80,7 @@ class Preflight:
                 agent_user=self.settings.agent_user,
                 paths=sensitive_paths(self.settings),
                 write_paths=write_protected_paths(self.settings),
+                repo_dir=self.settings.repo_dir,
             )
 
             step = "verify git version"

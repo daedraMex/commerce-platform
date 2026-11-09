@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -5,6 +6,7 @@ import pytest
 from factory.config import Settings
 from factory.isolation import (
     IsolationError,
+    repo_tree_violations,
     sensitive_paths,
     verify_isolation,
     write_protected_paths,
@@ -150,6 +152,129 @@ def test_verify_isolation_skips_when_no_agent_user(tmp_path):
     verify_isolation(agent_user="", paths=[tmp_path / "secrets.env"], run=run)
 
     assert run.calls == []
+
+
+def make_repo_tree(tmp_path):
+    repo = tmp_path / "repo"
+    hooks = repo / ".git" / "hooks"
+    hooks.mkdir(parents=True)
+    (repo / "README.md").write_text("ok\n")
+    (repo / ".git" / "config").write_text("[core]\n")
+    return repo
+
+
+def test_repo_tree_is_clean_when_nothing_belongs_to_the_agent(tmp_path):
+    repo = make_repo_tree(tmp_path)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid() + 100000,
+        agent_gids=set(),
+    )
+
+    assert violations == []
+
+
+def test_repo_tree_flags_paths_owned_by_the_agent(tmp_path):
+    repo = make_repo_tree(tmp_path)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid(),
+        agent_gids=set(),
+        limit=100,
+    )
+
+    assert repo / "README.md" in violations
+    assert repo / ".git" / "config" in violations
+
+
+def test_repo_tree_flags_paths_in_a_group_the_agent_belongs_to(tmp_path):
+    repo = make_repo_tree(tmp_path)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid() + 100000,
+        agent_gids={os.getgid()},
+        limit=100,
+    )
+
+    assert repo / "README.md" in violations
+    assert repo / ".git" / "config" in violations
+
+
+def test_repo_tree_flags_world_writable_paths(tmp_path):
+    repo = make_repo_tree(tmp_path)
+    world_writable = repo / "world.txt"
+    world_writable.write_text("x")
+    world_writable.chmod(0o666)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid() + 100000,
+        agent_gids=set(),
+    )
+
+    assert violations == [world_writable]
+
+
+def test_repo_tree_flags_setgid_directories_in_an_agent_group(tmp_path):
+    repo = make_repo_tree(tmp_path)
+    setgid_dir = repo / "shared"
+    setgid_dir.mkdir()
+    setgid_dir.chmod(0o2755)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid() + 100000,
+        agent_gids={os.getgid()},
+        limit=100,
+    )
+
+    assert setgid_dir in violations
+
+
+def test_repo_tree_reports_only_the_requested_number_of_paths(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for number in range(10):
+        path = repo / f"{number}.txt"
+        path.write_text("x")
+        path.chmod(0o666)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid() + 100000,
+        agent_gids=set(),
+        limit=3,
+    )
+
+    assert len(violations) == 3
+
+
+def test_verify_isolation_fails_for_an_unsafe_repo_tree(tmp_path, monkeypatch):
+    run = FakeRun()
+    unsafe = tmp_path / "repo" / "shared"
+    monkeypatch.setattr(
+        "factory.isolation.repo_tree_violations",
+        lambda *_args, **_kwargs: [unsafe],
+    )
+
+    with pytest.raises(IsolationError, match="repo tree") as caught:
+        verify_isolation(
+            agent_user="factory-agent",
+            paths=[],
+            repo_dir=tmp_path / "repo",
+            run=run,
+        )
+
+    assert str(unsafe) in str(caught.value)
 
 
 def test_verify_isolation_uses_positive_control_and_non_interactive_sudo(tmp_path):
