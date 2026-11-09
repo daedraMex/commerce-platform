@@ -84,6 +84,20 @@ def test_runbook_documents_the_safe_repo_group_and_fix_commands():
     assert "sudo chmod -R g-w,o-w /srv/factory/repo" in text
 
 
+def test_runbook_documents_the_machine_migration_checklist():
+    text = RUNBOOK.read_text()
+    flat = " ".join(text.split())
+
+    assert "## Migrating an existing machine" in text
+    assert "Update `/etc/sudoers.d/factory-agent`" in flat
+    assert "validate it with `sudo visudo -c`" in flat
+    assert "Run `opencode auth login` as `factory-agent`" in flat
+    assert "Remove `DEEPSEEK_API_KEY` and `FACTORY_PROVIDER_ENV_VARS`" in flat
+    assert "add `XOLO_BOT_USER_ID`" in flat
+    assert "Rotate the DeepSeek key and the Postgres password" in flat
+    assert "Clean any leftover worktrees, then run `factory preflight`" in flat
+
+
 def test_runbook_records_the_ratchet_rule():
     text = " ".join(RUNBOOK.read_text().lower().split())
 

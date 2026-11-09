@@ -300,6 +300,20 @@ Run these once, as the admin user unless a step says `factory`.
     require 1 approval, require the "Backend" and "Ticket link" checks, and
     disallow bypassing them.
 
+## Migrating an existing machine
+
+To upgrade an existing machine to this version:
+
+1. Update `/etc/sudoers.d/factory-agent` to the file shown in the setup steps
+   and validate it with `sudo visudo -c`.
+2. Run `opencode auth login` as `factory-agent`:
+   `sudo -u factory-agent -H /usr/bin/opencode auth login`.
+3. Remove `DEEPSEEK_API_KEY` and `FACTORY_PROVIDER_ENV_VARS` from
+   `~/factory/secrets.env`, and add `XOLO_BOT_USER_ID`.
+4. Rotate the DeepSeek key and the Postgres password, because both appeared in
+   the journal.
+5. Clean any leftover worktrees, then run `factory preflight`.
+
 ## How tickets become agent-ready
 
 - When `/to-tickets` creates a ticket it is marked **HITL** (human-in-the-loop)
