@@ -32,6 +32,13 @@ def test_fetch_main_fetches_from_origin():
     ]
 
 
+def test_fetch_main_raises_when_the_fetch_fails():
+    run = RecordingRun(CommandResult(exit_code=128, stdout="", stderr="could not read from remote"))
+
+    with pytest.raises(RuntimeError, match="git fetch failed: could not read from remote"):
+        Git(run=run).fetch_main(Path("/srv/factory/repo"))
+
+
 def test_check_runs_the_script_as_the_agent_user_without_secrets():
     run = RecordingRun()
     worktree = Path("/srv/factory/worktrees/nf/1")

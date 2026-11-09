@@ -59,7 +59,9 @@ class Git:
         self._base_env = dict(base_env if base_env is not None else os.environ)
 
     def fetch_main(self, repo_dir: Path) -> None:
-        self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
+        result = self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
+        if result.exit_code != 0:
+            raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
 
     def create_worktree(self, repo_dir: Path, worktree: Path, branch: str) -> Path:
         self._run(

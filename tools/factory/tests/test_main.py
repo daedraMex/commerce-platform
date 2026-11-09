@@ -1,6 +1,8 @@
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
 from factory.main import Factory
@@ -23,17 +25,26 @@ class FakeGit:
         decisions="",
         diff=None,
         command_body=COMMAND_BODY,
+        fetch_error=None,
     ):
         self.check_result = check_passed
         self.check_output = check_output
         self.decisions = decisions
         self.diff = diff or DiffStats()
         self.command_body = command_body
+        self.fetch_error = fetch_error
         self.committed = []
         self.pushed = []
         self.worktrees = []
+        self.events = []
+
+    def fetch_main(self, repo_dir):
+        self.events.append("fetch_main")
+        if self.fetch_error is not None:
+            raise self.fetch_error
 
     def create_worktree(self, repo_dir, worktree, branch):
+        self.events.append("create_worktree")
         self.worktrees.append((branch, worktree))
         return worktree
 
@@ -114,12 +125,16 @@ class RecordingNotifier:
     def __init__(self):
         self.pr_ready = []
         self.stuck = []
+        self.run_failed = []
 
     def send_pr_ready(self, info):
         self.pr_ready.append(info)
 
     def send_stuck(self, info):
         self.stuck.append(info)
+
+    def send_run_failed(self, info):
+        self.run_failed.append(info)
 
 
 def make_settings(tmp_path):
@@ -181,6 +196,36 @@ def test_success_opens_draft_pr_and_notifies(tmp_path):
     assert "Chose A." in body
     assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
     assert len(notifier.pr_ready) == 1
+
+
+def test_fetch_main_runs_before_any_worktree_is_created(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert "fetch_main" in git.events
+    assert git.events.index("fetch_main") < git.events.index("create_worktree")
+
+
+def test_fetch_failure_aborts_the_run_and_notifies(tmp_path):
+    git = FakeGit(fetch_error=RuntimeError("git fetch failed: no network"))
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    with pytest.raises(RuntimeError, match="git fetch failed"):
+        factory.run()
+
+    assert git.worktrees == []
+    assert github.listed_with is None
+    assert len(notifier.run_failed) == 1
+    assert "could not fetch origin/main" in notifier.run_failed[0].reason
 
 
 def test_success_labels_migration_when_migrations_changed(tmp_path):

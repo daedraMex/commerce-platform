@@ -20,6 +20,7 @@ from .notify import (
     Notifier,
     NullNotifier,
     PrReadyInfo,
+    RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
     build_handoff_command,
@@ -66,6 +67,7 @@ class Factory:
     def run(self) -> list[TicketResult]:
         cleanup_old(self.settings.worktrees_dir, keep_days=self.settings.keep_days)
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
+        self._fetch_main_or_abort()
         token = self.token_provider.mint(self.settings.repo)
         tickets = select_tickets(
             self.github.list_tickets(token), max_tickets=self.settings.max_tickets
@@ -77,6 +79,16 @@ class Factory:
             if not result.ok:
                 break
         return results
+
+    def _fetch_main_or_abort(self) -> None:
+        """Refresh origin/main before any worktree branches from it."""
+        try:
+            self.git.fetch_main(self.settings.repo_dir)
+        except Exception as exc:
+            self.notifier.send_run_failed(
+                RunFailedInfo(reason=f"could not fetch origin/main: {exc}")
+            )
+            raise
 
     def _run_ticket(self, ticket: Ticket) -> TicketResult:
         model = select_model(
