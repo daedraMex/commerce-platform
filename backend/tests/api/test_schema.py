@@ -1,4 +1,12 @@
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
+
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture
@@ -42,7 +50,25 @@ def test_schema_documents_liveness_success_with_example(schema):
     response = operation["responses"]["200"]
     examples = response["content"]["application/json"]["examples"].values()
 
-    assert any(example["value"] == {"status": "ok", "version": "dev"} for example in examples)
+    assert any(example["value"] == {"status": "ok", "version": "1.4.0"} for example in examples)
+
+
+def test_schema_uses_a_fixed_liveness_example_regardless_of_app_version():
+    env = {**os.environ, "APP_VERSION": "9.9.9"}
+    result = subprocess.run(
+        [sys.executable, "manage.py", "spectacular", "--format", "openapi-json"],
+        cwd=BACKEND_DIR,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+    schema = json.loads(result.stdout)
+    operation = schema["paths"]["/api/v1/health/live/"]["get"]
+    examples = operation["responses"]["200"]["content"]["application/json"]["examples"].values()
+
+    assert any(example["value"] == {"status": "ok", "version": "1.4.0"} for example in examples)
 
 
 def test_schema_documents_the_liveness_version_field(schema):

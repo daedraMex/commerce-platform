@@ -130,7 +130,7 @@ class LivenessView(APIView):
                 examples=[
                     OpenApiExample(
                         "Liveness success",
-                        value={"status": "ok", "version": settings.APP_VERSION},
+                        value={"status": "ok", "version": "1.4.0"},
                         response_only=True,
                     )
                 ],
