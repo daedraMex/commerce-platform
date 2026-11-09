@@ -40,6 +40,30 @@ def test_fetch_main_raises_when_the_fetch_fails():
         Git(run=run).fetch_main(Path("/srv/factory/repo"))
 
 
+def test_worktree_exists_reads_the_porcelain_list():
+    stdout = "worktree /srv/factory/repo\n\nworktree /srv/factory/worktrees/nf-7-x\n"
+    run = RecordingRun(CommandResult(0, stdout, ""))
+    repo = Path("/srv/factory/repo")
+
+    assert Git(run=run).worktree_exists(repo, Path("/srv/factory/worktrees/nf-7-x")) is True
+    assert Git(run=run).worktree_exists(repo, Path("/srv/factory/worktrees/other")) is False
+    assert run.calls[0][0] == ["git", "worktree", "list", "--porcelain"]
+
+
+def test_branch_exists_checks_the_local_branch_only():
+    run = RecordingRun(CommandResult(0, "", ""))
+    repo = Path("/srv/factory/repo")
+
+    assert Git(run=run).branch_exists(repo, "nf/7-x") is True
+    assert run.calls[0][0] == [
+        "git",
+        "show-ref",
+        "--verify",
+        "--quiet",
+        "refs/heads/nf/7-x",
+    ]
+
+
 def test_create_worktree_raises_a_clear_error_on_failure():
     run = RecordingRun(CommandResult(128, "", "fatal: a branch named 'nf/7-x' already exists"))
     repo = Path("/srv/factory/repo")

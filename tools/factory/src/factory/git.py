@@ -63,6 +63,21 @@ class Git:
         if result.exit_code != 0:
             raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
 
+    def worktree_exists(self, repo_dir: Path, worktree: Path) -> bool:
+        result = self._run(["git", "worktree", "list", "--porcelain"], str(repo_dir), timeout=120)
+        if result.exit_code != 0:
+            return False
+        target = f"worktree {worktree}"
+        return any(line.strip() == target for line in result.stdout.splitlines())
+
+    def branch_exists(self, repo_dir: Path, branch: str) -> bool:
+        result = self._run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            str(repo_dir),
+            timeout=120,
+        )
+        return result.exit_code == 0
+
     def create_worktree(self, repo_dir: Path, worktree: Path, branch: str) -> Path:
         result = self._run(
             ["git", "worktree", "add", "-b", branch, str(worktree), "origin/main"],

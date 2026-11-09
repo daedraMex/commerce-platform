@@ -8,7 +8,7 @@ from factory.diff import DiffStats, FileChange
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
 from factory.runner import AgentResult
-from factory.tickets import Ticket
+from factory.tickets import Ticket, worktree_path
 
 OVERLAY = "Model: {{MODEL}}. Branch: {{BRANCH}}."
 
@@ -42,23 +42,37 @@ class FakeGit:
         self.removed_worktrees = []
         self.deleted_branches = []
         self.events = []
+        self.operations = []
+        self.existing_worktrees = set()
+        self.existing_branches = set()
 
     def fetch_main(self, repo_dir):
         self.events.append("fetch_main")
         if self.fetch_error is not None:
             raise self.fetch_error
 
+    def worktree_exists(self, repo_dir, worktree):
+        self.operations.append(("worktree_exists", str(worktree)))
+        return str(worktree) in self.existing_worktrees
+
+    def branch_exists(self, repo_dir, branch):
+        self.operations.append(("branch_exists", branch))
+        return branch in self.existing_branches
+
     def create_worktree(self, repo_dir, worktree, branch):
         self.events.append("create_worktree")
+        self.operations.append(("create_worktree", branch))
         self.worktrees.append((branch, worktree))
         return worktree
 
     def remove_worktree(self, repo_dir, worktree):
         self.events.append("remove_worktree")
+        self.operations.append(("remove_worktree", str(worktree)))
         self.removed_worktrees.append(worktree)
 
     def delete_branch(self, repo_dir, branch):
         self.events.append("delete_branch")
+        self.operations.append(("delete_branch", branch))
         self.deleted_branches.append(branch)
 
     def write_file(self, worktree, relpath, content):
@@ -311,6 +325,42 @@ def test_preflight_cleans_up_its_throwaway_worktree_and_branch(tmp_path):
 
     assert git.removed_worktrees[0] == git.worktrees[0][1]
     assert git.deleted_branches == ["preflight-42"]
+
+
+def test_retry_removes_existing_ticket_worktree_and_branch(tmp_path):
+    branch = "nf/7-ticket-7"
+    worktree = worktree_path(tmp_path / "worktrees", branch)
+    git = FakeGit(check_passed=True)
+    git.existing_worktrees = {str(worktree)}
+    git.existing_branches = {branch}
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    create = git.operations.index(("create_worktree", branch))
+    assert git.operations.index(("remove_worktree", str(worktree))) < create
+    assert git.operations.index(("delete_branch", branch)) < create
+
+
+def test_retry_removes_only_the_existing_branch(tmp_path):
+    branch = "nf/7-ticket-7"
+    worktree = worktree_path(tmp_path / "worktrees", branch)
+    git = FakeGit(check_passed=True)
+    git.existing_branches = {branch}
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert ("remove_worktree", str(worktree)) not in git.operations
+    assert git.operations.index(("delete_branch", branch)) < git.operations.index(
+        ("create_worktree", branch)
+    )
 
 
 def test_success_labels_migration_when_migrations_changed(tmp_path):

@@ -109,6 +109,13 @@ class Factory:
             verify_git_version_fn=self._preflight_verify_git_version,
         ).run()
 
+    def _remove_stale_ticket_worktree(self, worktree: Path, branch: str) -> None:
+        """Drop a previous stuck run's worktree and local branch, never the remote."""
+        if self.git.worktree_exists(self.settings.repo_dir, worktree):
+            self.git.remove_worktree(self.settings.repo_dir, worktree)
+        if self.git.branch_exists(self.settings.repo_dir, branch):
+            self.git.delete_branch(self.settings.repo_dir, branch)
+
     def _run_ticket(self, ticket: Ticket) -> TicketResult:
         model = select_model(
             ticket.labels,
@@ -116,11 +123,9 @@ class Factory:
             strong_model=self.settings.factory_strong_model,
         )
         branch = branch_name(ticket)
-        worktree = self.git.create_worktree(
-            self.settings.repo_dir,
-            worktree_path(self.settings.worktrees_dir, branch),
-            branch,
-        )
+        worktree = worktree_path(self.settings.worktrees_dir, branch)
+        self._remove_stale_ticket_worktree(worktree, branch)
+        worktree = self.git.create_worktree(self.settings.repo_dir, worktree, branch)
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
         log_path = self._log_path(ticket)
