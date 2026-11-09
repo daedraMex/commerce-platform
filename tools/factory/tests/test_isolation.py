@@ -206,8 +206,61 @@ def test_repo_tree_flags_paths_in_a_group_the_agent_belongs_to(tmp_path):
     assert repo / ".git" / "config" in violations
 
 
-def test_repo_tree_flags_world_writable_paths(tmp_path):
+def test_repo_tree_allows_a_symlink_owned_by_factory(tmp_path):
     repo = make_repo_tree(tmp_path)
+    link = repo / "README.link"
+    os.symlink("README.md", link)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid() + 100000,
+        agent_gids=set(),
+    )
+
+    assert violations == []
+
+
+def test_repo_tree_flags_a_symlink_owned_by_the_agent(tmp_path):
+    repo = make_repo_tree(tmp_path)
+    link = repo / "README.link"
+    os.symlink("README.md", link)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid(),
+        agent_gids=set(),
+        limit=100,
+    )
+
+    assert link in violations
+
+
+def test_repo_tree_does_not_follow_symlinked_directories(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    bad = outside / "bad.txt"
+    bad.write_text("x")
+    bad.chmod(0o666)
+    repo = make_repo_tree(tmp_path)
+    os.symlink(outside, repo / "outside-link", target_is_directory=True)
+
+    violations = repo_tree_violations(
+        repo,
+        agent_user="factory-agent",
+        agent_uid=os.getuid() + 100000,
+        agent_gids=set(),
+        limit=100,
+    )
+
+    assert bad not in violations
+    assert violations == []
+
+
+def test_repo_tree_still_flags_world_writable_paths_next_to_symlinks(tmp_path):
+    repo = make_repo_tree(tmp_path)
+    os.symlink("README.md", repo / "README.link")
     world_writable = repo / "world.txt"
     world_writable.write_text("x")
     world_writable.chmod(0o666)

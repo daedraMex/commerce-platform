@@ -330,7 +330,9 @@ Run these once, as the admin user unless a step says `factory`.
 Every bug found in a factory PR review or a failed night becomes a test or a
 preflight step in the same fix, so that class of error cannot recur silently.
 A fix that only changes the code, without adding the failing test or preflight
-step that would have caught it, is not finished.
+step that would have caught it, is not finished. For example, the symlink false
+positive in the repo-tree walk (a symlink's `lrwxrwxrwx` is not
+world-writable) became the symlink tests in `tests/test_isolation.py`.
 
 ## Reading logs and decisions
 
