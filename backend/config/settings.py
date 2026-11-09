@@ -22,6 +22,9 @@ SECRET_KEY = env("SECRET_KEY")
 DEBUG = env("DEBUG")
 ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 
+# Reported by the liveness endpoint so a deploy can be verified.
+APP_VERSION = env("APP_VERSION", default="dev")
+
 INSTALLED_APPS = [
     "config.admin.PlatformAdminConfig",
     "django.contrib.auth",
