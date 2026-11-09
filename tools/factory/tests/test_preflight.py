@@ -8,8 +8,11 @@ from factory.tickets import Ticket
 
 
 class FakeGit:
-    def __init__(self, *, check_passed=True, fetch_error=None, events=None):
+    def __init__(
+        self, *, check_passed=True, check_output="check output", fetch_error=None, events=None
+    ):
         self.check_passed = check_passed
+        self.check_output = check_output
         self.fetch_error = fetch_error
         self.calls = events if events is not None else []
 
@@ -24,7 +27,7 @@ class FakeGit:
 
     def check(self, worktree):
         self.calls.append(("check", worktree))
-        return (self.check_passed, "check output")
+        return (self.check_passed, self.check_output)
 
     def remove_worktree(self, repo_dir, worktree):
         self.calls.append(("remove_worktree", worktree))
@@ -143,8 +146,25 @@ def test_preflight_failure_notifies_cleans_up_and_stops(tmp_path):
 
     assert caught.value.step == "check.sh"
     assert len(notifier.run_failed) == 1
-    assert notifier.run_failed[0].reason == "preflight failed: check.sh: check.sh failed"
+    assert notifier.run_failed[0].reason.startswith(
+        "preflight failed: check.sh: check.sh failed; see "
+    )
+    assert str(tmp_path / "logs" / "preflight-42.log") in notifier.run_failed[0].reason
     assert [call[0] for call in git.calls][-2:] == ["remove_worktree", "delete_branch"]
+
+
+def test_preflight_check_failure_writes_the_log_but_not_the_output_to_telegram(tmp_path):
+    git = FakeGit(check_passed=False, check_output="FAILED CHECK OUTPUT")
+    notifier = RecordingNotifier()
+
+    with pytest.raises(PreflightError, match="check.sh"):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    log_path = tmp_path / "logs" / "preflight-42.log"
+    assert log_path.read_text() == "FAILED CHECK OUTPUT"
+    reason = notifier.run_failed[0].reason
+    assert str(log_path) in reason
+    assert "FAILED CHECK OUTPUT" not in reason
 
 
 def test_preflight_fetch_failure_creates_no_worktree_and_notifies(tmp_path):

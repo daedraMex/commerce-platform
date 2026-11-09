@@ -63,6 +63,8 @@ class Preflight:
         self._verify_git_version = verify_git_version_fn
 
     def run(self) -> list[Ticket]:
+        run_id = str(self._clock())
+        log_path = self.settings.logs_dir / f"preflight-{run_id}.log"
         worktree = None
         branch = None
         step = "fetch origin/main"
@@ -84,14 +86,15 @@ class Preflight:
             self._verify_git_version()
 
             step = "create worktree"
-            branch = f"preflight-{self._clock()}"
+            branch = f"preflight-{run_id}"
             worktree = worktree_path(self.settings.worktrees_dir, branch)
             self.git.create_worktree(self.settings.repo_dir, worktree, branch)
 
             step = "check.sh"
-            passed, _output = self.git.check(worktree)
+            passed, output = self.git.check(worktree)
             if not passed:
-                raise RuntimeError("check.sh failed")
+                self._write_check_log(log_path, output)
+                raise RuntimeError(f"check.sh failed; see {log_path}")
 
             return tickets
         except PreflightError:
@@ -104,6 +107,10 @@ class Preflight:
             raise PreflightError(step, detail) from exc
         finally:
             self._cleanup(worktree, branch)
+
+    def _write_check_log(self, log_path, output: str) -> None:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path.write_text(output)
 
     def _cleanup(self, worktree, branch) -> None:
         if worktree is not None:
