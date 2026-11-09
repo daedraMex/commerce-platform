@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from factory.runner import (
     TEST_SETTINGS,
     AgentRunner,
@@ -92,6 +94,30 @@ def test_check_env_uses_the_values_matching_ci():
         "ALLOWED_HOSTS": "localhost,127.0.0.1",
         "REDIS_URL": "redis://localhost:6379/0",
     }
+
+
+CI_WORKFLOW = Path(__file__).resolve().parents[3] / ".github" / "workflows" / "ci.yml"
+
+
+def backend_job_env(text: str) -> dict[str, str]:
+    """Read the ``env:`` mapping of the backend job from the CI workflow."""
+    lines = text.splitlines()
+    backend = next(i for i, line in enumerate(lines) if line.strip() == "backend:")
+    env_start = next(i for i in range(backend + 1, len(lines)) if lines[i] == "    env:")
+    env: dict[str, str] = {}
+    for line in lines[env_start + 1 :]:
+        if not line.startswith("      "):
+            break
+        key, separator, value = line.strip().partition(":")
+        if separator:
+            env[key] = value.strip().strip('"').strip("'")
+    return env
+
+
+def test_test_settings_match_the_ci_backend_job():
+    env = backend_job_env(CI_WORKFLOW.read_text())
+
+    assert {key: env[key] for key in TEST_SETTINGS} == TEST_SETTINGS
 
 
 def test_truncate_check_output_keeps_the_tail():
