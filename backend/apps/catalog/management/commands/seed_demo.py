@@ -3,11 +3,15 @@
 from pathlib import Path
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from apps.catalog.management.commands.import_catalog import import_catalog_from_csv
-from apps.catalog.management.support import get_active_store, resolve_operator
+from apps.catalog.management.support import (
+    get_active_store,
+    import_catalog_from_csv,
+    resolve_operator,
+)
 from apps.catalog.models import Category, Supplier
 
 DEMO_CSV_PATH = Path(__file__).with_name("demo_catalog.csv")
@@ -71,16 +75,29 @@ class Command(BaseCommand):
 
 def _ensure_demo_categories_and_supplier(store):
     for definition in DEMO_CATEGORIES:
-        Category.objects.get_or_create(
-            store=store,
-            slug=definition["slug"],
-            defaults={
-                "name": definition["name"],
-                "sku_code": definition["sku_code"],
-                "shape": Category.Shape.RECTANGLE,
-                "option_schema": definition["option_schema"],
-                "attribute_schema": [],
-                "is_active": True,
-            },
-        )
+        _ensure_demo_category(store, definition)
     Supplier.objects.get_or_create(store=store, name=DEMO_SUPPLIER_NAME)
+
+
+def _ensure_demo_category(store, definition):
+    if Category.objects.filter(store=store, slug=definition["slug"]).exists():
+        return
+
+    category = Category(
+        store=store,
+        name=definition["name"],
+        slug=definition["slug"],
+        sku_code=definition["sku_code"],
+        shape=Category.Shape.RECTANGLE,
+        option_schema=definition["option_schema"],
+        attribute_schema=[],
+        is_active=True,
+    )
+    try:
+        category.full_clean()
+    except ValidationError as error:
+        messages = "; ".join(error.messages)
+        raise CommandError(
+            f"The demo category {definition['slug']!r} is invalid: {messages}"
+        ) from error
+    category.save()
