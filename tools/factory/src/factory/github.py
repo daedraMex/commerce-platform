@@ -11,6 +11,10 @@ from .tickets import Ticket, parse_blocked_by
 _CLOSES_RE = re.compile(r"(?:Closes|Part of)\s+#(\d+)", re.IGNORECASE)
 
 
+class GitHubError(RuntimeError):
+    """Raised when a gh call cannot be trusted to report the repo state."""
+
+
 class GitHub:
     def __init__(self, repo: str, run: RunCommand = run_command):
         self.repo = repo
@@ -65,6 +69,54 @@ class GitHub:
         # gh prints the PR URL on the last line; the number is its trailing segment.
         url = result.stdout.strip().splitlines()[-1].strip()
         return int(url.rstrip("/").rsplit("/", 1)[-1])
+
+    def count_open_factory_prs(
+        self,
+        *,
+        author: str,
+        branch_prefix: str = "nf/",
+        token: str | None = None,
+    ) -> int:
+        """Count open PRs by ``author`` whose branch starts with ``branch_prefix``.
+
+        Draft and ready PRs both count. ``gh`` reports app logins as
+        ``app/<slug>`` (and some bot logins with a ``[bot]`` suffix), so
+        normalize both forms before comparing. A failed call or unparseable
+        output raises instead of reporting zero, because a wrong zero would
+        silently bypass the cap.
+        """
+        result = self._run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self.repo,
+                "--state",
+                "open",
+                "--limit",
+                "1000",
+                "--json",
+                "number,isDraft,headRefName,author",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            raise GitHubError(f"gh pr list failed: {result.stderr.strip() or result.exit_code}")
+        try:
+            prs = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GitHubError("gh pr list returned invalid JSON") from exc
+        if not isinstance(prs, list):
+            raise GitHubError("gh pr list returned an unexpected JSON shape")
+        return sum(
+            1
+            for pr in prs
+            if _same_login((pr.get("author") or {}).get("login", ""), author)
+            and str(pr.get("headRefName", "")).startswith(branch_prefix)
+        )
 
     def add_issue_label(self, number: int, label: str, token: str) -> None:
         self._run(
@@ -165,3 +217,11 @@ class GitHub:
 
 def _gh_env(token: str | None) -> dict[str, str] | None:
     return {"GH_TOKEN": token} if token else None
+
+
+def _same_login(login: str, author: str) -> bool:
+    return _normalize_login(login) == _normalize_login(author)
+
+
+def _normalize_login(login: str) -> str:
+    return login.removesuffix("[bot]").removeprefix("app/")

@@ -1,8 +1,10 @@
 # Night factory — runbook
 
 The night factory is an unattended runner on a dedicated Pop!_OS machine. It
-implements tickets marked agent-ready overnight and opens draft pull requests.
-The decisions behind it are in `docs/adr/0025-night-factory-unattended-agent-runner.md`.
+runs every hour, around the clock, implements tickets marked agent-ready and
+opens draft pull requests, within two caps: open pull requests and daily ticket
+attempts. The decisions behind it are in
+`docs/adr/0025-night-factory-unattended-agent-runner.md`.
 
 - Code lives in `tools/factory/` (a small Python package run with `uv`).
 - It is governed by the factory-only OpenCode config
@@ -39,6 +41,9 @@ The main clone and the worktrees live under `/srv/factory`, outside
 
 /home/factory/          # factory:factory, mode 700
 ├── logs/               # one log file per ticket run, cleaned after 14 days
+├── state/              # mode 700; pause marker and the append-only attempts ledger
+│   ├── attempts.log    # mode 600; started + outcome lines per attempt, never readable by factory-agent
+│   └── paused          # present only while the factory is paused
 ├── secrets.env         # chmod 600, see below
 └── xolo-bot.pem        # chmod 600, see below
 ```
@@ -121,13 +126,16 @@ Run these once, as the admin user unless a step says `factory`.
     ```bash
     sudo install -d -m 755 -o factory -g factory /srv/factory
     sudo install -d -m 2770 -o factory -g factory-work /srv/factory/worktrees
+    sudo install -d -m 700 -o factory -g factory /home/factory/state
     sudo chmod 700 /home/factory
     ```
 
     The secrets file, the private key and the SSH deploy key
     (`~/.ssh/commerce_deploy`) remain owned by `factory` (mode `600`), so
-    `factory-agent` cannot read them even via bash. The factory verifies this on
-    every startup.
+    `factory-agent` cannot read them even via bash. The state directory stays
+    `700` and the attempts ledger `600` for the same reason: the agent can never
+    read or rewrite the daily count. The factory verifies the secrets on every
+    startup.
 
     Smoke-test the cross-user setup on the real machine by hand once (as admin),
     using a throwaway worktree whose flat name matches the sudoers glob:
@@ -260,7 +268,11 @@ Run these once, as the admin user unless a step says `factory`.
     FACTORY_AGENT_USER=factory-agent
     FACTORY_AGENT_HOME=/home/factory-agent
     FACTORY_HOST=factory@factory-host            # ssh target for the stuck handoff
-    # optional overrides:
+    # run limits (both must be >= 1):
+    FACTORY_MAX_OPEN_PRS=2                       # open xolo-bot PRs on nf/* branches
+    FACTORY_MAX_TICKETS_PER_DAY=6                # attempts started today, failures included
+    FACTORY_STATE_DIR=/home/factory/state        # pause marker + append-only attempts ledger
+    # other optional overrides:
     # FACTORY_MAX_TICKETS=1
     # FACTORY_ATTEMPTS=5              # max agent steps per ticket
     # FACTORY_TIME_LIMIT_MINUTES=120  # max wall-clock per ticket
@@ -295,6 +307,12 @@ Run these once, as the admin user unless a step says `factory`.
     systemctl --user enable --now factory.timer
     loginctl enable-linger factory   # keep the timer alive when nobody is logged in
     ```
+    The timer fires hourly. `factory.service` is `Type=oneshot`, so systemd
+    never starts a run while the previous one is still active. After changing a
+    unit file, reload and restart the timer:
+    ```bash
+    systemctl --user daemon-reload && systemctl --user restart factory.timer
+    ```
 
 11. **Protect `main`.** On GitHub: require a pull request before merging,
     require 1 approval, require the "Backend" and "Ticket link" checks, and
@@ -312,7 +330,15 @@ To upgrade an existing machine to this version:
    `~/factory/secrets.env`, and add `XOLO_BOT_USER_ID`.
 4. Rotate the DeepSeek key and the Postgres password, because both appeared in
    the journal.
-5. Clean any leftover worktrees, then run `factory preflight`.
+5. Create the state directory (`install -d -m 700 /home/factory/state`), add
+   `FACTORY_MAX_OPEN_PRS` and `FACTORY_MAX_TICKETS_PER_DAY` to
+   `~/factory/secrets.env` if you want non-default caps, and copy the current
+   `factory.service`/`factory.timer` into `~/.config/systemd/user/`. Then reload
+   and restart the hourly timer:
+   ```bash
+   systemctl --user daemon-reload && systemctl --user restart factory.timer
+   ```
+6. Clean any leftover worktrees, then run `factory preflight`.
 
 ## How tickets become agent-ready
 
@@ -327,9 +353,33 @@ To upgrade an existing machine to this version:
 - Migrations and changes touching money, security or customer data still get a
   human review before merging (unchanged AGENTS.md safety rules).
 - `FACTORY_MAX_TICKETS` (default 1) is how many independent tickets one run
-  takes, oldest first, each on its own branch. Raise it only when a night has
-  room for more than one independent ticket; the run still stops at the first
-  failure.
+  takes, oldest first, each on its own branch. Keep it at 1 with the hourly
+  timer: the daily cap is checked at the start of a run, so raising this can
+  exceed the daily attempt count. The run still stops at the first failure.
+
+## Run limits and pauses
+
+Two caps stop the factory before it picks a ticket:
+
+- **Open-PR cap.** `FACTORY_MAX_OPEN_PRS` (default 2) counts open pull requests
+  authored by `xolo-bot` on `nf/*` branches, draft or ready. At the configured
+  value the run pauses with "N PRs waiting for review".
+- **Daily cap.** `FACTORY_MAX_TICKETS_PER_DAY` (default 6) counts ticket
+  *attempts* started today in `America/Mexico_City`, successful or failed. At
+  the configured value the run pauses with "daily limit reached". A `started`
+  line is written before OpenCode runs and an outcome line after it finishes;
+  the daily cap counts only `started` lines, so a run killed by systemd's
+  timeout, a reboot or SIGTERM still consumes budget. The ledger at
+  `/home/factory/state/attempts.log` is append-only, mode `600`, and stays
+  unreadable by `factory-agent`. Failed attempts count, so a broken ticket
+  cannot burn the model budget.
+- **Unreachable GitHub.** If the open-PR count cannot be read, the run pauses
+  with "GitHub unreachable" instead of assuming zero.
+
+Both limits must be at least 1; the config rejects smaller values before the
+run. A skipped run is silent. Telegram gets exactly one message when the
+factory moves into a paused state, and nothing more until that state clears;
+the normal PR-ready, stuck and aborted messages are unchanged.
 
 ## Hardening
 
@@ -418,7 +468,8 @@ world-writable) became the symlink tests in `tests/test_isolation.py`.
   root (git-ignored, never committed). It holds every choice, the rejected
   alternative, and why. If the agent could not decide safely it writes the open
   question as the first line, starting with `OPEN QUESTION:`.
-- Worktrees and logs older than 14 days are deleted at the start of each run.
+- Worktrees and logs older than 14 days are deleted at the start of each run
+  that is not paused.
 
 ## Answering a `needs-decision` ticket
 
@@ -451,7 +502,7 @@ worktrees, then proves the cleanup removes an agent-owned
 branch even on failure.
 Any failed step sends `preflight failed: <step>: <short error>` to Telegram
 (truncated, with no environment values or secrets) and exits non-zero without
-touching a ticket. The nightly run performs the same preflight before selecting
+touching a ticket. The hourly run performs the same preflight before selecting
 any ticket.
 
 ## Run once by hand

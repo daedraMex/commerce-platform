@@ -4,6 +4,8 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
+# Type=oneshot keeps this run active until it exits, so systemd never starts
+# another run while one is still going; a timer tick during a run is skipped.
 Type=oneshot
 EnvironmentFile=%h/factory/secrets.env
 WorkingDirectory=/srv/factory/repo/tools/factory

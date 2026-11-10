@@ -1,9 +1,11 @@
 from factory.notify import (
+    PausedInfo,
     PrReadyInfo,
     RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
     build_handoff_command,
+    build_paused_message,
     build_pr_ready_message,
     build_run_failed_message,
     build_stuck_message,
@@ -113,6 +115,12 @@ def test_run_failed_message_names_the_reason_and_escapes_html():
     assert "Night factory aborted" in msg
     assert "could not fetch origin/main" in msg
     assert "&lt;no network&gt;" in msg
+
+
+def test_paused_message_names_the_reason_and_escapes_html():
+    msg = build_paused_message(PausedInfo(reason="2 PRs waiting for review <x>"))
+    assert "Night factory paused" in msg
+    assert "2 PRs waiting for review &lt;x&gt;" in msg
 
 
 def test_build_handoff_command_with_and_without_host():
