@@ -162,7 +162,11 @@ para `home` (las imágenes llegan en la fase 4b).
 **Objetivo:** que el staff convierta una foto del celular en la imagen del catálogo.
 **Entregables:** endpoints de staff para media del catálogo con `catalog.manage`; página para
 celular donde se sube la foto (HEIC a JPEG) y se marcan las cuatro esquinas; procesamiento en
-Celery que endereza, recorta a la proporción real y corrige la luz.
+Celery que endereza, recorta a la proporción real y corrige la luz. La página nace en Quetzal, la
+consola de staff (ADR-0026): esqueleto con inicio de sesión (ADR-0027), tienda en la URL y menú por
+permisos; `packages/api-client` generado con orval; `GET /api/v1/me/`; `Store.accent_color`.
+**Prerrequisito (PR humano):** `web/console/scripts/check.sh` y la fábrica corriendo el check de cada
+parte que toca un ticket; el job E2E de nivel 2 en GitHub Actions.
 **Criterio de salida:** un miembro del staff fotografía una frazada y queda como su imagen principal.
 
 ### Fase 5 — Inventario y pedidos
@@ -202,8 +206,10 @@ mostrado incluye el recargo.
 
 ### Fase 7 — Storefront, primero con la tienda de frazadas
 **Objetivo:** vender en tu propio dominio.
-**Entregables:** `packages/api-client` generado; un solo `storefront` en Next.js con tema por tienda, resuelta por dominio, que
-sale en vivo con `home`: catálogo, producto, carrito, checkout, confirmación e historial; SEO; despliegue en Vercel con previews.
+**Entregables:** un solo `storefront` en Next.js con tema por tienda, resuelta por dominio, que
+sale en vivo con `home`: catálogo, producto, carrito, checkout, confirmación e historial; SEO; despliegue en Vercel (plan Pro)
+con previews. Usa el `packages/api-client` y la sesión con BFF (ADR-0027) que ya existen desde la 4b; el tema
+completo por tienda se decide en su /grill-with-docs.
 **Criterio de salida:** alguien compra una frazada en tu dominio.
 
 ### Fase 8 — Tienda de anime y canales

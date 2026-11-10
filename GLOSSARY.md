@@ -57,6 +57,14 @@ _Avoid_: Privilege, capability, scope
 The link that makes someone staff of one store, with exactly one role there. An inactive membership grants nothing.
 _Avoid_: Assignment, employment
 
+**Quetzal**:
+The staff console: the web app where staff of every store do their work, such as catalog photos and orders. Not the Django admin, which only platform operators use.
+_Avoid_: Dashboard, backoffice, admin panel
+
+**Accent color**:
+The color a store shows in Quetzal so staff can see at a glance which store they are working in. It is store data, not a full theme.
+_Avoid_: Brand color, theme
+
 ### Catalog
 
 **Product**:
