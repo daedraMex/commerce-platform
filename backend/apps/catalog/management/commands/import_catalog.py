@@ -215,47 +215,60 @@ class Command(BaseCommand):
         # The operator is checked before the file, the store or any catalog row is read.
         operator = resolve_operator(options["operator"])
         store = get_active_store(options["store"])
-        dry_run = options["dry_run"]
         images_dir = _images_directory(options.get("images"))
 
-        rows, rejections = _read_rows(options["csv"], store)
-        warnings = _collect_warnings(rows, images_dir)
-        show_images = images_dir is not None
-        prepared_images = {}
-        if images_dir is not None:
-            prepared_images, image_rejections = _prepare_images(store, rows, images_dir)
-            rejections = [*rejections, *image_rejections]
-
-        if rejections:
-            report = _rejected_report(
-                rejections, dry_run, show_images=show_images, warnings=warnings
-            )
-        elif dry_run:
-            report = _execute(
-                store,
-                rows,
-                operator,
-                dry_run=True,
-                prepared_images=prepared_images,
-                show_images=show_images,
-                warnings=warnings,
-            )
-        else:
-            with transaction.atomic():
-                lock_store(store.pk)
-                report = _execute(
-                    store,
-                    rows,
-                    operator,
-                    dry_run=False,
-                    prepared_images=prepared_images,
-                    show_images=show_images,
-                    warnings=warnings,
-                )
+        report = import_catalog_from_csv(
+            store,
+            operator,
+            options["csv"],
+            dry_run=options["dry_run"],
+            images_dir=images_dir,
+        )
 
         self.stdout.write(report.render())
         if report.rejected:
             raise CommandError(f"{report.rejected} row(s) rejected.")
+
+
+def import_catalog_from_csv(store, operator, csv_path, *, dry_run=False, images_dir=None):
+    """Import a CSV into an already-resolved store and return its report.
+
+    Shared by ``import_catalog`` and ``seed_demo`` so both use one parsing,
+    validation and write path.
+    """
+    rows, rejections = _read_rows(csv_path, store)
+    warnings = _collect_warnings(rows, images_dir)
+    show_images = images_dir is not None
+    prepared_images = {}
+    if images_dir is not None:
+        prepared_images, image_rejections = _prepare_images(store, rows, images_dir)
+        rejections = [*rejections, *image_rejections]
+
+    if rejections:
+        return _rejected_report(rejections, dry_run, show_images=show_images, warnings=warnings)
+
+    if dry_run:
+        return _execute(
+            store,
+            rows,
+            operator,
+            dry_run=True,
+            prepared_images=prepared_images,
+            show_images=show_images,
+            warnings=warnings,
+        )
+
+    with transaction.atomic():
+        lock_store(store.pk)
+        return _execute(
+            store,
+            rows,
+            operator,
+            dry_run=False,
+            prepared_images=prepared_images,
+            show_images=show_images,
+            warnings=warnings,
+        )
 
 
 def _images_directory(value):

@@ -1,12 +1,15 @@
 import json
 from decimal import Decimal
+from io import StringIO
 
 import pytest
+from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
+from django.core.management import call_command
 from django.urls import reverse
 
-from apps.catalog.models import Category, Design, Product, ProductVariant, Supplier
+from apps.catalog.models import Category, Design, Media, Product, ProductVariant, Supplier
 from apps.stores.models import Store
 
 pytestmark = pytest.mark.django_db
@@ -458,3 +461,40 @@ def test_catalog_admin_is_reachable_by_superusers_only(client, url_name):
 
     assert response.status_code == 302
     assert response.url.startswith(reverse("admin:login"))
+
+
+def test_every_catalog_model_registered_in_the_admin_opens_its_change_page(
+    admin_client_by_email, settings
+):
+    settings.DEBUG = True
+    home = make_store("home", "Home")
+    call_command(
+        "seed_demo",
+        store="home",
+        operator="owner@example.com",
+        stdout=StringIO(),
+    )
+
+    catalog_models = [model for model in admin.site._registry if model._meta.app_label == "catalog"]
+    objects = {}
+    for model in catalog_models:
+        obj = model.objects.filter(store=home).first()
+        if obj is None and model is Media:
+            # The demo has no images, so give the Media admin a row to open.
+            obj = Media.objects.create(
+                store=home,
+                storage_key="demo/placeholder.jpg",
+                content_hash="demo-placeholder",
+                mime_type="image/jpeg",
+                width=1,
+                height=1,
+            )
+        assert obj is not None, model
+        objects[model] = obj
+
+    for model, obj in objects.items():
+        url = reverse(
+            f"admin:{model._meta.app_label}_{model._meta.model_name}_change",
+            args=[obj.pk],
+        )
+        assert admin_client_by_email.get(url).status_code == 200, model
