@@ -119,23 +119,34 @@ class Factory:
         results: list[TicketResult] = []
         for ticket in tickets:
             started_at = self.ledger.now()
+            self.ledger.record_started(ticket.number, started_at=started_at)
             try:
                 result = self._run_ticket(ticket)
             except Exception as exc:
-                self.ledger.record(ticket.number, "failed", started_at=started_at)
+                self.ledger.record_outcome(ticket.number, "failed", finished_at=self.ledger.now())
                 raise RunFailed(f"#{ticket.number} {ticket.title}", short_error(exc)) from exc
-            self.ledger.record(ticket.number, "ok" if result.ok else "stuck", started_at=started_at)
+            except BaseException:
+                self.ledger.record_outcome(ticket.number, "failed", finished_at=self.ledger.now())
+                raise
+            self.ledger.record_outcome(
+                ticket.number,
+                "ok" if result.ok else "stuck",
+                finished_at=self.ledger.now(),
+            )
             results.append(result)
             if not result.ok:
                 break
         return results
 
     def _pause_reason(self, token: str) -> str | None:
-        open_prs = self.github.count_open_factory_prs(
-            author=FACTORY_BOT_LOGIN,
-            branch_prefix=FACTORY_BRANCH_PREFIX,
-            token=token,
-        )
+        try:
+            open_prs = self.github.count_open_factory_prs(
+                author=FACTORY_BOT_LOGIN,
+                branch_prefix=FACTORY_BRANCH_PREFIX,
+                token=token,
+            )
+        except Exception:
+            return "GitHub unreachable"
         if open_prs >= self.settings.max_open_prs:
             noun = "PR" if open_prs == 1 else "PRs"
             return f"{open_prs} {noun} waiting for review"

@@ -42,7 +42,7 @@ The main clone and the worktrees live under `/srv/factory`, outside
 /home/factory/          # factory:factory, mode 700
 ├── logs/               # one log file per ticket run, cleaned after 14 days
 ├── state/              # mode 700; pause marker and the append-only attempts ledger
-│   ├── attempts.log    # mode 600; one line per ticket attempt, never readable by factory-agent
+│   ├── attempts.log    # mode 600; started + outcome lines per attempt, never readable by factory-agent
 │   └── paused          # present only while the factory is paused
 ├── secrets.env         # chmod 600, see below
 └── xolo-bot.pem        # chmod 600, see below
@@ -366,11 +366,15 @@ Two caps stop the factory before it picks a ticket:
   value the run pauses with "N PRs waiting for review".
 - **Daily cap.** `FACTORY_MAX_TICKETS_PER_DAY` (default 6) counts ticket
   *attempts* started today in `America/Mexico_City`, successful or failed. At
-  the configured value the run pauses with "daily limit reached". Every attempt
-  appends one line to `/home/factory/state/attempts.log` (timestamp, ticket,
-  outcome); the ledger is append-only, mode `600`, and stays unreadable by
-  `factory-agent`. Failed attempts count, so a broken ticket cannot burn the
-  model budget.
+  the configured value the run pauses with "daily limit reached". A `started`
+  line is written before OpenCode runs and an outcome line after it finishes;
+  the daily cap counts only `started` lines, so a run killed by systemd's
+  timeout, a reboot or SIGTERM still consumes budget. The ledger at
+  `/home/factory/state/attempts.log` is append-only, mode `600`, and stays
+  unreadable by `factory-agent`. Failed attempts count, so a broken ticket
+  cannot burn the model budget.
+- **Unreachable GitHub.** If the open-PR count cannot be read, the run pauses
+  with "GitHub unreachable" instead of assuming zero.
 
 Both limits must be at least 1; the config rejects smaller values before the
 run. A skipped run is silent. Telegram gets exactly one message when the

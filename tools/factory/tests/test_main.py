@@ -118,10 +118,17 @@ class FakeGit:
 
 
 class FakeGitHub:
-    def __init__(self, tickets=None, pr_number=101, open_factory_prs=0):
+    def __init__(
+        self,
+        tickets=None,
+        pr_number=101,
+        open_factory_prs=0,
+        open_factory_prs_error=None,
+    ):
         self.tickets = tickets or []
         self.pr_number = pr_number
         self.open_factory_prs = open_factory_prs
+        self.open_factory_prs_error = open_factory_prs_error
         self.created_prs = []
         self.comments = []
         self.issue_labels = []
@@ -135,6 +142,8 @@ class FakeGitHub:
 
     def count_open_factory_prs(self, *, author, branch_prefix="nf/", token=None):
         self.pr_counts.append((author, branch_prefix, token))
+        if self.open_factory_prs_error is not None:
+            raise self.open_factory_prs_error
         return self.open_factory_prs
 
     def create_draft_pr(self, *, branch, title, body, token):
@@ -173,6 +182,14 @@ class FakeRunner:
 
 
 class ExplodingRunner:
+    def __init__(self, error):
+        self.error = error
+
+    def run(self, *, worktree, model, prompt, timeout_seconds):
+        raise self.error
+
+
+class BaseExceptionRunner:
     def __init__(self, error):
         self.error = error
 
@@ -616,8 +633,10 @@ def test_daily_attempt_cap_reached_picks_no_ticket(tmp_path):
     now = datetime(2026, 11, 10, 10, 0, tzinfo=MEXICO_CITY)
     settings = replace(make_settings(tmp_path), max_tickets_per_day=2)
     ledger = AttemptLedger(settings.state_dir, clock=lambda: now)
-    ledger.record(1, "stuck", started_at=now)
-    ledger.record(2, "ok", started_at=now)
+    ledger.record_started(1, started_at=now)
+    ledger.record_outcome(1, "stuck", finished_at=now)
+    ledger.record_started(2, started_at=now)
+    ledger.record_outcome(2, "ok", finished_at=now)
     git = FakeGit(check_passed=True)
     github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
     runner = FakeRunner()
@@ -696,6 +715,51 @@ def test_pause_notification_is_sent_once_per_transition(tmp_path):
         "1 PR waiting for review",
         "1 PR waiting for review",
     ]
+
+
+def test_counting_open_prs_failure_pauses_with_github_unreachable(tmp_path):
+    settings = replace(make_settings(tmp_path), max_open_prs=2)
+    github = FakeGitHub(
+        tickets=[make_ticket(7, labels={"ready-for-agent"})],
+        open_factory_prs_error=RuntimeError("network down"),
+    )
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=FakeGit(check_passed=True),
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        settings=settings,
+    )
+
+    assert factory.run() == []
+    assert factory.run() == []
+
+    assert runner.calls == []
+    assert github.listed_with is None
+    assert [info.reason for info in notifier.paused] == ["GitHub unreachable"]
+
+
+def test_base_exception_still_leaves_a_started_ledger_line(tmp_path):
+    ledger = AttemptLedger(tmp_path / "state")
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path,
+        git=FakeGit(check_passed=True),
+        github=github,
+        runner=BaseExceptionRunner(KeyboardInterrupt()),
+        notifier=RecordingNotifier(),
+        ledger=ledger,
+    )
+
+    with pytest.raises(KeyboardInterrupt):
+        factory.run()
+
+    lines = ledger.path.read_text().splitlines()
+    assert lines[0].split("\t")[2] == "started"
+    assert ledger.count_today() == 1
 
 
 def test_step_budget_exhausted_sticks_and_notifies(tmp_path):

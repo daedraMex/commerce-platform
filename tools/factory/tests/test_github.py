@@ -1,6 +1,8 @@
 from pathlib import Path
 
-from factory.github import GitHub
+import pytest
+
+from factory.github import GitHub, GitHubError, _same_login
 from factory.shell import CommandResult
 
 REPO = "daedraMex/commerce-platform"
@@ -93,6 +95,31 @@ def test_count_open_factory_prs_filters_by_author_and_nf_prefix():
 
     count = GitHub(REPO, run=run).count_open_factory_prs(author="xolo-bot", token="TOKEN")
 
-    assert count == 3
+    # The captured fixture has one human PR on docs/* and two app/xolo-bot PRs on nf/*.
+    assert count == 2
     assert run.calls[-1][0][:3] == ["gh", "pr", "list"]
     assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
+
+
+@pytest.mark.parametrize(
+    "login",
+    ["app/xolo-bot", "xolo-bot", "xolo-bot[bot]", "app/xolo-bot[bot]"],
+)
+def test_bot_logins_with_app_prefix_or_bot_suffix_match(login):
+    assert _same_login(login, "xolo-bot")
+
+
+def test_count_open_factory_prs_raises_on_gh_error():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=1, stdout="", stderr="network down")
+
+    with pytest.raises(GitHubError, match="network down"):
+        GitHub(REPO, run=run).count_open_factory_prs(author="xolo-bot")
+
+
+def test_count_open_factory_prs_raises_on_invalid_json():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=0, stdout="not json", stderr="")
+
+    with pytest.raises(GitHubError, match="invalid JSON"):
+        GitHub(REPO, run=run).count_open_factory_prs(author="xolo-bot")

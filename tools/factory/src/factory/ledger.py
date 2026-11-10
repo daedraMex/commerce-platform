@@ -1,9 +1,10 @@
 """Append-only ledger of ticket attempts, counted in Mexico City time.
 
-Each line records when an attempt started, its ticket and its outcome. The
-daily cap counts the lines whose start date is today in America/Mexico_City, so
-the factory follows the operator's day rather than UTC. The file lives in the
-factory's state directory, which the agent user cannot read.
+A ``started`` line is written before the agent runs, then an outcome line after
+it finishes. The daily cap counts only ``started`` lines whose date is today in
+America/Mexico_City, so a run killed by systemd, a reboot or SIGTERM still
+consumes daily budget. The file lives in the factory's state directory, which
+the agent user cannot read.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 MEXICO_CITY = ZoneInfo("America/Mexico_City")
 LEDGER_FILE = "attempts.log"
+STARTED = "started"
 
 
 def _now() -> datetime:
@@ -46,16 +48,22 @@ class AttemptLedger:
             return 0
         count = 0
         for line in self.path.read_text().splitlines():
-            started = _parse_timestamp(line)
-            if started is not None and started.date() == today:
+            fields = _parse_line(line)
+            if fields is not None and fields[2] == STARTED and fields[0].date() == today:
                 count += 1
         return count
 
-    def record(self, ticket_number: int, outcome: str, *, started_at: datetime) -> None:
-        started = started_at
-        if started.tzinfo is None:
-            started = started.replace(tzinfo=MEXICO_CITY)
-        line = f"{started.astimezone(MEXICO_CITY).isoformat()}\t#{ticket_number}\t{outcome}\n"
+    def record_started(self, ticket_number: int, *, started_at: datetime) -> None:
+        self._append(ticket_number, STARTED, at=started_at)
+
+    def record_outcome(self, ticket_number: int, outcome: str, *, finished_at: datetime) -> None:
+        self._append(ticket_number, outcome, at=finished_at)
+
+    def _append(self, ticket_number: int, outcome: str, *, at: datetime) -> None:
+        timestamp = at
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=MEXICO_CITY)
+        line = f"{timestamp.astimezone(MEXICO_CITY).isoformat()}\t#{ticket_number}\t{outcome}\n"
         self._ensure_state_dir()
         fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         os.fchmod(fd, 0o600)
@@ -67,12 +75,14 @@ class AttemptLedger:
         os.chmod(self.state_dir, 0o700)
 
 
-def _parse_timestamp(line: str) -> datetime | None:
-    raw = line.split("\t", 1)[0]
+def _parse_line(line: str) -> tuple[datetime, str, str] | None:
+    parts = line.split("\t")
+    if len(parts) < 3:
+        return None
     try:
-        started = datetime.fromisoformat(raw)
+        started = datetime.fromisoformat(parts[0])
     except ValueError:
         return None
     if started.tzinfo is None:
         return None
-    return started.astimezone(MEXICO_CITY)
+    return started.astimezone(MEXICO_CITY), parts[1], parts[2]

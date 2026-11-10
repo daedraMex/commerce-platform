@@ -11,6 +11,10 @@ from .tickets import Ticket, parse_blocked_by
 _CLOSES_RE = re.compile(r"(?:Closes|Part of)\s+#(\d+)", re.IGNORECASE)
 
 
+class GitHubError(RuntimeError):
+    """Raised when a gh call cannot be trusted to report the repo state."""
+
+
 class GitHub:
     def __init__(self, repo: str, run: RunCommand = run_command):
         self.repo = repo
@@ -75,8 +79,11 @@ class GitHub:
     ) -> int:
         """Count open PRs by ``author`` whose branch starts with ``branch_prefix``.
 
-        Draft and ready PRs both count. ``gh`` reports app logins with a
-        ``[bot]`` suffix, so compare the login with that suffix removed.
+        Draft and ready PRs both count. ``gh`` reports app logins as
+        ``app/<slug>`` (and some bot logins with a ``[bot]`` suffix), so
+        normalize both forms before comparing. A failed call or unparseable
+        output raises instead of reporting zero, because a wrong zero would
+        silently bypass the cap.
         """
         result = self._run(
             [
@@ -96,10 +103,14 @@ class GitHub:
             timeout=120,
             env=_gh_env(token),
         )
+        if result.exit_code != 0:
+            raise GitHubError(f"gh pr list failed: {result.stderr.strip() or result.exit_code}")
         try:
             prs = json.loads(result.stdout)
-        except json.JSONDecodeError:
-            return 0
+        except json.JSONDecodeError as exc:
+            raise GitHubError("gh pr list returned invalid JSON") from exc
+        if not isinstance(prs, list):
+            raise GitHubError("gh pr list returned an unexpected JSON shape")
         return sum(
             1
             for pr in prs
@@ -209,8 +220,8 @@ def _gh_env(token: str | None) -> dict[str, str] | None:
 
 
 def _same_login(login: str, author: str) -> bool:
-    return _without_bot_suffix(login) == _without_bot_suffix(author)
+    return _normalize_login(login) == _normalize_login(author)
 
 
-def _without_bot_suffix(login: str) -> str:
-    return login.removesuffix("[bot]")
+def _normalize_login(login: str) -> str:
+    return login.removesuffix("[bot]").removeprefix("app/")

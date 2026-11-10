@@ -1,32 +1,25 @@
 [
   {
-    "number": 80,
-    "isDraft": true,
-    "headRefName": "nf/80-draft-ticket",
-    "author": {"login": "xolo-bot[bot]"}
+    "author": {
+      "id": "MDQ6VXNlcjI1OTExOTA5",
+      "is_bot": false,
+      "login": "daedraMex",
+      "name": "Erika Flores"
+    },
+    "headRefName": "docs/staff-console-adr"
   },
   {
-    "number": 81,
-    "isDraft": false,
-    "headRefName": "nf/81-ready-ticket",
-    "author": {"login": "xolo-bot[bot]"}
+    "author": {
+      "is_bot": true,
+      "login": "app/xolo-bot"
+    },
+    "headRefName": "nf/72-dev-seed-demo-command-loads-a-demo-catalog-into-an-existing-"
   },
   {
-    "number": 82,
-    "isDraft": false,
-    "headRefName": "nf/82-plain-login-ticket",
-    "author": {"login": "xolo-bot"}
-  },
-  {
-    "number": 83,
-    "isDraft": false,
-    "headRefName": "docs/83-not-a-factory-branch",
-    "author": {"login": "xolo-bot[bot]"}
-  },
-  {
-    "number": 84,
-    "isDraft": false,
-    "headRefName": "nf/84-human-ticket",
-    "author": {"login": "a-human"}
+    "author": {
+      "is_bot": true,
+      "login": "app/xolo-bot"
+    },
+    "headRefName": "nf/69-health-use-a-fixed-example-version-in-the-liveness-schema"
   }
 ]
