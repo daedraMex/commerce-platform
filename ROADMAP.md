@@ -159,15 +159,30 @@ comandos `import_catalog` y `set_prices`; endpoints públicos de lectura, inclui
 para `home` (las imágenes llegan en la fase 4b).
 
 ### Fase 4b — Fotos del catálogo
-**Objetivo:** que el staff convierta una foto del celular en la imagen del catálogo.
-**Entregables:** endpoints de staff para media del catálogo con `catalog.manage`; página para
-celular donde se sube la foto (HEIC a JPEG) y se marcan las cuatro esquinas; procesamiento en
-Celery que endereza, recorta a la proporción real y corrige la luz. La página nace en Quetzal, la
-consola de staff (ADR-0026): esqueleto con inicio de sesión (ADR-0027), tienda en la URL y menú por
-permisos; `packages/api-client` generado con orval; `GET /api/v1/me/`; `Store.accent_color`.
+**Objetivo:** que el staff convierta una o varias fotos del celular en imágenes del catálogo,
+individuales o grupales.
+**Entregables:** módulo `photos` con clean architecture y endpoints de staff con `catalog.manage`;
+original privado y preview autorizado; página para celular en Quetzal, la consola de staff
+(ADR-0026), con inicio de sesión BFF (ADR-0027), tienda en la URL y menú por permisos; subida
+multipart con HEIC a JPEG, orientación EXIF aplicada y metadata eliminada; foto individual con
+cuatro esquinas y recorte rectificado; productos de contorno con marco de recorte rectangular;
+foto grupal 4:5 enlazada a varios productos; procesamiento en Celery que endereza, recorta a la
+proporción de la talla fotografiada y corrige la luz de forma determinista (sin eliminación de fondo
+con ML); renditions 320/800 WebP con claves derivadas; idempotencia por tienda y creador;
+`ProductMedia.is_active`; `packages/api-client` generado con orval; `GET /api/v1/me/`;
+`Store.accent_color`.
 **Prerrequisito (PR humano):** `web/console/scripts/check.sh` y la fábrica corriendo el check de cada
 parte que toca un ticket; el job E2E de nivel 2 en GitHub Actions.
-**Criterio de salida:** un miembro del staff fotografía una frazada y queda como su imagen principal.
+**Criterio de salida:** un miembro del staff fotografía una frazada y queda como su imagen principal,
+y una foto grupal queda enlazada a varios productos. El video es la fase 4d.
+
+### Fase 4d — Video del catálogo
+**Objetivo:** que el staff agregue un video corto del producto sin cambiar los llamadores de la fase 4b.
+**Entregables:** subida directa a R2 con URLs prefirmadas detrás del puerto `MediaUploader` (el camino
+que ADR-0028 difirió); validación de duración, códec y tamaño; renditions de video y reproducción en
+la ficha del producto. Sin campos de video en la fase 4b; el diseño se decide en el /grill-with-docs
+de esta fase.
+**Criterio de salida:** un video corto subido desde Quetzal se reproduce en la ficha del producto.
 
 ### Fase 5 — Inventario y pedidos
 **Objetivo:** vender sin vender de más.

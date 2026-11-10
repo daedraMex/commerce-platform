@@ -240,22 +240,61 @@ with import_catalog, and readable through the API.
 ## Phase 4b — Catalog photos
 
 ```
-Phase 4b of commerce-platform. Read AGENTS.md, GLOSSARY.md and issue #1 (catalog photos).
+Phase 4b of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0026, ADR-0027 and ADR-0028.
 
-Goal: staff turn a phone photo of a blanket into its catalog image.
-- Staff write endpoints for catalog media, guarded by catalog.manage through the
-  Authorizer.
-- A mobile-first staff page: upload a photo (HEIC converted to JPEG); tap the four
-  corners of a rectangle product, while contour products get a cutout.
-- Processing in Celery: for rectangle categories straighten and crop to the size's
-  bounding-box aspect ratio; for contour categories remove the background around the
-  design's irregular outline; correct light; attach the result as the product's main
-  image.
-- Open for the grilling: where the staff page lives (Django templates or the Next.js
-  app); automatic corner detection later, with staff confirming the corners.
+Goal: staff turn one or more phone photos of products into catalog images.
+
+- New clean-architecture module apps/photos: Photo submission state machine, idempotency,
+  quad and crop validation, Authorizer calls. It never writes catalog models; it creates
+  Media and product images through the catalog service seam.
+- Private original storage (R2 in staging and production, MinIO in local and level 2) and
+  a MediaUploader port. API multipart now; presigned direct-to-R2 uploads are deferred to
+  the video phase.
+- Upload normalizes the file: HEIC decoded with pillow-heif, EXIF orientation applied,
+  metadata stripped, JPEG. It enforces 25 MB and 50 MP, stores the original in the
+  private bucket and generates one downscaled private preview served by an authorized
+  endpoint.
+- Staff endpoints guarded by catalog.manage through the Authorizer: upload with an
+  Idempotency-Key, submission status and preview, apply, retry, redo and discard.
+- Celery processing: rectangle photos are straightened from four staff-tapped corners
+  and cropped to the photographed size's ratio; rectangle categories without dimensions
+  keep the quad's ratio; contour products use a shared draggable crop frame with the
+  size's ratio and fall back to 4:5; group photos are always 4:5 and link one Media as a
+  gallery image to many products.
+- No ML in Phase 4b: no background removal. Light correction is deterministic gray-world
+  white balance with capped gains and a small autocontrast cutoff, staff can switch it
+  off, and pipeline_version records the result. Renditions are 320/800 WebP with keys
+  derived from the Media storage key.
+- ProductMedia gains is_active; one active main per product; (product, media) unique;
+  links are deactivated, reactivated and upserted without losing position; product
+  readers return active links only.
+- Quetzal shell: sign-in behind the BFF session (ADR-0027), store in the URL,
+  permission-driven menu, light/dark/system theme and Store.accent_color;
+  GET /api/v1/me/; packages/api-client generated with orval.
+- Prerequisite (human pull request): web/console/scripts/check.sh, the factory running
+  the check of every area a ticket touches, the level-2 E2E job, and the sudoers entry.
 ```
 
-**Done when:** a staff member photographs a blanket on their phone and it becomes that product's main image.
+**Done when:** a staff member photographs a blanket on their phone and it becomes that product's main image, and a group photo is linked to several products. Video is Phase 4d.
+
+---
+
+## Phase 4d — Catalog video
+
+```
+Phase 4d of commerce-platform. Read AGENTS.md, GLOSSARY.md and ADR-0028.
+
+Goal: staff add a short product video without changing the callers built in Phase 4b.
+
+- Switch the MediaUploader port to presigned direct-to-R2 uploads, the path ADR-0028
+  deferred; keep the API multipart adapter for still photos.
+- Validate duration, codec and size; generate the renditions the product page needs.
+- Do not add video fields to the Phase 4b models. The decoding and playback design is
+  decided in this phase's /grill-with-docs.
+- Quetzal page for uploading and previewing the video.
+```
+
+**Done when:** a short video uploaded from Quetzal plays on the product page.
 
 ---
 
