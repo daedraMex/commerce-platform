@@ -288,13 +288,14 @@ Goal: staff add a short product video without changing the callers built in Phas
 
 - Switch the MediaUploader port to presigned direct-to-R2 uploads, the path ADR-0028
   deferred; keep the API multipart adapter for still photos.
-- Validate duration, codec and size; generate the renditions the product page needs.
+- Validate duration, codec and size; generate the video renditions the public product API
+  exposes (the storefront uses them in Phase 7).
 - Do not add video fields to the Phase 4b models. The decoding and playback design is
   decided in this phase's /grill-with-docs.
-- Quetzal page for uploading and previewing the video.
+- Quetzal page for uploading the video and playing it back.
 ```
 
-**Done when:** a short video uploaded from Quetzal plays on the product page.
+**Done when:** a short video uploaded from Quetzal plays back in Quetzal, and the public product API returns its URL; the storefront shows it in Phase 7.
 
 ---
 
@@ -442,6 +443,8 @@ Goal: the blankets store live at its own domain.
   It goes live with the home store first.
 - Pages: home, category listing, product detail (variants: size and color), cart,
   checkout with Mercado Pago, order confirmation, customer login and order history.
+- Product detail shows the public video URL returned by the API since Phase 4d, with
+  playback controls and a poster image.
 - Product and category pages rendered on the server for SEO, with metadata, Open Graph
   and a sitemap. Images through next/image.
 - Mobile-first layout: most buyers arrive from TikTok and Instagram on their phones.
@@ -502,6 +505,11 @@ Goal: scheduled, validated and approved social media posts.
     matches the database, no licensed franchise or character names), then an LLM judge
     for tone. Returns a ValidationResult with each check.
   - Every LLM call recorded in AgentRun (model, prompt_version, tokens, latency, status).
+  - Video script use case: recommends product bundles and writes recording scripts
+    (shots, duration, hook, on-screen text) in the style of the reference videos. The
+    staff records the videos and uploads them through Quetzal (Phase 4d); there is no
+    AI-generated video. The bundle recommendation logic is shared with Phase 12
+    (suggested bundles); design it once.
 - Celery Beat creates posts from schedules; rejected posts regenerate at most twice,
   then go to needs_review. Add a social.propose_post permission for content_editor
   (a new data migration, ADR-0021); approval requires social.approve_post, so posts
