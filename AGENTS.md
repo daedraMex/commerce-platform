@@ -41,7 +41,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - All code in English: variables, functions, classes, files, database names,
   comments, error messages and commit messages.
 - Modular monolith. Each Django app in backend/apps/ is a module.
-- Modules with business rules (inventory, orders, payments, agents) follow clean
+- Modules with business rules (inventory, orders, payments, photos, agents) follow clean
   architecture:
   - domain/: pure Python, no Django, DRF or infrastructure imports
   - application/: one use case per file, dependencies injected as ports
