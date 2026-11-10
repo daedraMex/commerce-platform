@@ -41,6 +41,38 @@ def test_from_env_max_tickets_parses_int():
     assert settings.max_tickets == 3
 
 
+def test_from_env_reads_the_run_limits_and_defaults_them():
+    settings = Settings.from_env({"FACTORY_MODEL": "m", "FACTORY_STRONG_MODEL": "s"})
+    assert settings.max_open_prs == 2
+    assert settings.max_tickets_per_day == 6
+    assert settings.state_dir == Path.home() / "factory" / "state"
+
+    overridden = Settings.from_env(
+        {
+            "FACTORY_MODEL": "m",
+            "FACTORY_STRONG_MODEL": "s",
+            "FACTORY_MAX_OPEN_PRS": "4",
+            "FACTORY_MAX_TICKETS_PER_DAY": "9",
+            "FACTORY_STATE_DIR": "/tmp/factory-state",
+        }
+    )
+    assert overridden.max_open_prs == 4
+    assert overridden.max_tickets_per_day == 9
+    assert overridden.state_dir == Path("/tmp/factory-state")
+
+
+@pytest.mark.parametrize("name", ["FACTORY_MAX_OPEN_PRS", "FACTORY_MAX_TICKETS_PER_DAY"])
+def test_from_env_rejects_non_positive_run_limits(name):
+    with pytest.raises(FactoryConfigError, match=name):
+        Settings.from_env(
+            {
+                "FACTORY_MODEL": "m",
+                "FACTORY_STRONG_MODEL": "s",
+                name: "0",
+            }
+        )
+
+
 def test_from_env_bad_max_tickets_fails_clearly():
     with pytest.raises(FactoryConfigError, match="FACTORY_MAX_TICKETS"):
         Settings.from_env(

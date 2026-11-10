@@ -54,12 +54,23 @@ class Settings:
     github_app_id: str | None
     github_private_key: str | None
     github_installation_id: str | None
+    max_open_prs: int = 2
+    max_tickets_per_day: int = 6
     github_user_id: str | None = None
     agent_user: str = "factory-agent"
     agent_home: str | None = None
+    state_dir: Path = field(default_factory=lambda: Path.home() / "factory" / "state")
     secrets_file: Path = field(default_factory=lambda: Path.home() / "factory" / "secrets.env")
     deploy_key: Path = field(default_factory=lambda: Path.home() / ".ssh" / "commerce_deploy")
     handoff_host: str | None = None
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("FACTORY_MAX_OPEN_PRS", self.max_open_prs),
+            ("FACTORY_MAX_TICKETS_PER_DAY", self.max_tickets_per_day),
+        ):
+            if value < 1:
+                raise FactoryConfigError(f"{name} must be at least 1, got {value}.")
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> Settings:
@@ -79,10 +90,13 @@ class Settings:
             factory_strong_model=factory_strong_model,
             repo=_read(env, "FACTORY_REPO") or "daedraMex/commerce-platform",
             max_tickets=_read_int(env, "FACTORY_MAX_TICKETS", 1),
+            max_open_prs=_read_int(env, "FACTORY_MAX_OPEN_PRS", 2),
+            max_tickets_per_day=_read_int(env, "FACTORY_MAX_TICKETS_PER_DAY", 6),
             attempts=_read_int(env, "FACTORY_ATTEMPTS", 5),
             repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or "/srv/factory/repo"),
             worktrees_dir=Path(_read(env, "FACTORY_WORKTREES_DIR") or "/srv/factory/worktrees"),
             logs_dir=Path(_read(env, "FACTORY_LOGS_DIR") or str(home / "factory" / "logs")),
+            state_dir=Path(_read(env, "FACTORY_STATE_DIR") or str(home / "factory" / "state")),
             time_limit_seconds=_read_int(env, "FACTORY_TIME_LIMIT_MINUTES", 120) * 60,
             keep_days=_read_int(env, "FACTORY_KEEP_DAYS", 14),
             telegram_bot_token=_read(env, "FACTORY_TELEGRAM_BOT_TOKEN"),

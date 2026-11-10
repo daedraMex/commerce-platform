@@ -1,4 +1,4 @@
-"""Prove the machine can run a night before touching any ticket.
+"""Prove the machine can run unattended before touching any ticket.
 
 The preflight uses the real tools and the real code paths: it fetches
 ``origin/main``, lists tickets through the GitHub port, builds a throwaway
@@ -65,7 +65,7 @@ class Preflight:
         self._verify_git_version = verify_git_version_fn
         self._verify_sudoers_logging = verify_sudoers_logging_fn
 
-    def run(self) -> list[Ticket]:
+    def run(self, token: str | None = None) -> list[Ticket]:
         run_id = str(self._clock())
         log_path = self.settings.logs_dir / f"preflight-{run_id}.log"
         worktree = None
@@ -75,7 +75,8 @@ class Preflight:
             self.git.fetch_main(self.settings.repo_dir)
 
             step = "list tickets"
-            token = self.token_provider.mint(self.settings.repo)
+            if token is None:
+                token = self.token_provider.mint(self.settings.repo)
             tickets = self.github.list_tickets(token)
 
             step = "verify isolation"

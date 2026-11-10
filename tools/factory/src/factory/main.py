@@ -16,10 +16,12 @@ from .diff import touches_protected_paths
 from .git import Git, verify_git_version
 from .github import GitHub
 from .isolation import verify_isolation
+from .ledger import AttemptLedger
 from .models import select_model
 from .notify import (
     Notifier,
     NullNotifier,
+    PausedInfo,
     PrReadyInfo,
     RunFailedInfo,
     StuckInfo,
@@ -27,6 +29,7 @@ from .notify import (
     build_handoff_command,
 )
 from .outcomes import build_issue_comment
+from .pause import PauseState
 from .pr_body import build_pr_body
 from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, read_command_body
@@ -45,6 +48,8 @@ IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
 NEEDS_DECISION_LABEL = "needs-decision"
 MIGRATION_LABEL = "migration"
 LOG_TAIL_LINES = 30
+FACTORY_BOT_LOGIN = "xolo-bot"
+FACTORY_BRANCH_PREFIX = "nf/"
 
 
 @dataclass(frozen=True)
@@ -77,6 +82,8 @@ class Factory:
         preflight_verify_git_version=verify_git_version,
         preflight_verify_sudoers_logging=verify_sudoers_logging,
         preflight_clock=None,
+        ledger: AttemptLedger | None = None,
+        pause_state: PauseState | None = None,
     ):
         self.settings = settings
         self.github = github
@@ -89,27 +96,54 @@ class Factory:
         self._preflight_verify_git_version = preflight_verify_git_version
         self._preflight_verify_sudoers_logging = preflight_verify_sudoers_logging
         self._preflight_clock = preflight_clock
+        self.ledger = ledger or AttemptLedger(settings.state_dir)
+        self.pause_state = pause_state or PauseState(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
+        token = self.token_provider.mint(self.settings.repo)
+        paused_for = self._pause_reason(token)
+        if paused_for is not None:
+            if self.pause_state.enter(paused_for):
+                self.notifier.send_paused(PausedInfo(reason=paused_for))
+            return []
+        self.pause_state.clear()
         cleanup_old(
             self.settings.worktrees_dir,
             keep_days=self.settings.keep_days,
             remove_dir=self._remove_expired_worktree,
         )
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
-        tickets = select_tickets(self.run_preflight(), max_tickets=self.settings.max_tickets)
+        tickets = select_tickets(
+            self.run_preflight(token=token), max_tickets=self.settings.max_tickets
+        )
         results: list[TicketResult] = []
         for ticket in tickets:
+            started_at = self.ledger.now()
             try:
                 result = self._run_ticket(ticket)
             except Exception as exc:
+                self.ledger.record(ticket.number, "failed", started_at=started_at)
                 raise RunFailed(f"#{ticket.number} {ticket.title}", short_error(exc)) from exc
+            self.ledger.record(ticket.number, "ok" if result.ok else "stuck", started_at=started_at)
             results.append(result)
             if not result.ok:
                 break
         return results
 
-    def run_preflight(self) -> list[Ticket]:
+    def _pause_reason(self, token: str) -> str | None:
+        open_prs = self.github.count_open_factory_prs(
+            author=FACTORY_BOT_LOGIN,
+            branch_prefix=FACTORY_BRANCH_PREFIX,
+            token=token,
+        )
+        if open_prs >= self.settings.max_open_prs:
+            noun = "PR" if open_prs == 1 else "PRs"
+            return f"{open_prs} {noun} waiting for review"
+        if self.ledger.count_today() >= self.settings.max_tickets_per_day:
+            return "daily limit reached"
+        return None
+
+    def run_preflight(self, token: str | None = None) -> list[Ticket]:
         """Run the real-tool preflight and return the tickets it listed."""
         return Preflight(
             self.settings,
@@ -121,7 +155,7 @@ class Factory:
             verify_isolation_fn=self._preflight_verify_isolation,
             verify_git_version_fn=self._preflight_verify_git_version,
             verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
-        ).run()
+        ).run(token=token)
 
     def _remove_expired_worktree(self, worktree: Path) -> None:
         """Delete an expired worktree as its owner, then its local branch."""

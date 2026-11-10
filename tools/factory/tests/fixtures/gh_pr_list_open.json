@@ -1,0 +1,32 @@
+[
+  {
+    "number": 80,
+    "isDraft": true,
+    "headRefName": "nf/80-draft-ticket",
+    "author": {"login": "xolo-bot[bot]"}
+  },
+  {
+    "number": 81,
+    "isDraft": false,
+    "headRefName": "nf/81-ready-ticket",
+    "author": {"login": "xolo-bot[bot]"}
+  },
+  {
+    "number": 82,
+    "isDraft": false,
+    "headRefName": "nf/82-plain-login-ticket",
+    "author": {"login": "xolo-bot"}
+  },
+  {
+    "number": 83,
+    "isDraft": false,
+    "headRefName": "docs/83-not-a-factory-branch",
+    "author": {"login": "xolo-bot[bot]"}
+  },
+  {
+    "number": 84,
+    "isDraft": false,
+    "headRefName": "nf/84-human-ticket",
+    "author": {"login": "a-human"}
+  }
+]

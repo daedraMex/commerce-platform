@@ -24,7 +24,11 @@ class FakeGh:
         elif argv[:3] == ["gh", "issue", "view"]:
             stdout = read_fixture("gh_issue_view_open.json")
         elif argv[:3] == ["gh", "pr", "list"]:
-            stdout = read_fixture("gh_pr_list.json")
+            fields = argv[argv.index("--json") + 1] if "--json" in argv else ""
+            if "author" in fields:
+                stdout = read_fixture("gh_pr_list_open.json")
+            else:
+                stdout = read_fixture("gh_pr_list.json")
         elif argv[:3] == ["gh", "pr", "create"]:
             stdout = read_fixture("gh_pr_create.txt")
         else:
@@ -81,4 +85,14 @@ def test_create_draft_pr_reads_the_number_from_recorded_output():
 
     assert number == 63
     assert run.calls[-1][0][:3] == ["gh", "pr", "create"]
+    assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
+
+
+def test_count_open_factory_prs_filters_by_author_and_nf_prefix():
+    run = FakeGh()
+
+    count = GitHub(REPO, run=run).count_open_factory_prs(author="xolo-bot", token="TOKEN")
+
+    assert count == 3
+    assert run.calls[-1][0][:3] == ["gh", "pr", "list"]
     assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}

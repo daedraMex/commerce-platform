@@ -66,6 +66,47 @@ class GitHub:
         url = result.stdout.strip().splitlines()[-1].strip()
         return int(url.rstrip("/").rsplit("/", 1)[-1])
 
+    def count_open_factory_prs(
+        self,
+        *,
+        author: str,
+        branch_prefix: str = "nf/",
+        token: str | None = None,
+    ) -> int:
+        """Count open PRs by ``author`` whose branch starts with ``branch_prefix``.
+
+        Draft and ready PRs both count. ``gh`` reports app logins with a
+        ``[bot]`` suffix, so compare the login with that suffix removed.
+        """
+        result = self._run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self.repo,
+                "--state",
+                "open",
+                "--limit",
+                "1000",
+                "--json",
+                "number,isDraft,headRefName,author",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        try:
+            prs = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return 0
+        return sum(
+            1
+            for pr in prs
+            if _same_login((pr.get("author") or {}).get("login", ""), author)
+            and str(pr.get("headRefName", "")).startswith(branch_prefix)
+        )
+
     def add_issue_label(self, number: int, label: str, token: str) -> None:
         self._run(
             ["gh", "issue", "edit", str(number), "--repo", self.repo, "--add-label", label],
@@ -165,3 +206,11 @@ class GitHub:
 
 def _gh_env(token: str | None) -> dict[str, str] | None:
     return {"GH_TOKEN": token} if token else None
+
+
+def _same_login(login: str, author: str) -> bool:
+    return _without_bot_suffix(login) == _without_bot_suffix(author)
+
+
+def _without_bot_suffix(login: str) -> str:
+    return login.removesuffix("[bot]")

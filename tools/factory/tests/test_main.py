@@ -1,14 +1,19 @@
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
+from factory.ledger import AttemptLedger
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
 from factory.runner import AgentResult
 from factory.tickets import Ticket, worktree_path
+
+MEXICO_CITY = ZoneInfo("America/Mexico_City")
 
 OVERLAY = "Model: {{MODEL}}. Branch: {{BRANCH}}."
 
@@ -113,18 +118,24 @@ class FakeGit:
 
 
 class FakeGitHub:
-    def __init__(self, tickets=None, pr_number=101):
+    def __init__(self, tickets=None, pr_number=101, open_factory_prs=0):
         self.tickets = tickets or []
         self.pr_number = pr_number
+        self.open_factory_prs = open_factory_prs
         self.created_prs = []
         self.comments = []
         self.issue_labels = []
         self.pr_labels = []
         self.listed_with = None
+        self.pr_counts = []
 
     def list_tickets(self, token=None):
         self.listed_with = token
         return list(self.tickets)
+
+    def count_open_factory_prs(self, *, author, branch_prefix="nf/", token=None):
+        self.pr_counts.append((author, branch_prefix, token))
+        return self.open_factory_prs
 
     def create_draft_pr(self, *, branch, title, body, token):
         self.created_prs.append((branch, title, body, token))
@@ -174,6 +185,7 @@ class RecordingNotifier:
         self.pr_ready = []
         self.stuck = []
         self.run_failed = []
+        self.paused = []
 
     def send_pr_ready(self, info):
         self.pr_ready.append(info)
@@ -183,6 +195,9 @@ class RecordingNotifier:
 
     def send_run_failed(self, info):
         self.run_failed.append(info)
+
+    def send_paused(self, info):
+        self.paused.append(info)
 
 
 def make_settings(tmp_path):
@@ -195,6 +210,7 @@ def make_settings(tmp_path):
         repo_dir=tmp_path / "repo",
         worktrees_dir=tmp_path / "worktrees",
         logs_dir=tmp_path / "logs",
+        state_dir=tmp_path / "state",
         time_limit_seconds=60,
         keep_days=14,
         telegram_bot_token=None,
@@ -225,7 +241,18 @@ def _noop_verify_sudoers_logging():
     return None
 
 
-def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, token_provider=None):
+def build_factory(
+    tmp_path,
+    *,
+    git,
+    github,
+    runner,
+    notifier,
+    settings=None,
+    token_provider=None,
+    ledger=None,
+    pause_state=None,
+):
     return Factory(
         settings or make_settings(tmp_path),
         github=github,
@@ -238,6 +265,8 @@ def build_factory(tmp_path, *, git, github, runner, notifier, settings=None, tok
         preflight_verify_git_version=_noop_verify_git_version,
         preflight_verify_sudoers_logging=_noop_verify_sudoers_logging,
         preflight_clock=lambda: 42,
+        ledger=ledger,
+        pause_state=pause_state,
     )
 
 
@@ -470,6 +499,7 @@ def test_stops_at_first_failure(tmp_path):
         repo_dir=settings.repo_dir,
         worktrees_dir=settings.worktrees_dir,
         logs_dir=settings.logs_dir,
+        state_dir=settings.state_dir,
         time_limit_seconds=settings.time_limit_seconds,
         keep_days=settings.keep_days,
         telegram_bot_token=None,
@@ -556,6 +586,116 @@ def test_stuck_mints_token_and_scopes_it_to_comment_and_label(tmp_path):
 
     assert github.comments[0][2] == "MINTED-TOKEN"
     assert github.issue_labels[0][2] == "MINTED-TOKEN"
+
+
+def test_open_pr_cap_reached_picks_no_ticket(tmp_path):
+    settings = replace(make_settings(tmp_path), max_open_prs=2)
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], open_factory_prs=2)
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        settings=settings,
+    )
+
+    results = factory.run()
+
+    assert results == []
+    assert runner.calls == []
+    assert github.listed_with is None
+    assert git.worktrees == []
+    assert [info.reason for info in notifier.paused] == ["2 PRs waiting for review"]
+
+
+def test_daily_attempt_cap_reached_picks_no_ticket(tmp_path):
+    now = datetime(2026, 11, 10, 10, 0, tzinfo=MEXICO_CITY)
+    settings = replace(make_settings(tmp_path), max_tickets_per_day=2)
+    ledger = AttemptLedger(settings.state_dir, clock=lambda: now)
+    ledger.record(1, "stuck", started_at=now)
+    ledger.record(2, "ok", started_at=now)
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        settings=settings,
+        ledger=ledger,
+    )
+
+    results = factory.run()
+
+    assert results == []
+    assert runner.calls == []
+    assert github.listed_with is None
+    assert git.worktrees == []
+    assert [info.reason for info in notifier.paused] == ["daily limit reached"]
+
+
+def test_failed_attempts_count_toward_the_daily_cap(tmp_path):
+    now = datetime(2026, 11, 10, 10, 0, tzinfo=MEXICO_CITY)
+    settings = replace(make_settings(tmp_path), max_tickets_per_day=1)
+    ledger = AttemptLedger(settings.state_dir, clock=lambda: now)
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        settings=settings,
+        ledger=ledger,
+    )
+
+    first = factory.run()
+    second = factory.run()
+
+    assert len(first) == 1 and not first[0].ok
+    assert second == []
+    assert len(runner.calls) == settings.attempts
+    assert ledger.count_today() == 1
+    assert [info.reason for info in notifier.paused] == ["daily limit reached"]
+
+
+def test_pause_notification_is_sent_once_per_transition(tmp_path):
+    settings = replace(make_settings(tmp_path), max_open_prs=1)
+    github = FakeGitHub(tickets=[], open_factory_prs=1)
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=FakeGit(check_passed=True),
+        github=github,
+        runner=FakeRunner(),
+        notifier=notifier,
+        settings=settings,
+    )
+
+    factory.run()
+    factory.run()
+    assert [info.reason for info in notifier.paused] == ["1 PR waiting for review"]
+
+    github.open_factory_prs = 0
+    factory.run()
+    assert len(notifier.paused) == 1
+
+    github.open_factory_prs = 1
+    factory.run()
+    assert [info.reason for info in notifier.paused] == [
+        "1 PR waiting for review",
+        "1 PR waiting for review",
+    ]
 
 
 def test_step_budget_exhausted_sticks_and_notifies(tmp_path):

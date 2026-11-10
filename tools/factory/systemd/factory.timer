@@ -1,8 +1,10 @@
 [Unit]
-Description=Run the night factory every night at 23:00 local time
+Description=Run the night factory every hour
 
 [Timer]
-OnCalendar=*-*-* 23:00:00
+# factory.service is Type=oneshot, so systemd will not start a new run while
+# the previous one is still active; an hourly tick that lands mid-run is skipped.
+OnCalendar=hourly
 Persistent=true
 Unit=factory.service
 

@@ -23,6 +23,8 @@ class Notifier(Protocol):
 
     def send_run_failed(self, info: RunFailedInfo) -> None: ...
 
+    def send_paused(self, info: PausedInfo) -> None: ...
+
 
 @dataclass(frozen=True)
 class PrReadyInfo:
@@ -57,6 +59,11 @@ class StuckInfo:
 
 @dataclass(frozen=True)
 class RunFailedInfo:
+    reason: str
+
+
+@dataclass(frozen=True)
+class PausedInfo:
     reason: str
 
 
@@ -113,6 +120,15 @@ def build_run_failed_message(info: RunFailedInfo) -> str:
     )
 
 
+def build_paused_message(info: PausedInfo) -> str:
+    return "\n".join(
+        [
+            "<b>Night factory paused</b>",
+            escape_html(info.reason),
+        ]
+    )
+
+
 def build_pr_ready_keyboard(info: PrReadyInfo) -> list[list[dict[str, str]]]:
     return [
         [
@@ -156,6 +172,9 @@ class NullNotifier:
     def send_run_failed(self, info: RunFailedInfo) -> None:
         return None
 
+    def send_paused(self, info: PausedInfo) -> None:
+        return None
+
 
 class TelegramNotifier:
     """Send messages to one fixed chat id via the Bot API."""
@@ -173,6 +192,9 @@ class TelegramNotifier:
 
     def send_run_failed(self, info: RunFailedInfo) -> None:
         self._send(build_run_failed_message(info), [])
+
+    def send_paused(self, info: PausedInfo) -> None:
+        self._send(build_paused_message(info), [])
 
     def _send(self, text: str, keyboard: list[list[dict[str, str]]]) -> None:
         url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"

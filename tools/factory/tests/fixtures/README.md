@@ -17,5 +17,9 @@ data.
 - `gh_pr_list.json` — recorded with:
   `gh pr list --repo daedraMex/commerce-platform --state all --search 'Phase 4 / 05 in:title' --json body`
   (the merged PR whose body contains `Closes #49`).
+- `gh_pr_list_open.json` — the `author`, `isDraft` and `headRefName` shape that
+  `gh pr list --state open --json ...` returns for the open-PR cap. It mixes
+  xolo-bot PRs on `nf/*` (draft and ready), a xolo-bot PR on another branch, and
+  a human PR on `nf/*`, so the counting test proves both filters.
 - `gh_pr_create.txt` — the URL printed by `gh pr create` when PR #63 was opened;
   captured from the pull request it points at.
