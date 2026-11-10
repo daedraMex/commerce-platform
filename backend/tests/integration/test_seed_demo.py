@@ -4,6 +4,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 
+from apps.catalog.management.commands import seed_demo
 from apps.catalog.models import (
     Category,
     Collection,
@@ -86,6 +87,32 @@ def test_seed_demo_is_idempotent(settings):
     assert first["products"] >= 5
     assert first["variants"] > 0
     assert "Rows unchanged" in output
+
+
+def test_seed_demo_rejects_an_invalid_demo_category_and_creates_nothing(settings, monkeypatch):
+    settings.DEBUG = True
+    home = make_store("home", "Home")
+    make_superuser()
+
+    invalid_definition = {
+        "name": "Broken",
+        "slug": "demo-broken",
+        "sku_code": "DMB",
+        "option_schema": [
+            {
+                "code": "size",
+                "label": "Size",
+                "values": [{"code": "SM", "label": "Small"}],
+            }
+        ],
+    }
+    monkeypatch.setattr(seed_demo, "DEMO_CATEGORIES", (invalid_definition,))
+
+    with pytest.raises(CommandError, match="demo category"):
+        run_seed()
+
+    assert not Category.objects.filter(store=home).exists()
+    assert not Product.objects.exists()
 
 
 def test_seeding_one_store_creates_nothing_in_another(settings):

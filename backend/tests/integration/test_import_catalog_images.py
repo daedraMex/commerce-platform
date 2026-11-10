@@ -530,13 +530,13 @@ def test_the_first_pass_keeps_media_metadata_without_image_bytes(tmp_path, media
     write_image(images, "main.jpg", size=(10, 20))
     csv_path = write_csv(tmp_path, [row(main_image="main.jpg")])
 
-    from apps.catalog.management.commands import import_catalog
+    from apps.catalog.management import support
     from apps.catalog.media import PreparedMedia
 
-    rows, rejections = import_catalog._read_rows(str(csv_path), home)
+    rows, rejections = support._read_rows(str(csv_path), home)
     assert rejections == []
 
-    prepared, rejections = import_catalog._prepare_images(home, rows, images)
+    prepared, rejections = support._prepare_images(home, rows, images)
 
     assert rejections == []
     assert set(prepared) == {"main.jpg"}
@@ -548,7 +548,7 @@ def test_the_first_pass_keeps_media_metadata_without_image_bytes(tmp_path, media
     assert entry.storage_key.startswith(f"stores/{home.pk}/media/")
     assert entry.path == (images / "main.jpg").resolve()
 
-    plan = import_catalog._plan(home, rows, dry_run=True, prepared_images=prepared)
+    plan = support._plan(home, rows, dry_run=True, prepared_images=prepared)
     assert plan.rejections == []
     assert plan.new_media_files
     assert all(not hasattr(item, "content") for item in plan.new_media_files.values())
@@ -565,9 +565,9 @@ def test_a_file_changed_between_the_two_passes_fails_and_writes_nothing(
     image_path = write_image(images, "main.jpg", size=(10, 20))
     csv_path = write_csv(tmp_path, [row(main_image="main.jpg")])
 
-    from apps.catalog.management.commands import import_catalog
+    from apps.catalog.management import support
 
-    original = import_catalog.prepare_media_file
+    original = support.prepare_media_file
     calls = {"count": 0}
 
     def changing_prepare(store, path):
@@ -577,7 +577,7 @@ def test_a_file_changed_between_the_two_passes_fails_and_writes_nothing(
             image_path.write_bytes(image_bytes())
         return prepared
 
-    monkeypatch.setattr(import_catalog, "prepare_media_file", changing_prepare)
+    monkeypatch.setattr(support, "prepare_media_file", changing_prepare)
 
     with pytest.raises(CommandError, match="changed"):
         call_command(
