@@ -21,6 +21,7 @@ dependencies = [
 dev = [
     "factory-boy",
     "pre-commit>=4.7.0",
+    "pyyaml",
     "pytest",
     "pytest-django",
     "ruff>=0.17.2",
@@ -41,3 +42,6 @@ select = ["E", "F", "I", "UP", "B", "DJ"]
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 testpaths = ["tests"]
+markers = [
+    "no_celery_eager: keep Celery in its non-eager default for this test",
+]

@@ -171,6 +171,16 @@ class FakeTokenProvider:
         return self.token
 
 
+class FailingTokenProvider:
+    def __init__(self, error=None):
+        self.error = error or RuntimeError("github api down")
+        self.calls = []
+
+    def mint(self, repo):
+        self.calls.append(repo)
+        raise self.error
+
+
 class FakeRunner:
     def __init__(self, result=None):
         self.result = result or AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
@@ -732,6 +742,28 @@ def test_counting_open_prs_failure_pauses_with_github_unreachable(tmp_path):
         runner=runner,
         notifier=notifier,
         settings=settings,
+    )
+
+    assert factory.run() == []
+    assert factory.run() == []
+
+    assert runner.calls == []
+    assert github.listed_with is None
+    assert [info.reason for info in notifier.paused] == ["GitHub unreachable"]
+
+
+def test_token_mint_failure_pauses_with_github_unreachable_once(tmp_path):
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    token_provider = FailingTokenProvider()
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=FakeGit(check_passed=True),
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        token_provider=token_provider,
     )
 
     assert factory.run() == []
