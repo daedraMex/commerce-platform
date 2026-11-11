@@ -314,6 +314,8 @@ class Factory:
         )
         if diff.migrations_changed:
             self.github.add_pr_label(pr_number, MIGRATION_LABEL, token)
+        self._mark_pr_ready(pr_number, token)
+        self._enable_auto_merge(pr_number, token)
         info = PrReadyInfo(
             ticket_number=ticket.number,
             ticket_title=ticket.title,
@@ -371,6 +373,40 @@ class Factory:
         )
         self._notify(self.notifier.send_stuck, info)
         return TicketResult(ticket=ticket, ok=False)
+
+    def _mark_pr_ready(self, pr_number: int, token: str) -> None:
+        """Mark the PR ready; a failure leaves it a draft and never fails the ticket."""
+        try:
+            result = self.github.mark_pr_ready(pr_number, token)
+        except Exception as exc:
+            print(
+                f"PR #{pr_number} stays a draft: {short_error(exc)}",
+                file=sys.stderr,
+            )
+            return
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or result.stdout.strip() or f"exit {result.exit_code}"
+            print(
+                f"PR #{pr_number} stays a draft: {short_error(reason)}",
+                file=sys.stderr,
+            )
+
+    def _enable_auto_merge(self, pr_number: int, token: str) -> None:
+        """Ask GitHub to auto-merge; a repo setting that forbids it is not fatal."""
+        try:
+            result = self.github.enable_auto_merge(pr_number, token)
+        except Exception as exc:
+            print(
+                f"auto-merge not enabled for PR #{pr_number}: {short_error(exc)}",
+                file=sys.stderr,
+            )
+            return
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or result.stdout.strip() or f"exit {result.exit_code}"
+            print(
+                f"auto-merge not enabled for PR #{pr_number}: {short_error(reason)}",
+                file=sys.stderr,
+            )
 
     def _notify(self, send, info) -> None:
         """Notifications are best effort; a delivery failure never changes the outcome."""

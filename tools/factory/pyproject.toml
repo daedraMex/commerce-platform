@@ -1,7 +1,7 @@
 [project]
 name = "night-factory"
 version = "0.1.0"
-description = "Unattended hourly runner that implements agent-ready tickets and opens draft PRs"
+description = "Unattended hourly runner that implements agent-ready tickets and opens PRs ready for review"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pyjwt[crypto]>=2.10",

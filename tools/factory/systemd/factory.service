@@ -1,5 +1,5 @@
 [Unit]
-Description=Night factory: implement agent-ready tickets and open draft PRs
+Description=Night factory: implement agent-ready tickets and open PRs ready for review
 After=network-online.target
 Wants=network-online.target
 
