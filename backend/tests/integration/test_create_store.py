@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
 
 from apps.accounts.models import StoreMembership
-from apps.stores.models import Store
+from apps.stores.models import ACCENT_COLOR_DEFAULT, Store
 
 pytestmark = pytest.mark.django_db
 
@@ -112,3 +112,23 @@ def test_without_owner_the_store_has_no_membership():
     run_create_store("home", name="Home")
 
     assert not StoreMembership.objects.exists()
+
+
+def test_uses_the_platform_accent_color_when_the_option_is_omitted():
+    run_create_store("home", name="Home")
+
+    assert Store.objects.get(slug="home").accent_color == ACCENT_COLOR_DEFAULT
+
+
+def test_stores_the_accent_color_lowercase():
+    run_create_store("home", name="Home", accent_color="#ABCDEF")
+
+    assert Store.objects.get(slug="home").accent_color == "#abcdef"
+
+
+@pytest.mark.parametrize("accent_color", ["red", "#fff", "", "#12345g", "4f46e5"])
+def test_rejects_an_invalid_accent_color_and_creates_no_store(accent_color):
+    with pytest.raises(CommandError, match="accent_color"):
+        run_create_store("home", name="Home", accent_color=accent_color)
+
+    assert not Store.objects.exists()
