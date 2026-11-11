@@ -6,6 +6,7 @@ function, so nothing is built or loaded at import time and importing shared neve
 
 from collections.abc import Callable
 
+from apps.photos.application.ports import PhotoSubmissionRepository
 from apps.shared.domain.ports import Authorizer, FeatureFlags, StoreResolver
 
 _overrides: dict[Callable, Callable] = {}
@@ -45,3 +46,12 @@ def get_feature_flags() -> FeatureFlags:
     from apps.stores.feature_flags import DatabaseFeatureFlags
 
     return DatabaseFeatureFlags()
+
+
+def get_photo_submission_repository() -> PhotoSubmissionRepository:
+    if get_photo_submission_repository in _overrides:
+        return _overrides[get_photo_submission_repository]()
+
+    from apps.photos.infrastructure.repository import DjangoPhotoSubmissionRepository
+
+    return DjangoPhotoSubmissionRepository()
