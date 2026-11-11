@@ -290,6 +290,16 @@ Tamaño y material son atributos de la categoría, iguales para todas las varian
   La venta de paquetes fijos y surtidos ya existe desde la fase 5 (`Bundle` y `BundleItem`);
   aquí los agentes solo los recomiendan. La lógica de recomendación se comparte con la fase 12
   y se diseña una sola vez.
+- Las recomendaciones aprenden a nivel de serie, colección y categoría, no por SKU, para
+  seguir siendo válidas cuando cambian los modelos; una variante nueva hereda el historial de
+  su serie (arranque en frío).
+- Las recomendaciones solo usan lo que hay en stock ahora; las variantes inactivas o sin stock
+  nunca se proponen.
+- Los personajes nuevos se cargan como variantes del producto de su serie, así que los
+  paquetes surtidos (definidos por un conjunto) los incluyen solos y dejan caer los agotados
+  sin editar el paquete.
+- El agente marca los paquetes fijos cuyos componentes están agotados o inactivos para que el
+  staff los actualice.
 - Menciones desde Ghosty Teams: agentes webhook que llegan a `/api/v1/ops/agents/invoke/`,
   con verificación de origen, permisos del usuario y tope de relevos entre agentes.
 - `evals/` con dataset y graders por agente, corriendo en el CI cuando cambian los prompts.
@@ -324,6 +334,13 @@ que ya existen desde la fase 5, para aprobación. Esta fase solo recomienda paqu
 de paquetes fijos y surtidos es de la fase 5. La lógica de recomendación se comparte con la
 fase 9 (guiones de video) y se diseña una sola vez. Ejemplos de recomendación: una docena
 surtida de llaveros o 12 llaveros de Spider-Man mezclando los colores azul y rojo.
+**Reglas de recomendación:** aprenden a nivel de serie, colección y categoría, no por SKU, para
+seguir siendo válidas cuando cambian los modelos; una variante nueva hereda el historial de su
+serie (arranque en frío). Solo usan lo que hay en stock ahora; las variantes inactivas o sin
+stock nunca se proponen. Los personajes nuevos se cargan como variantes del producto de su
+serie, así que los paquetes surtidos (definidos por un conjunto) los incluyen solos y dejan
+caer los agotados sin editar el paquete. El agente marca los paquetes fijos cuyos componentes
+están agotados o inactivos para que el staff los actualice.
 **Criterio de salida:** la sugerencia semanal propone un paquete, lo apruebas y se puede vender
 con el flujo de la fase 5.
 **Requisito:** al menos unos meses de historial de ventas.

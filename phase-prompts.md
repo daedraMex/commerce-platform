@@ -551,6 +551,16 @@ Goal: scheduled, validated and approved social media posts.
     AI-generated video. Selling fixed and assorted bundles is already part of Phase 5
     (Bundle and BundleItem); here the agents only recommend them. The bundle
     recommendation logic is shared with Phase 12 (suggested bundles); design it once.
+  - Bundle recommendations learn at the series, collection and category level, not per
+    SKU, so they stay valid when models change; a new variant inherits its series' history
+    (cold start).
+  - Recommendations only use what is in stock now; inactive or out-of-stock variants are
+    never proposed.
+  - New characters are loaded as variants of their series product, so assorted bundles
+    (defined by a pool) include them automatically and drop exhausted ones without editing
+    the bundle.
+  - The agent flags fixed bundles whose components are out of stock or inactive, so staff
+    can update them.
 - Celery Beat creates posts from schedules; rejected posts regenerate at most twice,
   then go to needs_review. Add a social.propose_post permission for content_editor
   (a new data migration, ADR-0021); approval requires social.approve_post, so posts
@@ -618,6 +628,14 @@ Goal: raise the average ticket by recommending combinations that already sell to
   selling fixed and assorted bundles belongs to Phase 5. Bundle recommendation is shared with
   Phase 9 (video scripts) and designed once. Examples: an assorted dozen of keychains or 12
   Spider-Man keychains mixing the blue and red colors.
+- Recommendations learn at the series, collection and category level, not per SKU, so they
+  stay valid when models change; a new variant inherits its series' history (cold start).
+- Recommendations only use what is in stock now; inactive or out-of-stock variants are never
+  proposed.
+- New characters are loaded as variants of their series product, so assorted bundles (defined
+  by a pool) include them automatically and drop exhausted ones without editing the bundle.
+- The agent flags fixed bundles whose components are out of stock or inactive, so staff can
+  update them.
 ```
 
 **Done when:** the weekly suggestion proposes a bundle, you approve it and it can be sold through the Phase 5 flow.
