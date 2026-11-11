@@ -159,15 +159,31 @@ comandos `import_catalog` y `set_prices`; endpoints públicos de lectura, inclui
 para `home` (las imágenes llegan en la fase 4b).
 
 ### Fase 4b — Fotos del catálogo
-**Objetivo:** que el staff convierta una foto del celular en la imagen del catálogo.
-**Entregables:** endpoints de staff para media del catálogo con `catalog.manage`; página para
-celular donde se sube la foto (HEIC a JPEG) y se marcan las cuatro esquinas; procesamiento en
-Celery que endereza, recorta a la proporción real y corrige la luz. La página nace en Quetzal, la
-consola de staff (ADR-0026): esqueleto con inicio de sesión (ADR-0027), tienda en la URL y menú por
-permisos; `packages/api-client` generado con orval; `GET /api/v1/me/`; `Store.accent_color`.
+**Objetivo:** que el staff convierta una o varias fotos del celular en imágenes del catálogo,
+individuales o grupales.
+**Entregables:** módulo `photos` con clean architecture y endpoints de staff con `catalog.manage`;
+original privado y preview autorizado; página para celular en Quetzal, la consola de staff
+(ADR-0026), con inicio de sesión BFF (ADR-0027), tienda en la URL y menú por permisos; subida
+multipart con HEIC a JPEG, orientación EXIF aplicada y metadata eliminada; foto individual con
+cuatro esquinas y recorte rectificado; productos de contorno con marco de recorte rectangular;
+foto grupal 4:5 enlazada a varios productos; procesamiento en Celery que endereza, recorta a la
+proporción de la talla fotografiada y corrige la luz de forma determinista (sin eliminación de fondo
+con ML); renditions 320/800 WebP con claves derivadas; idempotencia por tienda y creador;
+`ProductMedia.is_active`; `packages/api-client` generado con orval; `GET /api/v1/me/`;
+`Store.accent_color`.
 **Prerrequisito (PR humano):** `web/console/scripts/check.sh` y la fábrica corriendo el check de cada
 parte que toca un ticket; el job E2E de nivel 2 en GitHub Actions.
-**Criterio de salida:** un miembro del staff fotografía una frazada y queda como su imagen principal.
+**Criterio de salida:** un miembro del staff fotografía una frazada y queda como su imagen principal,
+y una foto grupal queda enlazada a varios productos. El video es la fase 4d.
+
+### Fase 4d — Video del catálogo
+**Objetivo:** que el staff agregue un video corto del producto sin cambiar los llamadores de la fase 4b.
+**Entregables:** subida directa a R2 con URLs prefirmadas detrás del puerto `MediaUploader` (el camino
+que ADR-0028 difirió); validación de duración, códec y tamaño; renditions de video, reproducción en
+Quetzal y URL pública en la API del producto. Sin campos de video en la fase 4b; el diseño se decide
+en el /grill-with-docs de esta fase.
+**Criterio de salida:** un video corto subido desde Quetzal se reproduce en Quetzal, y la API
+pública del producto devuelve su URL; el storefront lo muestra en la fase 7.
 
 ### Fase 5 — Inventario y pedidos
 **Objetivo:** vender sin vender de más.
@@ -207,7 +223,8 @@ mostrado incluye el recargo.
 ### Fase 7 — Storefront, primero con la tienda de frazadas
 **Objetivo:** vender en tu propio dominio.
 **Entregables:** un solo `storefront` en Next.js con tema por tienda, resuelta por dominio, que
-sale en vivo con `home`: catálogo, producto, carrito, checkout, confirmación e historial; SEO; despliegue en Vercel (plan Pro)
+sale en vivo con `home`: catálogo, producto (con el video público que la API devuelve desde la
+fase 4d), carrito, checkout, confirmación e historial; SEO; despliegue en Vercel (plan Pro)
 con previews. Usa el `packages/api-client` y la sesión con BFF (ADR-0027) que ya existen desde la 4b; el tema
 completo por tienda se decide en su /grill-with-docs.
 **Criterio de salida:** alguien compra una frazada en tu dominio.
@@ -225,6 +242,10 @@ para Meta y TikTok; eventos de conversión desde el servidor; UTM guardados en e
   `AgentDefinition` (handle, prompt, versión, modelo, herramientas permitidas), `AgentRun`.
 - Colas separadas: `realtime`, `agents_batch`, `default`.
 - Módulo `social` y agente `@social`: calendario, generador, validador, aprobación y publicación.
+- Los agentes también recomiendan paquetes de productos y escriben guiones de grabación
+  (tomas, duración, gancho, texto en pantalla) al estilo de los videos de referencia; el
+  staff graba los videos y los sube por Quetzal (fase 4d). Nada de video generado por IA.
+  La lógica de paquetes se comparte con la fase 12 y se diseña una sola vez.
 - Menciones desde Ghosty Teams: agentes webhook que llegan a `/api/v1/ops/agents/invoke/`,
   con verificación de origen, permisos del usuario y tope de relevos entre agentes.
 - `evals/` con dataset y graders por agente, corriendo en el CI cuando cambian los prompts.
@@ -255,7 +276,8 @@ responde, la conversación pasa a ventas.
 **Objetivo:** subir el ticket promedio con combinaciones que ya se venden juntas.
 **Entregables:** análisis de canasta sobre `OrderItem` (pares frecuentes, margen, stock);
 agente `@paquetes` que nombra y describe; `Bundle` y `BundleItem` como borrador con aprobación;
-venta de paquetes en las tiendas web.
+venta de paquetes en las tiendas web. La recomendación de paquetes se comparte con la fase 9
+(guiones de video) y se diseña una sola vez.
 **Criterio de salida:** la sugerencia semanal genera un paquete, lo apruebas y se puede comprar.
 **Requisito:** al menos unos meses de historial de ventas.
 
