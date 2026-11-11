@@ -342,6 +342,7 @@ class ProductMediaInline(admin.TabularInline):
     model = ProductMedia
     autocomplete_fields = ("media",)
     extra = 0
+    can_delete = False
     fields = ("media", "variant", "role", "position", "is_active")
     ordering = ("position",)
 
