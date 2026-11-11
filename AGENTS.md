@@ -1,9 +1,11 @@
 # commerce-platform
 
 Monorepo for a multi-store e-commerce platform. One backend serves any number of
-stores (today `anime`: anime merchandise, `kawaii`: kawaii stationery, and `home`: blankets), a single
-themed storefront, a future mobile app, and a platform of AI agents (Instagram
-publishing, WhatsApp sales, customer follow-up, bundle suggestions).
+stores (today `anime`: anime merchandise such as caps, t-shirts and other anime products;
+`kawaii`: kawaii stationery such as BTS holders, lomo cards, notebooks, stickers, pens and
+squishies; `llaveros`: keychains of every kind, retail and wholesale for resellers; and
+`home`: blankets), a single themed storefront, a future mobile app, and a platform of AI
+agents (Instagram publishing, WhatsApp sales, customer follow-up, bundle suggestions).
 
 It runs for one business today and will become a SaaS later. New optional features are
 enabled for our own stores first (feature flags) and rolled out to others after.
