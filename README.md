@@ -43,6 +43,35 @@ If ports 5432 or 6379 are already taken on your machine, override them:
 After changing backend code, rebuild the worker so it picks up the changes:
 `docker compose up -d --build worker`.
 
+## Console (Quetzal)
+
+The staff console lives in `web/console/` and is part of a pnpm workspace at the
+repo root, together with the generated API client in `packages/api-client/`.
+Node comes from `.nvmrc` and pnpm from the root `packageManager` field.
+
+```bash
+pnpm install                 # install the whole workspace
+pnpm dev:console             # Quetzal at http://localhost:3000/<store>
+./web/console/scripts/check.sh   # generate, lint, typecheck, unit and level-1 tests
+```
+
+### API client
+
+`packages/api-client` is generated with orval from
+`packages/api-client/openapi.json`: TanStack Query hooks over one axios instance
+that always sends `X-Requested-With`. The generated code is not committed; the
+console's `dev`, `build` and `check` run the generation first.
+
+```bash
+pnpm generate:client         # regenerate from the committed openapi.json
+pnpm --filter @commerce-platform/api-client build   # typecheck the generated client
+cd backend && uv run python manage.py dump_openapi   # refresh openapi.json after API changes
+cd backend && uv run python manage.py dump_openapi --check   # fail on drift
+```
+
+`backend/scripts/check.sh` runs the drift check, so a change to the API must be
+accompanied by a regenerated and committed `openapi.json`.
+
 ## Deploying
 
 After deploying a change that adds rendition sizes or bumps
@@ -61,4 +90,6 @@ objects.
 ## Layout
 
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv
+- `web/console/`: Quetzal, the staff console (Next.js App Router)
+- `packages/api-client/`: the generated API client used by the console
 - `docker-compose.yml`: PostgreSQL 16, Redis 7 and the Celery worker for local development

@@ -1,0 +1,1836 @@
+{
+  "components": {
+    "schemas": {
+      "Attribute": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {}
+        },
+        "required": [
+          "code",
+          "label",
+          "type",
+          "value"
+        ],
+        "type": "object"
+      },
+      "Category": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/Option"
+            },
+            "type": "array"
+          },
+          "shape": {
+            "type": "string"
+          },
+          "sku_code": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "options",
+          "shape",
+          "sku_code",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "CategorySummary": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "CheckStatus": {
+        "description": "* `ok` - ok\n* `error` - error",
+        "enum": [
+          "ok",
+          "error"
+        ],
+        "type": "string"
+      },
+      "CollectionSummary": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "description",
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "FieldError": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "field"
+        ],
+        "type": "object"
+      },
+      "LivenessResponse": {
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "version"
+        ],
+        "type": "object"
+      },
+      "Option": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "$ref": "#/components/schemas/OptionValue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "values"
+        ],
+        "type": "object"
+      },
+      "OptionValue": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "height_cm": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          },
+          "label": {
+            "type": "string"
+          },
+          "width_cm": {
+            "format": "double",
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "code",
+          "label"
+        ],
+        "type": "object"
+      },
+      "PaginatedProductList": {
+        "properties": {
+          "count": {
+            "example": 123,
+            "type": "integer"
+          },
+          "next": {
+            "example": "http://api.example.org/accounts/?page=4",
+            "format": "uri",
+            "nullable": true,
+            "type": "string"
+          },
+          "previous": {
+            "example": "http://api.example.org/accounts/?page=2",
+            "format": "uri",
+            "nullable": true,
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "count",
+          "results"
+        ],
+        "type": "object"
+      },
+      "ProblemDetails": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "detail",
+          "status",
+          "title",
+          "type"
+        ],
+        "type": "object"
+      },
+      "Product": {
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/Attribute"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategorySummary"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/Variant"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "attributes",
+          "category",
+          "name",
+          "slug",
+          "variants"
+        ],
+        "type": "object"
+      },
+      "ProductDetail": {
+        "properties": {
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/Attribute"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "category": {
+            "$ref": "#/components/schemas/CategorySummary"
+          },
+          "collections": {
+            "items": {
+              "$ref": "#/components/schemas/CollectionSummary"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "description": {
+            "type": "string"
+          },
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/ProductImage"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "variants": {
+            "items": {
+              "$ref": "#/components/schemas/Variant"
+            },
+            "readOnly": true,
+            "type": "array"
+          }
+        },
+        "required": [
+          "attributes",
+          "category",
+          "collections",
+          "description",
+          "images",
+          "name",
+          "slug",
+          "variants"
+        ],
+        "type": "object"
+      },
+      "ProductImage": {
+        "properties": {
+          "alt_text": {
+            "type": "string"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "medium_url": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer"
+          },
+          "role": {
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "variant": {
+            "nullable": true,
+            "readOnly": true,
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "alt_text",
+          "height",
+          "medium_url",
+          "position",
+          "role",
+          "thumbnail_url",
+          "url",
+          "variant",
+          "width"
+        ],
+        "type": "object"
+      },
+      "ProductSummary": {
+        "properties": {
+          "main_image": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ProductImage"
+              }
+            ],
+            "readOnly": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "main_image",
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "ReadinessChecks": {
+        "properties": {
+          "database": {
+            "$ref": "#/components/schemas/CheckStatus"
+          },
+          "redis": {
+            "$ref": "#/components/schemas/CheckStatus"
+          }
+        },
+        "required": [
+          "database",
+          "redis"
+        ],
+        "type": "object"
+      },
+      "ReadinessProblemDetails": {
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ReadinessChecks"
+          },
+          "code": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "checks",
+          "code",
+          "detail",
+          "status",
+          "title",
+          "type"
+        ],
+        "type": "object"
+      },
+      "ReadinessResponse": {
+        "properties": {
+          "checks": {
+            "$ref": "#/components/schemas/ReadinessChecks"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "checks",
+          "status"
+        ],
+        "type": "object"
+      },
+      "StaffMe": {
+        "properties": {
+          "permissions": {
+            "description": "Permission codes the role allows in this store, sorted alphabetically.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role": {
+            "description": "The role the user holds in this store.",
+            "type": "string"
+          },
+          "store": {
+            "$ref": "#/components/schemas/StaffStore"
+          }
+        },
+        "required": [
+          "permissions",
+          "role",
+          "store"
+        ],
+        "type": "object"
+      },
+      "StaffStore": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "TokenObtainRequest": {
+        "properties": {
+          "email": {
+            "description": "Email address, matched ignoring case.",
+            "type": "string"
+          },
+          "password": {
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "TokenPairResponse": {
+        "properties": {
+          "access": {
+            "type": "string"
+          },
+          "refresh": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "access",
+          "refresh"
+        ],
+        "type": "object"
+      },
+      "TokenRefreshRequest": {
+        "properties": {
+          "refresh": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "refresh"
+        ],
+        "type": "object"
+      },
+      "TokenRefreshResponse": {
+        "properties": {
+          "access": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "access"
+        ],
+        "type": "object"
+      },
+      "Variant": {
+        "properties": {
+          "compare_at_price": {
+            "format": "decimal",
+            "nullable": true,
+            "pattern": "^-?\\d{0,8}(?:\\.\\d{0,2})?$",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/VariantOption"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "price": {
+            "format": "decimal",
+            "pattern": "^-?\\d{0,8}(?:\\.\\d{0,2})?$",
+            "type": "string"
+          },
+          "sku": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "compare_at_price",
+          "options",
+          "price",
+          "sku"
+        ],
+        "type": "object"
+      },
+      "VariantLookup": {
+        "properties": {
+          "compare_at_price": {
+            "format": "decimal",
+            "nullable": true,
+            "pattern": "^-?\\d{0,8}(?:\\.\\d{0,2})?$",
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/VariantOption"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
+          "price": {
+            "format": "decimal",
+            "pattern": "^-?\\d{0,8}(?:\\.\\d{0,2})?$",
+            "type": "string"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductSummary"
+          },
+          "sku": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "compare_at_price",
+          "options",
+          "price",
+          "product",
+          "sku"
+        ],
+        "type": "object"
+      },
+      "VariantOption": {
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/OptionValue"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "value"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "jwtAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "Multi-store commerce platform API.",
+    "title": "Commerce Platform API",
+    "version": "1.0.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/v1/auth/token/": {
+      "post": {
+        "description": "Takes a set of user credentials and returns an access and refresh JSON web\ntoken pair to prove the authentication of those credentials.",
+        "operationId": "api_v1_auth_token_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenObtainRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenObtainRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenObtainRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "TokenPair": {
+                    "summary": "Token pair",
+                    "value": {
+                      "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access",
+                      "refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TokenPairResponse"
+                }
+              }
+            },
+            "description": "A new access and refresh token pair."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "ValidationError": {
+                    "summary": "validation_error",
+                    "value": {
+                      "code": "validation_error",
+                      "detail": "Validation failed.",
+                      "errors": [
+                        {
+                          "code": "required",
+                          "detail": "This field is required.",
+                          "field": "password"
+                        }
+                      ],
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Validation failed."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "InvalidCredentials": {
+                    "summary": "invalid_credentials",
+                    "value": {
+                      "code": "invalid_credentials",
+                      "detail": "Invalid email or password.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Invalid email or password."
+          }
+        },
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/auth/token/refresh/": {
+      "post": {
+        "description": "Takes a refresh type JSON web token and returns an access type JSON web\ntoken if the refresh token is valid.",
+        "operationId": "api_v1_auth_token_refresh_create",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRefreshRequest"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRefreshRequest"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/TokenRefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "AccessToken": {
+                    "summary": "Access token",
+                    "value": {
+                      "access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TokenRefreshResponse"
+                }
+              }
+            },
+            "description": "A new access token."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "ValidationError": {
+                    "summary": "validation_error",
+                    "value": {
+                      "code": "validation_error",
+                      "detail": "Validation failed.",
+                      "errors": [
+                        {
+                          "code": "required",
+                          "detail": "This field is required.",
+                          "field": "refresh"
+                        }
+                      ],
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Validation failed."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Token is invalid",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Token is invalid"
+          }
+        },
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/catalog/categories/": {
+      "get": {
+        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
+        "operationId": "api_v1_catalog_categories_list",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "Frazada": {
+                    "value": [
+                      {
+                        "name": "Frazada",
+                        "options": [
+                          {
+                            "code": "size",
+                            "label": "Size",
+                            "values": [
+                              {
+                                "code": "IND",
+                                "height_cm": 160.0,
+                                "label": "Individual / Personal / Viajera",
+                                "width_cm": 110.0
+                              },
+                              {
+                                "code": "MAT",
+                                "height_cm": 160.0,
+                                "label": "Matrimonial",
+                                "width_cm": 210.0
+                              }
+                            ]
+                          }
+                        ],
+                        "shape": "rectangle",
+                        "sku_code": "FRZ",
+                        "slug": "frazada"
+                      }
+                    ]
+                  }
+                },
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Category"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The store's active categories and their option definitions."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          },
+          {}
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/catalog/collections/": {
+      "get": {
+        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
+        "operationId": "api_v1_catalog_collections_list",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "Halloween2026": {
+                    "summary": "Halloween 2026",
+                    "value": [
+                      {
+                        "description": "Blankets and pillows for the season.",
+                        "name": "Halloween 2026",
+                        "slug": "halloween-2026"
+                      }
+                    ]
+                  }
+                },
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CollectionSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "The store's active collections in name order."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          },
+          {}
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/catalog/products/": {
+      "get": {
+        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
+        "operationId": "api_v1_catalog_products_list",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only products in the category with this slug.",
+            "in": "query",
+            "name": "category",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only products in the active collection with this slug, in the collection's curated order.",
+            "examples": {
+              "Halloween2026": {
+                "summary": "Halloween 2026",
+                "value": "halloween-2026"
+              }
+            },
+            "in": "query",
+            "name": "collection",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A page number within the paginated result set.",
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Number of results to return per page.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only products whose name contains this text, ignoring case and accents.",
+            "in": "query",
+            "name": "search",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ProductPage": {
+                    "summary": "Product page",
+                    "value": {
+                      "count": 123,
+                      "next": "http://api.example.org/accounts/?page=4",
+                      "previous": "http://api.example.org/accounts/?page=2",
+                      "results": [
+                        {
+                          "attributes": [
+                            {
+                              "code": "material",
+                              "label": "Material",
+                              "type": "text",
+                              "value": "Flannel premier"
+                            }
+                          ],
+                          "category": {
+                            "name": "Frazada",
+                            "slug": "frazada"
+                          },
+                          "name": "Frazada Térmica",
+                          "slug": "frazada-termica",
+                          "variants": [
+                            {
+                              "compare_at_price": "699.00",
+                              "options": [
+                                {
+                                  "code": "size",
+                                  "label": "Size",
+                                  "value": {
+                                    "code": "MAT",
+                                    "height_cm": 160.0,
+                                    "label": "Matrimonial",
+                                    "width_cm": 210.0
+                                  }
+                                }
+                              ],
+                              "price": "499.00",
+                              "sku": "FRZ-00012-MAT"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedProductList"
+                }
+              }
+            },
+            "description": "A page of the store's visible products, newest first or in the collection's curated order."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          },
+          {}
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/catalog/products/{slug}/": {
+      "get": {
+        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
+        "operationId": "api_v1_catalog_products_retrieve",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ProductDetail": {
+                    "summary": "Product detail",
+                    "value": {
+                      "attributes": [
+                        {
+                          "code": "material",
+                          "label": "Material",
+                          "type": "text",
+                          "value": "Flannel premier"
+                        }
+                      ],
+                      "category": {
+                        "name": "Frazada",
+                        "slug": "frazada"
+                      },
+                      "collections": [
+                        {
+                          "description": "Blankets and pillows for the season.",
+                          "name": "Halloween 2026",
+                          "slug": "halloween-2026"
+                        }
+                      ],
+                      "description": "Sublimated flannel blanket.",
+                      "images": [
+                        {
+                          "alt_text": "Blue flannel blanket with a moon pattern",
+                          "height": 800,
+                          "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                          "position": 1,
+                          "role": "main",
+                          "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                          "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                          "variant": null,
+                          "width": 1200
+                        }
+                      ],
+                      "name": "Frazada Térmica",
+                      "slug": "frazada-termica",
+                      "variants": [
+                        {
+                          "compare_at_price": "699.00",
+                          "options": [
+                            {
+                              "code": "size",
+                              "label": "Size",
+                              "value": {
+                                "code": "MAT",
+                                "height_cm": 160.0,
+                                "label": "Matrimonial",
+                                "width_cm": 210.0
+                              }
+                            }
+                          ],
+                          "price": "499.00",
+                          "sku": "FRZ-00012-MAT"
+                        }
+                      ]
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProductDetail"
+                }
+              }
+            },
+            "description": "One visible product with its attributes, active collections and active variants."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No visible product matches this slug.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No visible product matches this slug."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          },
+          {}
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/catalog/variants/{sku}/": {
+      "get": {
+        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
+        "operationId": "api_v1_catalog_variants_retrieve",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Variant SKU, matched ignoring case.",
+            "in": "path",
+            "name": "sku",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "MatrimonialBlanket": {
+                    "summary": "Matrimonial blanket",
+                    "value": {
+                      "compare_at_price": "699.00",
+                      "options": [
+                        {
+                          "code": "size",
+                          "label": "Size",
+                          "value": {
+                            "code": "MAT",
+                            "height_cm": 160.0,
+                            "label": "Matrimonial",
+                            "width_cm": 210.0
+                          }
+                        }
+                      ],
+                      "price": "499.00",
+                      "product": {
+                        "main_image": {
+                          "alt_text": "Blue flannel blanket with a moon pattern",
+                          "height": 800,
+                          "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                          "position": 1,
+                          "role": "main",
+                          "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                          "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                          "variant": null,
+                          "width": 1200
+                        },
+                        "name": "Frazada Térmica",
+                        "slug": "frazada-termica"
+                      },
+                      "sku": "FRZ-00012-MAT"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/VariantLookup"
+                }
+              }
+            },
+            "description": "The visible variant and a summary of its product."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No visible variant matches this SKU.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No visible variant matches this SKU."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          },
+          {}
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/health/live/": {
+      "get": {
+        "operationId": "api_v1_health_live_retrieve",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "LivenessSuccess": {
+                    "summary": "Liveness success",
+                    "value": {
+                      "status": "ok",
+                      "version": "1.4.0"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/LivenessResponse"
+                }
+              }
+            },
+            "description": "The API process is running."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "InternalError": {
+                    "summary": "internal_error",
+                    "value": {
+                      "code": "internal_error",
+                      "detail": "An unexpected error occurred.",
+                      "status": 500,
+                      "title": "Internal Server Error",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "An unexpected error occurred."
+          }
+        },
+        "security": [
+          {}
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/health/ready/": {
+      "get": {
+        "operationId": "api_v1_health_ready_retrieve",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ReadinessSuccess": {
+                    "summary": "Readiness success",
+                    "value": {
+                      "checks": {
+                        "database": "ok",
+                        "redis": "ok"
+                      },
+                      "status": "ok"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessResponse"
+                }
+              }
+            },
+            "description": "PostgreSQL and Redis are reachable."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "ServiceUnavailable": {
+                    "summary": "service_unavailable",
+                    "value": {
+                      "checks": {
+                        "database": "error",
+                        "redis": "ok"
+                      },
+                      "code": "service_unavailable",
+                      "detail": "One or more dependencies are unavailable.",
+                      "status": 503,
+                      "title": "Service Unavailable",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ReadinessProblemDetails"
+                }
+              }
+            },
+            "description": "One or more dependencies are unavailable."
+          }
+        },
+        "security": [
+          {}
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/me/": {
+      "get": {
+        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
+        "operationId": "api_v1_staff_me_retrieve",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "StoreAdmin": {
+                    "summary": "Store admin",
+                    "value": {
+                      "permissions": [
+                        "catalog.manage",
+                        "inventory.adjust",
+                        "orders.place_manual",
+                        "social.approve_post"
+                      ],
+                      "role": "store_admin",
+                      "store": {
+                        "name": "Home",
+                        "slug": "home"
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMe"
+                }
+              }
+            },
+            "description": "Your role and permissions in the store."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You are not staff of this store.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You are not staff of this store."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    }
+  }
+}

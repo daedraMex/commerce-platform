@@ -1,0 +1,14 @@
+{
+  "name": "commerce-platform",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "dev:console": "pnpm --filter @commerce-platform/console dev",
+    "check:console": "pnpm --filter @commerce-platform/console check",
+    "generate:client": "pnpm --filter @commerce-platform/api-client generate",
+    "openapi": "cd backend && uv run python manage.py dump_openapi"
+  }
+}

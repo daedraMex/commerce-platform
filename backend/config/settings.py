@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     "apps.catalog",
     "apps.health",
     "apps.photos",
+    "apps.shared",
     "apps.stores",
 ]
 

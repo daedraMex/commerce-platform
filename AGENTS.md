@@ -86,6 +86,11 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - cd backend && uv run pytest tests/api/test_health.py   # one test file while iterating
 - cd backend && uv run pre-commit install --config ../.pre-commit-config.yaml
   # installs the ruff hooks that run on every commit
+- pnpm install                              # Node dependencies (Node from .nvmrc)
+- pnpm dev:console                          # Quetzal at http://localhost:3000/<store>
+- ./web/console/scripts/check.sh            # generate client, lint, typecheck, unit, level-1 tests
+- pnpm generate:client                      # regenerate packages/api-client from openapi.json
+- cd backend && uv run python manage.py dump_openapi   # refresh packages/api-client/openapi.json
 
 ## Testing
 - Write the failing test first.
