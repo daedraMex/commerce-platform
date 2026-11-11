@@ -1,5 +1,7 @@
 """Django implementations of the catalog service's ports (ADR-0028)."""
 
+from django.db import IntegrityError, transaction
+
 from apps.catalog.media import PreparedMedia, save_prepared_media
 from apps.catalog.models import Media, Product, ProductMedia, ProductVariant
 from apps.catalog.services import (
@@ -52,6 +54,25 @@ def _variant_record(row):
     )
 
 
+_MEDIA_UNIQUE_CONSTRAINTS = {
+    "catalog_media_store_content_hash_unique",
+    "catalog_media_storage_key_key",
+}
+
+
+def _is_duplicate_media(error):
+    cause = error.__cause__
+    constraint = getattr(getattr(cause, "diag", None), "constraint_name", None)
+    if constraint in _MEDIA_UNIQUE_CONSTRAINTS:
+        return True
+    message = str(error)
+    if any(name in message for name in _MEDIA_UNIQUE_CONSTRAINTS):
+        return True
+    return "UNIQUE constraint failed" in message and (
+        "content_hash" in message or "storage_key" in message
+    )
+
+
 def _image_record(row):
     return ProductImageRecord(
         id=row.pk,
@@ -68,6 +89,9 @@ def _image_record(row):
 class DjangoCatalogRepository:
     """Read and write catalog rows, filtering every query by store."""
 
+    def lock_product(self, store_id: int, product_id: int) -> None:
+        Product.objects.select_for_update().filter(pk=product_id, store_id=store_id).exists()
+
     def media_by_content_hash(self, store_id: int, content_hash: str) -> MediaRecord | None:
         row = Media.objects.filter(store_id=store_id, content_hash=content_hash).first()
         return _media_record(row) if row is not None else None
@@ -77,16 +101,29 @@ class DjangoCatalogRepository:
         return _media_record(row) if row is not None else None
 
     def add_media(self, store_id: int, media: NewMedia) -> MediaRecord:
-        row = Media.objects.create(
-            store_id=store_id,
-            storage_key=media.storage_key,
-            content_hash=media.content_hash,
-            mime_type=media.mime_type,
-            alt_text=media.alt_text,
-            width=media.width,
-            height=media.height,
-            metadata=media.metadata,
-        )
+        try:
+            # The savepoint keeps the caller's transaction usable if a concurrent
+            # request already inserted the same content.
+            with transaction.atomic():
+                row = Media.objects.create(
+                    store_id=store_id,
+                    storage_key=media.storage_key,
+                    content_hash=media.content_hash,
+                    mime_type=media.mime_type,
+                    alt_text=media.alt_text,
+                    width=media.width,
+                    height=media.height,
+                    metadata=media.metadata,
+                )
+        except IntegrityError as error:
+            if not _is_duplicate_media(error):
+                raise
+            existing = Media.objects.filter(
+                store_id=store_id, content_hash=media.content_hash
+            ).first()
+            if existing is None:
+                raise
+            return _media_record(existing)
         return _media_record(row)
 
     def get_product(self, store_id: int, product_id: int) -> ProductRecord | None:

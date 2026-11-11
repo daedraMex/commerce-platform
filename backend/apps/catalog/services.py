@@ -4,14 +4,16 @@ Pure Python: the Django implementations live in ``apps.catalog.repositories`` so
 store rules can be tested with fake repositories.
 """
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Protocol
 
+from apps.shared.domain.exceptions import DomainError
 from apps.shared.domain.store import StoreReference
 
 
-class CatalogServiceError(Exception):
+class CatalogServiceError(DomainError):
     """A catalog service command cannot be completed."""
 
     code = "catalog_service_error"
@@ -119,8 +121,18 @@ class ProductImageRecord:
     is_active: bool
 
 
+class UnitOfWork(Protocol):
+    """Run a block of work atomically, rolling every change in it back on failure."""
+
+    def __call__(self) -> AbstractContextManager[None]: ...
+
+
 class CatalogRepository(Protocol):
     """Persistence the service needs; the service enforces the store rules."""
+
+    def lock_product(self, store_id: int, product_id: int) -> None:
+        """Lock the store's product row for the rest of the transaction, if it exists."""
+        ...
 
     def media_by_content_hash(self, store_id: int, content_hash: str) -> MediaRecord | None:
         """Return the store's Media with that content hash, if any."""
@@ -174,9 +186,16 @@ class MediaFileWriter(Protocol):
 class CatalogService:
     """The catalog seam: Media creation, product-image rules and store-scoped lookup."""
 
-    def __init__(self, *, repository: CatalogRepository, files: MediaFileWriter):
+    def __init__(
+        self,
+        *,
+        repository: CatalogRepository,
+        files: MediaFileWriter,
+        transaction: UnitOfWork,
+    ):
         self._repository = repository
         self._files = files
+        self._transaction = transaction
 
     def create_media(self, store: StoreReference, media: NewMedia) -> MediaRecord:
         """Return the store's Media for the content, creating and storing it once."""
@@ -205,43 +224,41 @@ class CatalogService:
         position: int | None = None,
     ) -> ProductImageRecord:
         """Link a media to a product once, refusing a link that already exists."""
-        product = self._require_product(store, product_id)
-        self._require_media(store, media_id)
-        if variant_id is not None:
-            self._require_variant_of_product(store, product, variant_id)
-        if self._repository.find_product_image(product.id, media_id) is not None:
-            raise ProductImageConflict("This product already links that media.")
-
-        role = ProductImageRole(role)
-        if role is ProductImageRole.MAIN:
-            self._retire_other_mains(product.id, keep_id=None)
-        return self._repository.add_product_image(
-            NewProductImage(
-                product_id=product.id,
+        with self._transaction():
+            self._repository.lock_product(store.id, product_id)
+            product = self._require_product(store, product_id)
+            self._require_media(store, media_id)
+            if variant_id is not None:
+                self._require_variant_of_product(store, product, variant_id)
+            return self._add_image(
+                product.id,
                 media_id=media_id,
                 variant_id=variant_id,
                 role=role,
                 position=position,
             )
-        )
 
     def deactivate_product_image(
         self, store: StoreReference, *, image_id: int
     ) -> ProductImageRecord:
         """Retire one link, keeping its role and position."""
-        image = self._require_image(store, image_id)
-        if not image.is_active:
-            return image
-        return self._repository.save_product_image(replace(image, is_active=False))
+        with self._transaction():
+            image = self._require_image(store, image_id)
+            self._repository.lock_product(store.id, image.product_id)
+            if not image.is_active:
+                return image
+            return self._repository.save_product_image(replace(image, is_active=False))
 
     def reactivate_product_image(
         self, store: StoreReference, *, image_id: int
     ) -> ProductImageRecord:
         """Restore one link, keeping its role and position."""
-        image = self._require_image(store, image_id)
-        if image.role is ProductImageRole.MAIN:
-            self._retire_other_mains(image.product_id, keep_id=image.id)
-        return self._repository.save_product_image(replace(image, is_active=True))
+        with self._transaction():
+            image = self._require_image(store, image_id)
+            self._repository.lock_product(store.id, image.product_id)
+            if image.role is ProductImageRole.MAIN:
+                self._retire_other_mains(image.product_id, keep_id=image.id)
+            return self._repository.save_product_image(replace(image, is_active=True))
 
     def set_main_product_image(
         self,
@@ -273,33 +290,59 @@ class CatalogService:
         position: int | None = None,
     ) -> ProductImageRecord:
         """Create or reactivate a product's link to a media without losing its position."""
-        product = self._require_product(store, product_id)
-        self._require_media(store, media_id)
-        if variant_id is not None:
-            self._require_variant_of_product(store, product, variant_id)
+        with self._transaction():
+            self._repository.lock_product(store.id, product_id)
+            product = self._require_product(store, product_id)
+            self._require_media(store, media_id)
+            if variant_id is not None:
+                self._require_variant_of_product(store, product, variant_id)
 
-        existing = self._repository.find_product_image(product.id, media_id)
-        if existing is None:
-            return self.create_product_image(
-                store,
-                product_id=product.id,
+            existing = self._repository.find_product_image(product.id, media_id)
+            if existing is None:
+                return self._add_image(
+                    product.id,
+                    media_id=media_id,
+                    variant_id=variant_id,
+                    role=role,
+                    position=position,
+                )
+
+            role = ProductImageRole(role)
+            if role is ProductImageRole.MAIN:
+                self._retire_other_mains(product.id, keep_id=existing.id)
+            changed = replace(
+                existing,
+                variant_id=variant_id,
+                role=role,
+                position=existing.position if position is None else position,
+                is_active=True,
+            )
+            return self._repository.save_product_image(changed)
+
+    def _add_image(
+        self,
+        product_id: int,
+        *,
+        media_id: int,
+        variant_id: int | None,
+        role: ProductImageRole,
+        position: int | None,
+    ) -> ProductImageRecord:
+        if self._repository.find_product_image(product_id, media_id) is not None:
+            raise ProductImageConflict("This product already links that media.")
+
+        role = ProductImageRole(role)
+        if role is ProductImageRole.MAIN:
+            self._retire_other_mains(product_id, keep_id=None)
+        return self._repository.add_product_image(
+            NewProductImage(
+                product_id=product_id,
                 media_id=media_id,
                 variant_id=variant_id,
                 role=role,
                 position=position,
             )
-
-        role = ProductImageRole(role)
-        if role is ProductImageRole.MAIN:
-            self._retire_other_mains(product.id, keep_id=existing.id)
-        changed = replace(
-            existing,
-            variant_id=variant_id,
-            role=role,
-            position=existing.position if position is None else position,
-            is_active=True,
         )
-        return self._repository.save_product_image(changed)
 
     def _require_product(self, store: StoreReference, product_id: int) -> ProductRecord:
         product = self._repository.get_product(store.id, product_id)

@@ -2,10 +2,13 @@ from decimal import Decimal
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import transaction
 
 from apps.catalog.media import prepare_for_store
 from apps.catalog.models import Category, Media, Product, ProductMedia, ProductVariant
+from apps.catalog.repositories import DjangoCatalogRepository, DjangoMediaFiles
 from apps.catalog.services import (
+    CatalogService,
     NewMedia,
     ProductImageRole,
     StoreMismatch,
@@ -176,3 +179,100 @@ def test_product_and_variant_lookup_are_scoped_to_the_store(media_root):
     assert service.get_variant(home_store, variant.pk).id == variant.pk
     assert service.get_product(anime_store, product.pk) is None
     assert service.get_variant(anime_store, variant.pk) is None
+
+
+class FailingAddRepository(DjangoCatalogRepository):
+    def add_product_image(self, image):
+        raise RuntimeError("cannot save the new main")
+
+
+def test_a_failure_while_setting_the_new_main_leaves_the_old_main_active(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    old_media = make_media(home, content_hash="old-main")
+    new_media = make_media(home, content_hash="new-main")
+    store = StoreReference(id=home.pk, slug=home.slug)
+
+    old_main = get_catalog_service().set_main_product_image(
+        store, product_id=product.pk, media_id=old_media.pk
+    )
+    failing = CatalogService(
+        repository=FailingAddRepository(),
+        files=DjangoMediaFiles(),
+        transaction=transaction.atomic,
+    )
+
+    with pytest.raises(RuntimeError):
+        failing.set_main_product_image(store, product_id=product.pk, media_id=new_media.pk)
+
+    assert ProductMedia.objects.get(pk=old_main.id).is_active is True
+    assert not ProductMedia.objects.filter(product=product, media=new_media).exists()
+
+
+def test_two_set_main_calls_in_turn_leave_exactly_one_active_main(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    first_media = make_media(home, content_hash="first-main")
+    second_media = make_media(home, content_hash="second-main")
+    service = get_catalog_service()
+    store = StoreReference(id=home.pk, slug=home.slug)
+
+    service.set_main_product_image(store, product_id=product.pk, media_id=first_media.pk)
+    second = service.set_main_product_image(store, product_id=product.pk, media_id=second_media.pk)
+
+    active_mains = ProductMedia.objects.filter(
+        product=product, role=ProductMedia.Role.MAIN, is_active=True
+    )
+    assert active_mains.count() == 1
+    assert active_mains.get().pk == second.id
+
+
+def prepared_draft(store, *, color):
+    prepared = prepare_for_store(
+        store,
+        SimpleUploadedFile(
+            "photo.jpg", image_bytes("JPEG", color=color), content_type="image/jpeg"
+        ),
+    )
+    return NewMedia(
+        content=prepared.content,
+        content_hash=prepared.content_hash,
+        storage_key=prepared.storage_key,
+        mime_type=prepared.mime_type,
+        width=prepared.width,
+        height=prepared.height,
+        metadata=prepared.metadata,
+        alt_text="A blanket",
+    )
+
+
+def test_create_media_reuses_the_media_a_concurrent_request_already_created(media_root):
+    home = make_store("home")
+    store = StoreReference(id=home.pk, slug=home.slug)
+    repository = DjangoCatalogRepository()
+    service = CatalogService(
+        repository=repository,
+        files=DjangoMediaFiles(),
+        transaction=transaction.atomic,
+    )
+    draft = prepared_draft(home, color=(10, 20, 30))
+    first = service.create_media(store, draft)
+
+    original_lookup = repository.media_by_content_hash
+    misses = {"remaining": 1}
+
+    def racing_lookup(store_id, content_hash):
+        if misses["remaining"]:
+            misses["remaining"] -= 1
+            return None
+        return original_lookup(store_id, content_hash)
+
+    repository.media_by_content_hash = racing_lookup
+
+    with transaction.atomic():
+        second = service.create_media(store, draft)
+        after = service.create_media(store, prepared_draft(home, color=(40, 50, 60)))
+
+    assert second.id == first.id
+    assert after.id != first.id
+    assert Media.objects.filter(store=home).count() == 2

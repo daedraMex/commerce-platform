@@ -1,7 +1,11 @@
+from contextlib import contextmanager
+
 import pytest
+from rest_framework import status
 
 from apps.catalog.services import (
     CatalogService,
+    CatalogServiceError,
     CategoryReference,
     MediaRecord,
     NewMedia,
@@ -14,7 +18,9 @@ from apps.catalog.services import (
     VariantNotFound,
     VariantRecord,
 )
+from apps.shared.domain.exceptions import DomainError
 from apps.shared.domain.store import StoreReference
+from config.exceptions import _domain_error_status
 
 HOME = StoreReference(id=1, slug="home")
 ANIME = StoreReference(id=2, slug="anime")
@@ -27,6 +33,12 @@ class FakeCatalogRepository:
         self.media = {item.id: item for item in media}
         self.images = {image.id: image for image in images}
         self.next_image_id = max(self.images, default=0) + 1
+        self.locked_products = []
+
+    def lock_product(self, store_id, product_id):
+        self.locked_products.append((store_id, product_id))
+        product = self.products.get(product_id)
+        return product is not None and product.store_id == store_id
 
     def media_by_content_hash(self, store_id, content_hash):
         return next(
@@ -132,6 +144,29 @@ class FakeMediaFiles:
         self.stored.append(media)
 
 
+class FakeUnitOfWork:
+    def __init__(self):
+        self.depth = 0
+        self.entered = 0
+        self.committed = 0
+        self.rolled_back = 0
+
+    @contextmanager
+    def __call__(self):
+        self.depth += 1
+        self.entered += 1
+        try:
+            yield
+        except Exception:
+            self.rolled_back += 1
+            raise
+        else:
+            if self.depth == 1:
+                self.committed += 1
+        finally:
+            self.depth -= 1
+
+
 def make_product(product_id=10, store=HOME, *, category_shape="rectangle"):
     return ProductRecord(
         id=product_id,
@@ -234,8 +269,13 @@ def files():
 
 
 @pytest.fixture
-def service(repository, files):
-    return CatalogService(repository=repository, files=files)
+def transaction():
+    return FakeUnitOfWork()
+
+
+@pytest.fixture
+def service(repository, files, transaction):
+    return CatalogService(repository=repository, files=files, transaction=transaction)
 
 
 def test_create_media_reuses_a_media_with_the_same_content_hash_without_storing_it(
@@ -389,3 +429,80 @@ def test_lookup_returns_the_product_with_its_category_schema(service):
     assert product.category.shape == "rectangle"
     assert product.category.option_schema[0]["code"] == "size"
     assert variant.option_values == {"size": "IND"}
+
+
+def test_create_product_image_runs_in_a_transaction_and_locks_the_product(
+    service, repository, transaction
+):
+    service.create_product_image(HOME, product_id=10, media_id=30)
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]
+
+
+def test_deactivate_runs_in_a_transaction_and_locks_the_product(service, repository, transaction):
+    repository.images[40] = make_image()
+
+    service.deactivate_product_image(HOME, image_id=40)
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]
+
+
+def test_reactivate_runs_in_a_transaction_and_locks_the_product(service, repository, transaction):
+    repository.images[40] = make_image(is_active=False)
+
+    service.reactivate_product_image(HOME, image_id=40)
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]
+
+
+def test_upsert_runs_in_a_transaction_and_locks_the_product(service, repository, transaction):
+    service.upsert_product_image(HOME, product_id=10, media_id=30)
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]
+
+
+def test_set_main_runs_in_one_transaction_and_locks_the_product(service, repository, transaction):
+    service.set_main_product_image(HOME, product_id=10, media_id=30)
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]
+
+
+def test_write_commands_roll_back_the_transaction_when_the_product_is_foreign(
+    service, repository, transaction
+):
+    repository.products[10] = make_product(store=ANIME)
+
+    with pytest.raises(StoreMismatch):
+        service.create_product_image(HOME, product_id=10, media_id=30)
+
+    assert transaction.rolled_back == 1
+    assert transaction.committed == 0
+
+
+@pytest.mark.parametrize(
+    ("error_class", "code", "status_code"),
+    [
+        (CatalogServiceError, "catalog_service_error", None),
+        (StoreMismatch, "catalog_store_mismatch", status.HTTP_404_NOT_FOUND),
+        (ProductImageConflict, "catalog_product_image_conflict", status.HTTP_409_CONFLICT),
+        (ProductImageNotFound, "catalog_product_image_not_found", status.HTTP_404_NOT_FOUND),
+        (VariantNotFound, "catalog_variant_not_found", status.HTTP_404_NOT_FOUND),
+    ],
+)
+def test_catalog_service_errors_are_domain_errors_with_stable_codes(error_class, code, status_code):
+    error = error_class("boom")
+
+    assert isinstance(error, DomainError)
+    assert error.code == code
+    assert error.message == str(error) == "boom"
+    assert _domain_error_status(error) == status_code

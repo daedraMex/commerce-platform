@@ -62,9 +62,12 @@ def get_catalog_service() -> CatalogService:
     if get_catalog_service in _overrides:
         return _overrides[get_catalog_service]()
 
+    from django.db import transaction
+
     from apps.catalog.repositories import DjangoCatalogRepository, DjangoMediaFiles
 
     return CatalogService(
         repository=DjangoCatalogRepository(),
         files=DjangoMediaFiles(),
+        transaction=transaction.atomic,
     )
