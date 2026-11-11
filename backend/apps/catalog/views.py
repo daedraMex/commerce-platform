@@ -1,7 +1,16 @@
-from django.db.models import Case, IntegerField, OuterRef, Prefetch, Subquery, Value, When
+from django.db.models import (
+    Case,
+    Exists,
+    IntegerField,
+    OuterRef,
+    Prefetch,
+    Subquery,
+    Value,
+    When,
+)
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 from rest_framework import generics
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import AllowAny
 
 from apps.catalog.models import (
@@ -12,11 +21,13 @@ from apps.catalog.models import (
     ProductMedia,
     ProductVariant,
 )
+from apps.catalog.permissions import CanManageCatalog
 from apps.catalog.serializers import (
     CategorySerializer,
     CollectionSummarySerializer,
     ProductDetailSerializer,
     ProductSerializer,
+    StaffProductSerializer,
     VariantLookupSerializer,
 )
 from apps.shared.interfaces.views import StoreScopedMixin
@@ -434,3 +445,105 @@ class VariantLookupView(StoreScopedMixin, generics.RetrieveAPIView):
         if variant is None:
             raise NotFound("No visible variant matches this SKU.")
         return variant
+
+
+NEEDS_MAIN_IMAGE_PARAMETER = OpenApiParameter(
+    "needs_main_image",
+    location=OpenApiParameter.QUERY,
+    required=False,
+    type=bool,
+    description=(
+        "With true, only products without an active main image; with false, only products with one."
+    ),
+)
+
+STAFF_PRODUCT_PAGE_EXAMPLE = OpenApiExample(
+    "Staff product page",
+    value={
+        "id": 12,
+        "name": "Frazada Térmica",
+        "slug": "frazada-termica",
+        "category": {"name": "Frazada", "slug": "frazada"},
+        "needs_main_image": False,
+        "main_image": PRODUCT_IMAGE_EXAMPLE,
+    },
+    response_only=True,
+)
+
+
+def has_active_main_image():
+    """A product's active main image, as an Exists subquery for filtering."""
+    return Exists(
+        ProductMedia.objects.filter(
+            product_id=OuterRef("pk"),
+            role=ProductMedia.Role.MAIN,
+            is_active=True,
+        )
+    )
+
+
+@extend_schema(
+    parameters=[
+        STORE_HEADER_PARAMETER,
+        CATEGORY_PARAMETER,
+        SEARCH_PARAMETER,
+        NEEDS_MAIN_IMAGE_PARAMETER,
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=StaffProductSerializer(many=True),
+            description=(
+                "A page of the store's active products with their active main image, for the "
+                "photo workflow."
+            ),
+            examples=[STAFF_PRODUCT_PAGE_EXAMPLE],
+        ),
+        **STORE_ERRORS,
+        **problem_response(
+            401,
+            ("not_authenticated", "Authentication credentials were not provided."),
+            ("token_invalid", "Given token not valid for any token type"),
+        ),
+        **problem_response(
+            403,
+            ("permission_denied", CanManageCatalog.message),
+        ),
+    },
+)
+class StaffProductListView(StoreScopedMixin, generics.ListAPIView):
+    store_permission_classes = [CanManageCatalog]
+    serializer_class = StaffProductSerializer
+    queryset = Product.objects.none()
+
+    def get_queryset(self):
+        store_id = self.request.store.id
+        queryset = (
+            Product.objects.filter(store_id=store_id, is_active=True)
+            .select_related("category")
+            .prefetch_related(
+                Prefetch(
+                    "product_media",
+                    queryset=main_product_images().filter(media__store_id=store_id),
+                )
+            )
+        )
+
+        category = self.request.query_params.get("category")
+        if category:
+            queryset = queryset.filter(category__slug=category)
+
+        search = self.request.query_params.get("search")
+        if search:
+            queryset = queryset.filter(name__unaccent__icontains=search)
+
+        needs_main_image = self.request.query_params.get("needs_main_image")
+        if needs_main_image is not None:
+            normalized = needs_main_image.lower()
+            if normalized == "true":
+                queryset = queryset.filter(~has_active_main_image())
+            elif normalized == "false":
+                queryset = queryset.filter(has_active_main_image())
+            else:
+                raise ValidationError({"needs_main_image": ["Use true or false."]})
+
+        return queryset.order_by("name", "id")
