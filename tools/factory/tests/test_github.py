@@ -78,6 +78,20 @@ def test_is_open_reads_recorded_state():
     assert run.calls[-1][0] == ["gh", "issue", "view", "21", "--repo", REPO, "--json", "state"]
 
 
+def test_is_open_fails_closed_when_gh_exits_nonzero():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=1, stdout="", stderr="network down")
+
+    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+
+
+def test_is_open_fails_closed_on_invalid_json():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=0, stdout="not json", stderr="")
+
+    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+
+
 def test_create_draft_pr_reads_the_number_from_recorded_output():
     run = FakeGh()
 

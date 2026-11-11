@@ -193,10 +193,12 @@ class GitHub:
             timeout=120,
             env=_gh_env(token),
         )
+        if result.exit_code != 0:
+            return True
         try:
             return json.loads(result.stdout).get("state") == "OPEN"
         except (json.JSONDecodeError, AttributeError):
-            return False
+            return True
 
     def _open_pr_ticket_numbers(self, token: str | None) -> set[int]:
         result = self._run(
