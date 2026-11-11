@@ -1,4 +1,4 @@
-"""Recreate the derived WebP renditions of a store's public media."""
+"""Create the missing derived WebP renditions of a store's public media."""
 
 from django.core.management.base import BaseCommand
 
@@ -8,15 +8,13 @@ from apps.catalog.models import Media
 
 
 class Command(BaseCommand):
-    help = "Create missing WebP renditions for a store's media, or rewrite them all."
+    help = (
+        "Create missing WebP renditions for a store's media. Existing renditions "
+        "are never rewritten; bump MEDIA_RENDITION_VERSION to change the encoding."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--store", required=True, help="Store slug.")
-        parser.add_argument(
-            "--force",
-            action="store_true",
-            help="Re-encode and overwrite renditions that already exist.",
-        )
 
     def handle(self, *args, **options):
         store = get_active_store(options["store"])
@@ -24,7 +22,7 @@ class Command(BaseCommand):
 
         for media in Media.objects.filter(store=store).order_by("pk"):
             try:
-                renditions = store_renditions(media.storage_key, force=options["force"])
+                renditions = store_renditions(media.storage_key)
             except MediaRuleError as error:
                 failed += 1
                 self.stderr.write(f"{media.storage_key}: {error}")

@@ -2,12 +2,13 @@ from decimal import Decimal
 from io import StringIO
 
 import pytest
+from django.core.files.storage import FileSystemStorage
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.test import override_settings
 from PIL import Image
 
-from apps.catalog.media import rendition_key, store_media
+from apps.catalog.media import MediaRuleError, rendition_key, store_media, store_renditions
 from apps.catalog.models import (
     Category,
     Design,
@@ -165,15 +166,50 @@ def test_a_size_bump_writes_new_keys_and_leaves_the_old_objects(media_root):
     assert old_thumbnail.read_bytes() == old_bytes
 
 
-def test_force_rewrites_a_rendition_under_the_same_key(media_root):
+def test_an_existing_rendition_is_never_rewritten(media_root):
     home = make_store()
     media = upload_media(home)
     thumbnail = rendition_path(media_root, media.storage_key, 320)
     thumbnail.write_bytes(b"not a webp")
 
-    call_command("regenerate_renditions", store="home", force=True, stdout=StringIO())
+    output = StringIO()
+    call_command("regenerate_renditions", store="home", stdout=output)
 
-    assert open_image(thumbnail) == ("WEBP", (320, 160))
+    assert thumbnail.read_bytes() == b"not a webp"
+    assert "Renditions written: 0" in output.getvalue()
+
+
+def test_the_regeneration_command_has_no_force_option(media_root):
+    make_store()
+
+    with pytest.raises(TypeError):
+        call_command("regenerate_renditions", store="home", force=True, stdout=StringIO())
+
+
+def test_a_rendition_stored_under_another_name_is_an_error(media_root, monkeypatch):
+    home = make_store()
+    media = upload_media(home)
+    thumbnail = rendition_path(media_root, media.storage_key, 320)
+    original_bytes = thumbnail.read_bytes()
+    renditions_dir = thumbnail.parent
+    files_before = set(renditions_dir.iterdir())
+    real_exists = FileSystemStorage.exists
+    checked = set()
+
+    def exists_misses_the_first_check(self, name):
+        # Simulates a rendition written by another process after our check.
+        if name not in checked:
+            checked.add(name)
+            return False
+        return real_exists(self, name)
+
+    monkeypatch.setattr(FileSystemStorage, "exists", exists_misses_the_first_check)
+
+    with pytest.raises(MediaRuleError):
+        store_renditions(media.storage_key)
+
+    assert thumbnail.read_bytes() == original_bytes
+    assert set(renditions_dir.iterdir()) == files_before
 
 
 def test_the_api_exposes_original_thumbnail_and_medium_urls(client, media_root):

@@ -157,8 +157,13 @@ def rendition_payload(content, width):
         raise MediaRuleError("The stored image cannot be read for renditions.") from error
 
 
-def store_renditions(storage_key, *, content=None, force=False):
-    """Write every missing rendition for a stored original and return what happened."""
+def store_renditions(storage_key, *, content=None):
+    """Write every missing rendition for a stored original and return what happened.
+
+    An existing rendition is never rewritten: rendition keys are served with an
+    immutable cache, so changing the bytes under a key would leave stale copies
+    cached. To change the encoding, bump MEDIA_RENDITION_VERSION for new keys.
+    """
     storage = get_media_storage()
     if content is None:
         try:
@@ -171,14 +176,17 @@ def store_renditions(storage_key, *, content=None, force=False):
     renditions = []
     for name, width in sorted(rendition_sizes().items(), key=lambda item: item[1]):
         key = rendition_key(storage_key, width=width, version=version)
-        if not force and storage.exists(key):
+        if storage.exists(key):
             renditions.append(Rendition(name, width, key, False))
             continue
 
         payload = rendition_payload(content, width)
-        if force and storage.exists(key):
-            storage.delete(key)
-        storage.save(key, ContentFile(payload, name=key.rsplit("/", 1)[-1]))
+        saved_key = storage.save(key, ContentFile(payload, name=key.rsplit("/", 1)[-1]))
+        if saved_key != key:
+            storage.delete(saved_key)
+            raise MediaRuleError(
+                f"The rendition {key!r} was stored as {saved_key!r}; refusing to keep it."
+            )
         renditions.append(Rendition(name, width, key, True))
     return renditions
 
