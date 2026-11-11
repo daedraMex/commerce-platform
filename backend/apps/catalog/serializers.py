@@ -108,6 +108,8 @@ class VariantSerializer(serializers.Serializer):
 
 class ProductImageSerializer(serializers.Serializer):
     url = serializers.CharField(source="media.public_url")
+    thumbnail_url = serializers.CharField(source="media.thumbnail_url")
+    medium_url = serializers.CharField(source="media.medium_url")
     role = serializers.CharField()
     position = serializers.IntegerField()
     alt_text = serializers.CharField(source="media.alt_text")

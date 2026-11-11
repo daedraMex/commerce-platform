@@ -593,6 +593,18 @@ class Media(models.Model):
 
         return media_url(self.storage_key)
 
+    @property
+    def thumbnail_url(self):
+        from apps.catalog.media import rendition_url
+
+        return rendition_url(self, "thumbnail")
+
+    @property
+    def medium_url(self):
+        from apps.catalog.media import rendition_url
+
+        return rendition_url(self, "medium")
+
 
 class ProductMedia(models.Model):
     """One image linked to a product, optionally for one of its variants."""

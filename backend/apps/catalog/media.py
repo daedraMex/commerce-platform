@@ -4,7 +4,7 @@ import hashlib
 import warnings
 from dataclasses import dataclass, replace
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from django.conf import settings
 from django.core.files.base import ContentFile
@@ -15,6 +15,11 @@ from PIL import Image, ImageCms, ImageOps, UnidentifiedImageError
 from apps.catalog.models import Media
 
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
+DEFAULT_RENDITION_SIZES = {"thumbnail": 320, "medium": 800}
+DEFAULT_RENDITION_VERSION = 1
+RENDITION_FORMAT = "WEBP"
+RENDITION_QUALITY = 82
+RENDITION_METHOD = 6
 FORMAT_TO_MIME = {
     "JPEG": "image/jpeg",
     "PNG": "image/png",
@@ -59,6 +64,16 @@ class PreparedMediaFile:
     metadata: dict
 
 
+@dataclass(frozen=True)
+class Rendition:
+    """One derived WebP file, whether it was just written or already existed."""
+
+    name: str
+    width: int
+    storage_key: str
+    written: bool
+
+
 def get_media_storage():
     """The configured media storage, reflecting the current settings."""
     config = settings.STORAGES.get("default", {})
@@ -76,6 +91,96 @@ def media_url(storage_key):
     base = (getattr(settings, "MEDIA_BASE_URL", "") or "").rstrip("/")
     key = storage_key.lstrip("/")
     return f"{base}/{key}" if base else f"/{key}"
+
+
+def rendition_sizes():
+    """The named rendition widths, from settings so a change writes new keys."""
+    return dict(getattr(settings, "MEDIA_RENDITION_SIZES", DEFAULT_RENDITION_SIZES))
+
+
+def rendition_version():
+    """The encoding version mixed into every rendition key."""
+    return int(getattr(settings, "MEDIA_RENDITION_VERSION", DEFAULT_RENDITION_VERSION))
+
+
+def rendition_key(storage_key, *, width, version):
+    """Derive a rendition key from the original's key, the width and the version."""
+    path = PurePosixPath(storage_key.lstrip("/"))
+    name = f"{path.stem}-{width}w-v{version}.webp"
+    parent = path.parent
+    if str(parent) == ".":
+        return str(PurePosixPath("renditions", name))
+    return str(parent / "renditions" / name)
+
+
+def rendition_url(media, name):
+    """The public URL of one named rendition of a Media."""
+    width = rendition_sizes()[name]
+    key = rendition_key(media.storage_key, width=width, version=rendition_version())
+    return media_url(key)
+
+
+def resize_to_width(image, width):
+    """Shrink an image to a width, keeping its ratio and never upscaling it."""
+    if image.width <= width:
+        return image
+    height = max(1, round(image.height * width / image.width))
+    return image.resize((width, height), Image.Resampling.LANCZOS)
+
+
+def encode_rendition(image):
+    """Encode a resized image as a metadata-free WebP."""
+    image = convert_to_srgb(image)
+    if image.mode not in ("RGB", "RGBA"):
+        image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+    buffer = BytesIO()
+    image.save(
+        buffer,
+        format=RENDITION_FORMAT,
+        quality=RENDITION_QUALITY,
+        method=RENDITION_METHOD,
+        exif=b"",
+        icc_profile=None,
+        xmp=b"",
+    )
+    return buffer.getvalue()
+
+
+def rendition_payload(content, width):
+    """Build the WebP bytes for one rendition width from an original image."""
+    try:
+        with Image.open(BytesIO(content)) as image:
+            image.load()
+            oriented = ImageOps.exif_transpose(image)
+            return encode_rendition(resize_to_width(oriented, width))
+    except (UnidentifiedImageError, OSError, ValueError) as error:
+        raise MediaRuleError("The stored image cannot be read for renditions.") from error
+
+
+def store_renditions(storage_key, *, content=None, force=False):
+    """Write every missing rendition for a stored original and return what happened."""
+    storage = get_media_storage()
+    if content is None:
+        try:
+            with storage.open(storage_key, "rb") as stored:
+                content = stored.read()
+        except OSError as error:
+            raise MediaRuleError(f"Cannot read the stored image {storage_key!r}.") from error
+
+    version = rendition_version()
+    renditions = []
+    for name, width in sorted(rendition_sizes().items(), key=lambda item: item[1]):
+        key = rendition_key(storage_key, width=width, version=version)
+        if not force and storage.exists(key):
+            renditions.append(Rendition(name, width, key, False))
+            continue
+
+        payload = rendition_payload(content, width)
+        if force and storage.exists(key):
+            storage.delete(key)
+        storage.save(key, ContentFile(payload, name=key.rsplit("/", 1)[-1]))
+        renditions.append(Rendition(name, width, key, True))
+    return renditions
 
 
 def convert_to_srgb(image):
@@ -159,14 +264,14 @@ def prepare_media(upload):
 
 
 def save_prepared_media(prepared):
-    """Write a prepared image to storage once; its key is content-addressed."""
+    """Write a prepared image and its renditions once; its key is content-addressed."""
     storage = get_media_storage()
-    if storage.exists(prepared.storage_key):
-        return
-    storage.save(
-        prepared.storage_key,
-        ContentFile(prepared.content, name=prepared.storage_key.rsplit("/", 1)[-1]),
-    )
+    if not storage.exists(prepared.storage_key):
+        storage.save(
+            prepared.storage_key,
+            ContentFile(prepared.content, name=prepared.storage_key.rsplit("/", 1)[-1]),
+        )
+    store_renditions(prepared.storage_key, content=prepared.content)
 
 
 def media_from_prepared(store, prepared, *, alt_text=""):

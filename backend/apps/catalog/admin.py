@@ -304,7 +304,7 @@ class MediaAdmin(NoDeleteAdmin):
             return ""
         return format_html(
             '<img src="{}" alt="" style="max-height: 48px; max-width: 48px;">',
-            obj.public_url,
+            obj.thumbnail_url,
         )
 
     def get_form(self, request, obj=None, change=False, **kwargs):

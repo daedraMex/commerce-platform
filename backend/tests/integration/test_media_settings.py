@@ -63,6 +63,15 @@ def test_filesystem_storage_defaults_media_base_url_to_the_local_route(
     assert module.MEDIA_BASE_URL == f"http://localhost:8000{module.MEDIA_URL}"
 
 
+def test_media_renditions_default_to_320_and_800_webp(settings_module, monkeypatch):
+    set_env(monkeypatch)
+
+    module = importlib.reload(settings_module)
+
+    assert module.MEDIA_RENDITION_SIZES == {"thumbnail": 320, "medium": 800}
+    assert module.MEDIA_RENDITION_VERSION == 1
+
+
 def test_production_like_settings_use_r2_storage(settings_module, monkeypatch):
     set_env(
         monkeypatch,

@@ -124,6 +124,10 @@ def test_product_detail_returns_its_images(client, media_base_url):
     assert response.json()["images"] == [
         {
             "url": "https://media.example.com/stores/1/media/main.jpg",
+            "thumbnail_url": (
+                "https://media.example.com/stores/1/media/renditions/main-320w-v1.webp"
+            ),
+            "medium_url": ("https://media.example.com/stores/1/media/renditions/main-800w-v1.webp"),
             "role": "main",
             "position": 1,
             "alt_text": "The main photo",
@@ -133,6 +137,12 @@ def test_product_detail_returns_its_images(client, media_base_url):
         },
         {
             "url": "https://media.example.com/stores/1/media/gallery.jpg",
+            "thumbnail_url": (
+                "https://media.example.com/stores/1/media/renditions/gallery-320w-v1.webp"
+            ),
+            "medium_url": (
+                "https://media.example.com/stores/1/media/renditions/gallery-800w-v1.webp"
+            ),
             "role": "gallery",
             "position": 2,
             "alt_text": "A blanket",
@@ -182,6 +192,8 @@ def test_the_variant_lookup_returns_the_products_main_image(client, media_base_u
     assert response.status_code == 200
     assert response.json()["product"]["main_image"] == {
         "url": "https://media.example.com/stores/1/media/main.jpg",
+        "thumbnail_url": "https://media.example.com/stores/1/media/renditions/main-320w-v1.webp",
+        "medium_url": "https://media.example.com/stores/1/media/renditions/main-800w-v1.webp",
         "role": "main",
         "position": 1,
         "alt_text": "A blanket",
