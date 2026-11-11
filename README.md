@@ -16,7 +16,7 @@ a themed Next.js storefront, a mobile app and a platform of AI agents.
 ## Getting started
 
 ```bash
-# 1. Start PostgreSQL and Redis
+# 1. Start PostgreSQL, Redis and the Celery worker
 docker compose up -d
 
 # 2. Install backend dependencies (from uv.lock)
@@ -40,7 +40,10 @@ If ports 5432 or 6379 are already taken on your machine, override them:
 `POSTGRES_PORT=5433 REDIS_PORT=6380 docker compose up -d` and update
 `DATABASE_URL` in `backend/.env` to match.
 
+After changing backend code, rebuild the worker so it picks up the changes:
+`docker compose up -d --build worker`.
+
 ## Layout
 
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv
-- `docker-compose.yml`: PostgreSQL 16 and Redis 7 for local development
+- `docker-compose.yml`: PostgreSQL 16, Redis 7 and the Celery worker for local development
