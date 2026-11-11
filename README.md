@@ -40,6 +40,9 @@ If ports 5432 or 6379 are already taken on your machine, override them:
 `POSTGRES_PORT=5433 REDIS_PORT=6380 docker compose up -d` and update
 `DATABASE_URL` in `backend/.env` to match.
 
+After changing backend code, rebuild the worker so it picks up the changes:
+`docker compose up -d --build worker`.
+
 ## Layout
 
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv

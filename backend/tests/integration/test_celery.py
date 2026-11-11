@@ -1,11 +1,23 @@
+import pytest
 from django.conf import settings
 
 from config.celery import app
 
 
-def test_celery_uses_the_redis_url_for_broker_and_results():
+def test_celery_uses_the_redis_url_for_broker():
     assert app.conf.broker_url == settings.REDIS_URL
-    assert app.conf.result_backend == settings.REDIS_URL
+
+
+def test_celery_ignores_task_results():
+    assert settings.CELERY_TASK_IGNORE_RESULT is True
+    assert app.conf.task_ignore_result is True
+    assert app.conf.result_backend is None
+
+
+@pytest.mark.no_celery_eager
+def test_celery_defaults_to_not_eager():
+    assert settings.CELERY_TASK_ALWAYS_EAGER is False
+    assert app.conf.task_always_eager is False
 
 
 def test_celery_runs_eagerly_during_tests():

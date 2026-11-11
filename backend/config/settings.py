@@ -4,7 +4,6 @@ Values come from environment variables, read from backend/.env when it exists.
 See backend/.env.example for the full list.
 """
 
-import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -79,9 +78,9 @@ DATABASES = {"default": env.db("DATABASE_URL")}
 REDIS_URL = env("REDIS_URL", default="redis://localhost:6379/0")
 
 CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default="pytest" in sys.modules)
+CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
+CELERY_TASK_IGNORE_RESULT = True
 
 AUTH_USER_MODEL = "accounts.User"
 
