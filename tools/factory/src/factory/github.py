@@ -202,18 +202,35 @@ class GitHub:
 
     def _open_pr_ticket_numbers(self, token: str | None) -> set[int]:
         result = self._run(
-            ["gh", "pr", "list", "--repo", self.repo, "--state", "open", "--json", "body"],
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self.repo,
+                "--state",
+                "open",
+                "--limit",
+                "1000",
+                "--json",
+                "body",
+            ],
             cwd="/",
             timeout=120,
             env=_gh_env(token),
         )
-        numbers: set[int] = set()
+        if result.exit_code != 0:
+            raise GitHubError(f"gh pr list failed: {result.stderr.strip() or result.exit_code}")
         try:
-            for obj in json.loads(result.stdout):
-                for match in _CLOSES_RE.findall(obj.get("body", "") or ""):
-                    numbers.add(int(match))
-        except json.JSONDecodeError:
-            pass
+            prs = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GitHubError("gh pr list returned invalid JSON") from exc
+        if not isinstance(prs, list):
+            raise GitHubError("gh pr list returned an unexpected JSON shape")
+        numbers: set[int] = set()
+        for obj in prs:
+            for match in _CLOSES_RE.findall(obj.get("body", "") or ""):
+                numbers.add(int(match))
         return numbers
 
 
