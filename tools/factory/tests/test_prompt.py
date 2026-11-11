@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from factory.areas import BACKEND, CONSOLE
 from factory.prompt import compose_prompt, compose_review_prompt, read_command_body
 from factory.tickets import Ticket
 
@@ -59,6 +60,39 @@ def test_compose_prompt_appends_check_feedback():
     assert "failing area's `scripts/check.sh`" in prompt
     assert "web/console/scripts/check.sh" in prompt
     assert "from `backend/`" not in prompt
+
+
+def test_compose_prompt_names_the_real_failing_area_and_script():
+    ticket = Ticket(number=3, title="Add thing", body="Body.")
+    prompt = compose_prompt(
+        ticket,
+        model="m",
+        branch="nf/3-add-thing",
+        command_template=COMMAND,
+        overlay=OVERLAY,
+        feedback="1 failed, 9 passed",
+        failed_areas=(CONSOLE,),
+    )
+
+    assert "`console`" in prompt
+    assert "`web/console/scripts/check.sh`" in prompt
+    assert "`backend`" not in prompt
+
+
+def test_compose_prompt_lists_every_failing_area():
+    ticket = Ticket(number=3, title="Add thing", body="Body.")
+    prompt = compose_prompt(
+        ticket,
+        model="m",
+        branch="nf/3-add-thing",
+        command_template=COMMAND,
+        overlay=OVERLAY,
+        feedback="both failed",
+        failed_areas=(BACKEND, CONSOLE),
+    )
+
+    assert "`backend` (`backend/scripts/check.sh`)" in prompt
+    assert "`console` (`web/console/scripts/check.sh`)" in prompt
 
 
 def test_compose_prompt_omits_feedback_when_empty():

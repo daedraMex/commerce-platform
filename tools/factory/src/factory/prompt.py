@@ -7,6 +7,7 @@ extra rules that apply only to unattended runs.
 
 from __future__ import annotations
 
+from .areas import Area
 from .reviews import ReviewComment
 from .tickets import Ticket
 
@@ -35,6 +36,7 @@ def compose_prompt(
     command_template: str,
     overlay: str,
     feedback: str = "",
+    failed_areas: tuple[Area, ...] = (),
 ) -> str:
     arguments = f"#{ticket.number}: {ticket.title}\n\n{ticket.body}".strip()
     base = command_template.replace(ARGUMENTS_TOKEN, arguments)
@@ -43,7 +45,7 @@ def compose_prompt(
         filled_overlay = filled_overlay.replace(token, value)
     prompt = f"{base}\n\n{filled_overlay}".strip()
     if feedback:
-        prompt += _feedback_section(feedback)
+        prompt += _feedback_section(feedback, failed_areas)
     return prompt + "\n"
 
 
@@ -57,6 +59,7 @@ def compose_review_prompt(
     review_body: str,
     comments: tuple[ReviewComment, ...],
     feedback: str = "",
+    failed_areas: tuple[Area, ...] = (),
 ) -> str:
     """Compose a prompt that adds the owner's review feedback as untrusted data."""
     prompt = compose_prompt(
@@ -68,18 +71,34 @@ def compose_review_prompt(
     ).rstrip()
     prompt += "\n\n" + _review_section(review_body, comments)
     if feedback:
-        prompt += _feedback_section(feedback)
+        prompt += _feedback_section(feedback, failed_areas)
     return prompt + "\n"
 
 
-def _feedback_section(feedback: str) -> str:
-    return (
-        "\n\n## check.sh is still failing\n\n"
-        "Here is the latest output:\n\n```\n"
-        f"{feedback}\n"
-        "```\n\nFix the failures and re-run the failing area's `scripts/check.sh` "
-        "(for example `backend/scripts/check.sh` or `web/console/scripts/check.sh`)."
-    )
+def _area_label(area: Area) -> str:
+    return f"`{area.name}` (`{area.script.as_posix()}`)"
+
+
+def _feedback_section(feedback: str, failed_areas: tuple[Area, ...] = ()) -> str:
+    if len(failed_areas) == 1:
+        detail = f"The {_area_label(failed_areas[0])} check failed."
+        guidance = "Fix the failures and re-run that area's `scripts/check.sh`."
+    elif failed_areas:
+        labels = ", ".join(_area_label(area) for area in failed_areas)
+        detail = f"These areas failed: {labels}."
+        guidance = "Fix the failures and re-run each failing area's `scripts/check.sh`."
+    else:
+        detail = ""
+        guidance = (
+            "Fix the failures and re-run the failing area's `scripts/check.sh` "
+            "(for example `backend/scripts/check.sh` or `web/console/scripts/check.sh`)."
+        )
+    body = f"Here is the latest output:\n\n```\n{feedback}\n```"
+    parts = ["\n\n## check.sh is still failing\n\n"]
+    if detail:
+        parts.append(f"{detail}\n\n")
+    parts.append(f"{body}\n\n{guidance}")
+    return "".join(parts)
 
 
 def _review_section(review_body: str, comments: tuple[ReviewComment, ...]) -> str:

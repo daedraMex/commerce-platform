@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
+
+TIMEOUT_GRACE_SECONDS = 20
 
 
 class CommandTimeout(RuntimeError):
@@ -46,15 +49,50 @@ def run_command(
         merged_env = {key: value for key, value in (env or {}).items() if value is not None}
     else:
         merged_env = merge_env(env)
+    # Start the command in its own session so a timeout can kill the whole
+    # process group. Killing only sudo would orphan next/playwright children.
+    proc = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=merged_env,
+        start_new_session=True,
+    )
     try:
-        proc = subprocess.run(
-            argv,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=merged_env,
-        )
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        _terminate_process_group(proc, grace_seconds=TIMEOUT_GRACE_SECONDS)
         raise CommandTimeout(f"command timed out after {timeout}s: {' '.join(argv)}") from exc
-    return CommandResult(exit_code=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
+    return CommandResult(exit_code=proc.returncode, stdout=stdout, stderr=stderr)
+
+
+def _terminate_process_group(proc: subprocess.Popen, *, grace_seconds: int) -> None:
+    """Stop the command group, giving sudo time to relay SIGTERM first.
+
+    Sending SIGTERM to sudo lets it forward the signal to the command it
+    started. After the grace period the whole same-user group is killed. When
+    the command runs as another user, that kill only reaches sudo; the caller
+    follows up with the agent-user ``pkill`` cleanup.
+    """
+    try:
+        proc.terminate()
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
+    for pipe in (proc.stdout, proc.stderr):
+        if pipe is not None:
+            pipe.close()

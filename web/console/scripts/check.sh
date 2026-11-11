@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+repo_root="$(cd "$(dirname "$0")/../../.." && pwd)"
+
+cd "$repo_root"
+pnpm install --frozen-lockfile --prefer-offline
+
+cd "$repo_root/web/console"
+pnpm exec playwright install chromium
 
 pnpm run generate
 pnpm run lint

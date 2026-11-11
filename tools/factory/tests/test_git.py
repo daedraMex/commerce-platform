@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from factory.areas import AREAS, BACKEND, CONSOLE
 from factory.git import (
     BOT_COMMIT_NAME,
     CLEANUP_PROBE_SCRIPT,
@@ -16,7 +17,7 @@ from factory.git import (
     worktree_cleanup_path,
 )
 from factory.runner import TEST_SETTINGS
-from factory.shell import CommandResult
+from factory.shell import CommandResult, CommandTimeout
 
 
 class RecordingRun:
@@ -282,9 +283,17 @@ def test_live_worktree_paths_parses_the_porcelain_list(tmp_path):
     assert Git(run=run).live_worktree_paths(first) == {first.resolve(), second.resolve()}
 
 
-def test_check_runs_the_script_as_the_agent_user_without_secrets():
+def write_script(worktree: Path, area) -> Path:
+    script = worktree / area.script
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("#!/bin/sh\n")
+    return script
+
+
+def test_check_runs_the_script_as_the_agent_user_without_secrets(tmp_path):
     run = RecordingRun()
-    worktree = Path("/srv/factory/worktrees/nf/1")
+    worktree = tmp_path
+    script = write_script(worktree, BACKEND)
 
     Git(
         run=run,
@@ -298,7 +307,7 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
             "DEEPSEEK_API_KEY": "dk-123",
             "GH_TOKEN": "secret",
         },
-    ).check(worktree)
+    ).check(worktree, areas=(BACKEND,))
 
     argv, cwd, env, replace_env = run.calls[0]
     assert argv == [
@@ -308,9 +317,9 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
         "-u",
         "factory-agent",
         "--",
-        str(worktree / "backend" / "scripts" / "check.sh"),
+        str(script),
     ]
-    assert cwd == str(worktree / "backend")
+    assert cwd == str(worktree / "backend" / "scripts")
     assert replace_env is True
     assert env == {
         "PATH": "/usr/bin",
@@ -321,15 +330,222 @@ def test_check_runs_the_script_as_the_agent_user_without_secrets():
     }
 
 
-def test_check_truncates_output_fed_to_the_agent():
+def test_check_console_env_sets_ci_and_the_playwright_browser_path(tmp_path):
+    run = RecordingRun()
+    worktree = tmp_path
+    script = write_script(worktree, CONSOLE)
+
+    Git(
+        run=run,
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        base_env={
+            "PATH": "/usr/local/bin:/usr/bin",
+            "HOME": "/home/factory",
+            "LANG": "C",
+            "DATABASE_URL": "postgres://db",
+            "DEEPSEEK_API_KEY": "dk-123",
+        },
+        port_in_use=lambda _port: False,
+    ).check(worktree, areas=(CONSOLE,))
+
+    argv, cwd, env, replace_env = run.calls[0]
+    assert argv == [
+        "sudo",
+        "-n",
+        "--preserve-env=PATH,HOME,LANG,CI,PLAYWRIGHT_BROWSERS_PATH",
+        "-u",
+        "factory-agent",
+        "--",
+        str(script),
+    ]
+    assert cwd == str(worktree / "web" / "console" / "scripts")
+    assert replace_env is True
+    assert env == {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "HOME": "/home/factory-agent",
+        "LANG": "C",
+        "CI": "true",
+        "PLAYWRIGHT_BROWSERS_PATH": "/home/factory-agent/.cache/ms-playwright",
+    }
+    assert "SECRET_KEY" not in env
+    assert "DEEPSEEK_API_KEY" not in env
+
+
+def test_check_runs_every_selected_area_in_labeled_output(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, BACKEND)
+    write_script(worktree, CONSOLE)
+    results = [
+        CommandResult(exit_code=0, stdout="backend ok", stderr=""),
+        CommandResult(exit_code=0, stdout="console ok", stderr=""),
+    ]
+    run = SequenceRun(results)
+
+    result = Git(run=run, port_in_use=lambda _port: False).check(worktree, areas=AREAS)
+
+    assert result.passed is True
+    assert result.failed_areas == ()
+    assert len(run.calls) == 2
+    assert "=== backend (backend/scripts/check.sh) ===" in result.output
+    assert "=== console (web/console/scripts/check.sh) ===" in result.output
+    assert "backend ok" in result.output
+    assert "console ok" in result.output
+
+
+def test_check_fails_when_any_area_fails_and_names_the_failing_area(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, BACKEND)
+    write_script(worktree, CONSOLE)
+    results = [
+        CommandResult(exit_code=0, stdout="backend ok", stderr=""),
+        CommandResult(exit_code=1, stdout="1 failed", stderr="boom"),
+    ]
+
+    result = Git(run=SequenceRun(results), port_in_use=lambda _port: False).check(
+        worktree, areas=AREAS
+    )
+
+    assert result.passed is False
+    assert result.failed_areas == (CONSOLE,)
+    assert "=== console (web/console/scripts/check.sh) ===" in result.output
+    assert "1 failed" in result.output
+    assert "boom" in result.output
+
+
+def test_check_skips_an_area_whose_script_is_absent(tmp_path):
+    run = RecordingRun()
+
+    result = Git(run=run).check(tmp_path, areas=AREAS)
+
+    assert result.passed is True
+    assert result.failed_areas == ()
+    assert run.calls == []
+    assert "backend" in result.output
+    assert "skipped" in result.output
+    assert "console" in result.output
+
+
+def test_check_maps_the_changed_files_to_areas(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, BACKEND)
+    write_script(worktree, CONSOLE)
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        run.calls.append(argv)
+        if argv[:3] == ["git", "diff", "origin/main...HEAD"]:
+            return CommandResult(0, "backend/apps/catalog/views.py\n", "")
+        if argv[:3] == ["git", "diff", "HEAD"]:
+            return CommandResult(0, "", "")
+        if argv[:2] == ["git", "ls-files"]:
+            return CommandResult(0, "packages/api-client/openapi.json\n", "")
+        return CommandResult(0, "ok", "")
+
+    run.calls = []
+
+    result = Git(run=run, port_in_use=lambda _port: False).check(worktree)
+
+    assert result.passed is True
+    script_calls = [argv for argv in run.calls if argv[:1] != ["git"]]
+    assert len(script_calls) == 2
+    assert script_calls[0][-1] == str(worktree / BACKEND.script)
+    assert script_calls[1][-1] == str(worktree / CONSOLE.script)
+
+
+def test_check_truncates_output_fed_to_the_agent(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, BACKEND)
     run = RecordingRun(CommandResult(exit_code=1, stdout="x" * 9000, stderr=""))
 
-    passed, output = Git(run=run).check(Path("/work"))
+    result = Git(run=run).check(worktree, areas=(BACKEND,))
 
-    assert passed is False
-    assert len(output) < 9000
-    assert output.endswith("x" * 100)
-    assert "truncated" in output
+    assert result.passed is False
+    assert len(result.output) < 9000
+    assert result.output.endswith("x" * 100)
+    assert "truncated" in result.output
+
+
+class TimeoutThenRecord:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        self.calls.append((argv, cwd, env, replace_env))
+        if len(self.calls) == 1:
+            raise CommandTimeout("slow")
+        return CommandResult(exit_code=0, stdout="", stderr="")
+
+
+def test_check_on_timeout_runs_the_agent_cleanup_through_sudo(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, BACKEND)
+    run = TimeoutThenRecord()
+
+    result = Git(run=run, agent_user="factory-agent").check(worktree, areas=(BACKEND,))
+
+    assert result.passed is False
+    assert result.failed_areas == (BACKEND,)
+    assert "timed out" in result.output
+    assert run.calls[1] == (
+        [
+            "sudo",
+            "-n",
+            "-u",
+            "factory-agent",
+            "/usr/bin/pkill",
+            "-KILL",
+            "-u",
+            "factory-agent",
+        ],
+        "/",
+        None,
+        False,
+    )
+
+
+def test_check_cleans_up_a_busy_console_port_once_then_runs(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, CONSOLE)
+    run = RecordingRun()
+    ports = iter([True, False])
+
+    result = Git(
+        run=run,
+        agent_user="factory-agent",
+        port_in_use=lambda _port: next(ports),
+    ).check(worktree, areas=(CONSOLE,))
+
+    assert result.passed is True
+    assert run.calls[0][0] == [
+        "sudo",
+        "-n",
+        "-u",
+        "factory-agent",
+        "/usr/bin/pkill",
+        "-KILL",
+        "-u",
+        "factory-agent",
+    ]
+    assert run.calls[1][0][-1] == str(worktree / CONSOLE.script)
+
+
+def test_check_fails_with_a_clear_message_when_port_3000_stays_busy(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, CONSOLE)
+    run = RecordingRun()
+
+    result = Git(
+        run=run,
+        agent_user="factory-agent",
+        port_in_use=lambda _port: True,
+    ).check(worktree, areas=(CONSOLE,))
+
+    assert result.passed is False
+    assert result.failed_areas == (CONSOLE,)
+    assert "port 3000 busy" in result.output
+    assert len(run.calls) == 1
+    assert run.calls[0][0][-2:] == ["-u", "factory-agent"]
+    assert str(worktree / CONSOLE.script) not in run.calls[0][0]
 
 
 def test_commit_never_runs_hooks():

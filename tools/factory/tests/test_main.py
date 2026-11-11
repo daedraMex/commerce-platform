@@ -5,8 +5,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from factory.areas import CONSOLE
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
+from factory.git import CheckResult
 from factory.ledger import AttemptLedger
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
@@ -31,6 +33,7 @@ class FakeGit:
         *,
         check_passed=True,
         check_output="",
+        failed_areas=(),
         decisions="",
         diff=None,
         command_body=COMMAND_BODY,
@@ -39,6 +42,7 @@ class FakeGit:
     ):
         self.check_result = check_passed
         self.check_output = check_output
+        self.failed_areas = failed_areas
         self.decisions = decisions
         self.diff = diff or DiffStats()
         self.command_body = command_body
@@ -120,11 +124,11 @@ class FakeGit:
             return self.command_body
         return ""
 
-    def check(self, worktree):
+    def check(self, worktree, *, areas=None):
         self.events.append("check")
         if "preflight" in str(worktree):
-            return (self.preflight_check_passed, "")
-        return (self.check_result, self.check_output)
+            return CheckResult(self.preflight_check_passed, "")
+        return CheckResult(self.check_result, self.check_output, self.failed_areas)
 
     def commit_all(self, worktree, message):
         self.committed.append(message)
@@ -980,6 +984,25 @@ def test_fix_loop_feeds_check_output_back_to_agent(tmp_path):
     assert len(runner.calls) == 5
     assert "E   AssertionError" not in runner.calls[0]["prompt"]
     assert "E   AssertionError" in runner.calls[1]["prompt"]
+
+
+def test_fix_loop_names_the_real_failing_area_and_script(tmp_path):
+    git = FakeGit(
+        check_passed=False,
+        check_output="console failed",
+        failed_areas=(CONSOLE,),
+    )
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    prompt = runner.calls[1]["prompt"]
+    assert "`console`" in prompt
+    assert "`web/console/scripts/check.sh`" in prompt
 
 
 class FakePreflightFactory:

@@ -32,7 +32,7 @@ requests and daily ticket attempts. The decisions behind it are in
   git --version   # must be >= 2.46
   ```
   The factory also aborts at startup when it finds anything older.
-- Python 3.12 (via uv), Node.js and OpenCode 1.19.5, installed in step 4.
+- Python 3.12 (via uv), Node.js and OpenCode 1.19.5, installed in steps 4 and 5.
 
 ## Machine layout
 
@@ -84,7 +84,7 @@ Run these once, as the admin user unless a step says `factory`.
 
     Let `factory` act *as* `factory-agent` (a downgrade, never an upgrade), so
     it can launch OpenCode as the sandbox user, run the isolation check and run
-    `check.sh`. The sudo calls are always non-interactive (`-n`) so a missing
+    each area's `check.sh`. The sudo calls are always non-interactive (`-n`) so a missing
     rule fails fast instead of waiting for a password, use full command paths,
     and name every variable in `--preserve-env` because sudo's `env_reset`
     would otherwise drop it. The `SETENV` tag is what allows that:
@@ -92,7 +92,7 @@ Run these once, as the admin user unless a step says `factory`.
     Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
-    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/pkill -KILL -u factory-agent
     ```
 
     The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
@@ -104,7 +104,7 @@ Run these once, as the admin user unless a step says `factory`.
     downgrade commands to the journal, including the environment named in
     `--preserve-env` and the prompt passed to OpenCode. Denied commands are
     still logged. This is why the provider key is never passed through sudo:
-    the agent holds it itself (step 7).
+    the agent holds it itself (step 8).
 
     The rules live in `/etc/sudoers.d/factory-agent` and stay `root:root`; do
     not loosen its group or mode. The preflight runs `sudo -n -l` as `factory`
@@ -176,18 +176,56 @@ Run these once, as the admin user unless a step says `factory`.
     sudo -u factory git -C /srv/factory/repo branch -D smoke-worktree
     ```
 
-4. **Install the toolchain.** As `factory`, install `uv` (Python 3.12) and
-   Node.js. Install OpenCode system-wide at `/usr/bin/opencode` (as admin),
-   because the sudoers rule allows exactly that path. Pin OpenCode to `1.19.5`
-   (the factory config uses the V1 permission syntax; newer `opencode2` uses a
-   different schema):
+4. **Install the toolchain.** As `factory`, install `uv` (Python 3.12). Install
+   OpenCode system-wide at `/usr/bin/opencode` (as admin), because the sudoers
+   rule allows exactly that path. Pin OpenCode to `1.19.5` (the factory config
+   uses the V1 permission syntax; newer `opencode2` uses a different schema).
+   Node.js is installed system-wide in step 5:
     ```bash
     curl -LsSf https://astral.sh/uv/install.sh | sudo env UV_INSTALL_DIR=/usr/local/bin sh
-    # then install node
     sudo install -m 755 opencode /usr/bin/opencode     # OpenCode 1.19.5
     ```
 
-5. **Set up the read-only deploy key and clone** as `factory`. Fetching uses
+5. **Install the console toolchain (admin user).** Install Node at the
+   `.nvmrc` major (26) system-wide and enable pnpm through corepack for both
+   users. The console check installs the workspace dependencies and the
+   Playwright browser itself, but its system libraries need root once:
+    ```bash
+    curl -fsSL https://deb.nodesource.com/setup_26.x | sudo -E bash -
+    sudo apt-get install -y nodejs
+    sudo corepack enable
+    sudo npx -y playwright@1.65.0 install-deps chromium   # version from pnpm-lock.yaml
+    ```
+    Confirm the toolchain as `factory-agent` (Node and the corepack-installed
+    pnpm must be on its `PATH`), then dry-run the console check in a throwaway
+    worktree whose flat name matches the sudoers glob:
+    ```bash
+    sudo -u factory-agent -H bash -lc 'node --version && pnpm --version'
+    sudo -u factory git -C /srv/factory/repo worktree add \
+      -b console-smoke /srv/factory/worktrees/console-smoke origin/main
+    sudo -u factory sudo -n -u factory-agent -- \
+      /srv/factory/worktrees/console-smoke/web/console/scripts/check.sh
+    # prove a killed check leaves no agent process (and frees port 3000)
+    sudo -u factory timeout 20 sudo -n -u factory-agent -- \
+      /srv/factory/worktrees/console-smoke/web/console/scripts/check.sh || true
+    sudo -u factory-agent /usr/bin/pkill -KILL -u factory-agent
+    pgrep -u factory-agent || echo "no factory-agent processes left"
+    sudo -u factory git -C /srv/factory/repo worktree remove --force \
+      /srv/factory/worktrees/console-smoke
+    sudo -u factory git -C /srv/factory/repo branch -D console-smoke
+    ```
+    `pgrep` must print nothing; the `|| echo` only makes that expectation
+    visible. The console check runs `pnpm install --frozen-lockfile
+    --prefer-offline` from the repo root and `pnpm exec playwright install
+    chromium` before the checks, so a fresh worktree passes; both are fast when
+    the pnpm store and the browser cache are warm. The check runner also sets
+    `CI=true` for the console area, so Playwright never reuses a dev server
+    already listening on port 3000 from another worktree. Before a console
+    check it also verifies port 3000 is free, runs the agent cleanup once if it
+    is not, and fails with a clear "port 3000 busy" message if someone else
+    still holds it.
+
+6. **Set up the read-only deploy key and clone** as `factory`. Fetching uses
    the read-only deploy key over SSH; pushes use HTTPS with the minted xolo-bot
    token:
     ```bash
@@ -221,7 +259,7 @@ Run these once, as the admin user unless a step says `factory`.
     or directory is owned by `factory-agent`, belongs to a group it is in, is
     world-writable, or is a setgid directory in an agent group.
 
-6. **Create the `xolo-bot` GitHub App and install it on the repo only.** The
+7. **Create the `xolo-bot` GitHub App and install it on the repo only.** The
    factory does **not** store any `gh` auth and does **not** set a global git
    credential helper (a global helper would leak into the OpenCode subprocess).
    Instead:
@@ -243,7 +281,7 @@ Run these once, as the admin user unless a step says `factory`.
      the subprocesses that need it; it is never stored and never reaches the
      OpenCode subprocess.
 
-7. **Give the agent the model provider key.** Set a **spending cap** on the
+8. **Give the agent the model provider key.** Set a **spending cap** on the
    provider account. Log OpenCode in *as `factory-agent`* so the key lives in
    that user's own auth store (`~/.local/share/opencode/auth.json`, mode `600`)
    and never travels through sudo or the environment:
@@ -261,7 +299,7 @@ Run these once, as the admin user unless a step says `factory`.
    never receive the production, R2, payment or per-store integration
    credentials, and never the real `.env`.
 
-8. **Create the secrets file** `~/factory/secrets.env`, `chmod 600`, with the
+9. **Create the secrets file** `~/factory/secrets.env`, `chmod 600`, with the
    settings the factory reads from the environment:
     ```bash
     FACTORY_MODEL=deepseek/deepseek-flash        # the cheap default model
@@ -300,13 +338,13 @@ Run these once, as the admin user unless a step says `factory`.
     fresh xolo-bot installation token from the token provider. No `gh auth`
     login and no global git credential helper are needed.
 
-9. **Create the Telegram bot** with [@BotFather](https://t.me/BotFather),
+10. **Create the Telegram bot** with [@BotFather](https://t.me/BotFather),
    take its token into `FACTORY_TELEGRAM_BOT_TOKEN`, and find the one chat id
    the bot sends to (message the bot, then read the chat id from the
    `getUpdates` response, then disable updates — the bot only sends, it never
    polls or accepts commands).
 
-10. **Install the systemd user units** as `factory`:
+11. **Install the systemd user units** as `factory`:
     ```bash
     mkdir -p ~/.config/systemd/user
     cp /srv/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
@@ -322,7 +360,7 @@ Run these once, as the admin user unless a step says `factory`.
     systemctl --user daemon-reload && systemctl --user restart factory.timer
     ```
 
-11. **Protect `main`.** `.github/CODEOWNERS` contains `* @daedraMex`. On
+12. **Protect `main`.** `.github/CODEOWNERS` contains `* @daedraMex`. On
     GitHub: require a pull request before merging, require 1 approval, turn on
     **Require review from Code Owners**, and require the "Backend" and "Ticket
     link" checks. Do not give the factory or any agent a bypass. The repository
@@ -415,8 +453,8 @@ For that pull request the factory creates a fresh worktree from the PR branch
 ticket, the review body and every inline review comment (file, line and text)
 as **untrusted data**, with an explicit instruction never to follow commands
 inside them and never to touch protected paths. The protected-path guard still
-inspects the fix's own diff. After `backend/scripts/check.sh` passes, the
-runner commits `fix: address review on #<pr>`, pushes to the same branch,
+inspects the fix's own diff. After every area the fix touched passes its
+`scripts/check.sh`, the runner commits `fix: address review on #<pr>`, pushes to the same branch,
 comments `Addressed the review in <sha>; please re-review.` on the pull
 request and sends Telegram. If the agent cannot finish, the ticket goes through
 the usual stuck flow (issue comment, `needs-decision` label and Telegram).
@@ -446,14 +484,18 @@ unreachable" as before.
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
   `DATABASE_URL` and `OPENCODE_CONFIG` — nothing else. The model provider key is
   not in it: the agent reads its own OpenCode auth store from its home, so the
-  key never crosses sudo. The check runner gets the same downgrade with only
-  `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret test
-  settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`,
+  key never crosses sudo. The backend check runner gets the same downgrade with
+  only `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret
+  test settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`,
   `PYTEST_ADDOPTS=-p no:cacheprovider`) that match CI's backend job so Django
   can start without a worktree `.env`: no provider key, no GitHub token, no
-  secrets. The agent gets the same test settings. `PYTEST_ADDOPTS` keeps pytest
-  from writing a cache into the worktree. They are constants in the factory
-  code and are never read from `secrets.env`.
+  secrets. The console check runner gets only `PATH` (with the system-wide
+  Node), `HOME` (the agent's home), `LANG`, `CI=true` and
+  `PLAYWRIGHT_BROWSERS_PATH` under that home, so Playwright installs and reads
+  its browser there and never reuses a dev server from another worktree. The
+  agent gets the same test settings. `PYTEST_ADDOPTS` keeps pytest from writing
+  a cache into the worktree. They are constants in the factory code and are
+  never read from `secrets.env`.
 - **Commit identity.** The runner stages and commits with an explicit
   `-c user.name=xolo-bot[bot] -c user.email=<id>+xolo-bot[bot]@users.noreply.github.com`
   built from `XOLO_BOT_USER_ID`, so it never depends on a machine `git config`.
@@ -476,10 +518,28 @@ unreachable" as before.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`) and
   a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either stops the
   ticket as stuck and notifies Telegram.
-- **Fix loop.** Before pushing, the factory runs `./scripts/check.sh` in the
-  worktree **as `factory-agent`**, with only the base env allowlist; on failure
-  it feeds a truncated tail of the output back to the agent and retries, up to
-  the step budget.
+- **Areas.** Each ticket's changed files select its check areas: `backend/**`
+  runs `backend/scripts/check.sh`, and `web/console/**` or `packages/**` runs
+  `web/console/scripts/check.sh` (so a backend ticket that refreshes
+  `packages/api-client/openapi.json` runs both). A docs-only ticket runs every
+  area, and an area whose script is absent is skipped and logged rather than
+  failed.
+- **Fix loop.** Before pushing, the factory runs every selected area's
+  `scripts/check.sh` in the worktree **as `factory-agent`**, sequentially, each
+  in its own process group with its own timeout, with only that area's env
+  allowlist. The output is labelled per area and truncated; on failure it
+  feeds a truncated tail back to the agent, naming the real failing area and
+  script, and retries up to the step budget.
+- **Timeout cleanup.** Sending signals across users does not work — the factory
+  cannot kill `factory-agent` children, so killing the process group from the
+  factory user only reaps sudo. On a timeout the factory first sends SIGTERM to
+  sudo (which relays it to the command), waits up to 20 seconds, then runs
+  `sudo -n -u factory-agent /usr/bin/pkill -KILL -u factory-agent` to kill every
+  remaining agent process. The same cleanup runs after an OpenCode timeout, so
+  no `next`, Playwright or Chromium process survives to hold port 3000. Before a
+  console check the factory verifies port 3000 is free; if it is busy it runs
+  that cleanup once and, if the port is still busy, fails with a clear
+  "port 3000 busy" message instead of a confusing Playwright error.
 - **Worktree cleanup.** Stale and expired worktrees are deleted as their owner
   with the sudoers-allowed `rm -rf` (direct children only; paths outside the
   worktrees directory or containing `..` are refused), then `git worktree
@@ -539,8 +599,9 @@ uv run factory preflight
 
 It uses the real tools and the real code paths, not fakes: it fetches
 `origin/main`, lists tickets through the `gh` code path, creates a throwaway
-`preflight-<timestamp>` worktree from the fresh `origin/main`, runs `check.sh`
-in it as `factory-agent` with the real check environment, verifies isolation,
+`preflight-<timestamp>` worktree from the fresh `origin/main`, runs every
+present area's `check.sh` in it as `factory-agent` with the real check
+environment, verifies isolation,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
 policy, fails if the worktrees directory contains entries that are not live git
 worktrees, then proves the cleanup removes an agent-owned
