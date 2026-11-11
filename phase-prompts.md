@@ -53,7 +53,7 @@ Run /wayfinder over the whole platform. The scope, in delivery order (see ROADMA
 5. Inventory (locations) and orders with clean architecture.
 6. Payments (Mercado Pago with OXXO) and deployment with Dokploy.
 7. Themed storefront, first live with the home store.
-8. Second store and channels: TikTok Shop sync, catalog feeds, conversion events.
+8. More stores and channels: TikTok Shop sync, catalog feeds, conversion events.
 9. Agent platform and Instagram publishing agent.
 10. WhatsApp sales agent with human handoff.
 11. Customer follow-up agent.
@@ -138,7 +138,8 @@ Phase 3 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
 Goal: stores and store-scoped role-based access control.
 - apps/stores: Store (slug unique, name, domain) and a `create_store` management command.
-  The `anime`, `kawaii` and `home` stores are created with that command, never with a migration.
+  The `anime`, `kawaii`, `llaveros` and `home` stores are created with that command, never
+  with a migration.
 - Per-store feature flags: StoreFeatureFlag (store, code, enabled, unique store+code) and a
   service to ask whether a flag is on for a store. No third-party flag library.
 - Update the X-Store middleware to load the Store; unknown or missing store returns 400
@@ -154,7 +155,7 @@ Goal: stores and store-scoped role-based access control.
 - A DRF permission class IsStoreStaff as a first barrier.
 - Admin screens for roles and memberships.
 - Unit tests for MembershipAuthorizer and API tests proving a user with a role in one
-  store cannot act on the other store.
+  store cannot act on another store.
 ```
 
 **Done when:** the cross-store permission tests pass.
@@ -336,6 +337,17 @@ apps/orders
 - interfaces: POST /api/v1/orders/ (customer), GET own orders, staff endpoints for
   status changes guarded by the Authorizer.
 - PlaceOrder runs in one database transaction: all or nothing.
+- Volume pricing per variant: price tiers by quantity (for example 1, 6 and 12 pieces),
+  with a minimum margin per piece checked against the variant's cost and each channel's
+  commission. Wholesale is sold mainly through direct channels (the WhatsApp sales agent,
+  ROADMAP Phase 10); retail through TikTok Shop and the storefront.
+- Two bundle kinds. A fixed bundle always has the same components (the starter kit for
+  resellers and the squishy sets). An assorted bundle is N pieces drawn from a pool (the
+  variants of one product or a collection) with optional rules such as a maximum per
+  variant; it is sellable when the pool has enough stock under those rules. At order time
+  the system picks the mix highest stock first, reserves and decrements each chosen
+  variant, and the order lists the exact pieces to pack (for example 4 Tanjiro, 5 Nezuko
+  and 3 Zenitsu).
 - Map OutOfStock and InvalidTransition to 409 in the domain exception handler.
 
 Analytics readiness (issue #1, analytics): later reports read orders directly, so from
@@ -462,20 +474,35 @@ Goal: the blankets store live at its own domain.
 
 ---
 
-## Phase 8 — Anime and kawaii stores and sales channels
+## Phase 8 — Anime, kawaii and llaveros stores and sales channels
 
 ```
-Phase 8 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
+Phase 8 of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0020 and ADR-0024.
 
-Goal: the anime and kawaii stores and the external channels.
+Goal: the anime, kawaii and llaveros stores and the external channels.
 - The `anime` store on the same storefront: its domain and its theme, no new app.
 - The `kawaii` store on the same storefront too: its own domain and theme, no new app.
-- Product lines: stores are split by audience into three: `kawaii` (kawaii
-  stationery: BTS holders, keychains, lomo cards, notebooks, stickers, pens,
-  squishies), `anime` (anime merchandise: caps, t-shirts and other anime
-  products) and `home` (blankets). Bags and backpacks go to `anime` or `kawaii`
-  by design. A new store only when a line has a different buyer. Stores are data
-  (create_store) and categories are data (ADR-0024).
+- The `llaveros` store on the same storefront too: its own domain and theme, no new app.
+- Each store has its own social and TikTok Shop accounts, stored as per-store integration
+  credentials (ADR-0020).
+- Product lines: stores are split by audience into four: `anime` (anime merchandise:
+  caps, t-shirts and other anime products), `kawaii` (kawaii stationery: BTS holders,
+  lomo cards, notebooks, stickers, pens and squishies), `llaveros` (keychains of every
+  kind: kawaii, anime, superheroes and animals; retail and wholesale for resellers) and
+  `home` (blankets). Keychains go to `llaveros`, not `kawaii`. Bags and backpacks go to
+  `anime` or `kawaii` by design. A new store only when a line has a different buyer.
+  Stores are data (create_store) and categories are data (ADR-0024).
+- Campaign segmentation inside `llaveros` uses collections (`Kawaii`, `Anime`,
+  `Superheroes`, `Animals`, `Wholesale/Starter kit`), not more stores. A keychain may
+  later also be listed in `kawaii` or `anime` as a separate product with its own allocated
+  stock; start without it. Products never move between stores, so every line is placed in
+  its final store from the start.
+- Keychains category (data, not code): one product per series (for example "Llavero Demon
+  Slayer"), with a required "Personaje" option (one variant per character or pose, each
+  with its own SKU, stock and photo) and an optional "Color" option only when a character
+  comes in several colors (for example Spider-Man blue and red). Never use "Color" to mean
+  the character: it breaks storefront filters, catalog feeds and agent-written copy. Size
+  and material are category attributes, the same for every variant.
 - apps/integrations:
   - TikTok Shop: a Celery Beat task that imports TikTok orders as Order with
     channel=tiktok (idempotent by external_id) and pushes stock levels to TikTok.
@@ -520,10 +547,13 @@ Goal: scheduled, validated and approved social media posts.
     (shots, duration, hook, on-screen text) in the style of the reference videos. The
     staff records the videos and uploads them through Quetzal (Phase 4d); there is no
     AI-generated video. The bundle recommendation logic is shared with Phase 12
-    (suggested bundles); design it once. A set is a bundle composed by
-    recommendation (x pieces of x models, based on what sells) and approved by
-    staff. A bundle has no stock of its own: its availability is computed from its
-    components' loose-piece stock, and selling one decrements the components.
+    (suggested bundles); design it once. There are fixed bundles, whose components are
+    always the same (the starter kit for resellers and the squishy sets), and assorted
+    bundles, which draw N pieces from a pool (the variants of one product or a
+    collection) with optional rules such as a maximum per variant, like an assorted
+    dozen of Demon Slayer keychains. A bundle has no stock of its own: its availability
+    is computed from its components' stock, and selling one decrements each chosen
+    component.
 - Celery Beat creates posts from schedules; rejected posts regenerate at most twice,
   then go to needs_review. Add a social.propose_post permission for content_editor
   (a new data migration, ADR-0021); approval requires social.approve_post, so posts
@@ -564,7 +594,7 @@ Goal: see what the system does and make it harder to break.
 ```
 Phase 11 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
-Goal: a customer app for both stores.
+Goal: a customer app for every store.
 - mobile/: React Native with Expo and TypeScript, using packages/api-client.
 - QR scanning: product labels contain a URL like https://<store-domain>/p/<SKU>.
   Universal links (iOS) and app links (Android) open the product in the app when
@@ -576,3 +606,26 @@ Goal: a customer app for both stores.
 ```
 
 **Done when:** scanning a product label opens it in the app with its current price.
+
+---
+
+## Phase 12 — Bundle suggestions
+
+```
+Phase 12 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
+
+Goal: raise the average ticket with combinations that already sell together.
+- Basket analysis over OrderItem (frequent pairs, margin, stock).
+- `@paquetes` agent that names and describes them; Bundle and BundleItem as drafts with
+  approval; selling bundles in the web stores. Bundle recommendation is shared with Phase 9
+  (video scripts) and designed once. There are fixed bundles, whose components are always the
+  same (the starter kit for resellers and the squishy sets), and assorted bundles, which draw
+  N pieces from a pool (the variants of one product or a collection) with optional rules such
+  as a maximum per variant, like an assorted dozen of keychains or 12 Spider-Man keychains
+  mixing the blue and red colors. A bundle has no stock of its own: its availability is
+  computed from its components' stock, and selling one decrements each chosen component; the
+  order lists the exact pieces to pack.
+```
+
+**Done when:** the weekly suggestion generates a bundle, you approve it and it can be bought.
+**Requirement:** at least a few months of sales history.
