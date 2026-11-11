@@ -7,6 +7,12 @@ from rest_framework import exceptions, status
 from rest_framework.response import Response
 from rest_framework.views import exception_handler, set_rollback
 
+from apps.catalog.services import (
+    ProductImageConflict,
+    ProductImageNotFound,
+    StoreMismatch,
+    VariantNotFound,
+)
 from apps.shared.domain.exceptions import (
     DomainError,
     NotFoundError,
@@ -28,6 +34,10 @@ DOMAIN_ERROR_STATUS = {
     StoreHeaderMissingError: status.HTTP_400_BAD_REQUEST,
     StoreHeaderInvalidError: status.HTTP_400_BAD_REQUEST,
     StoreNotFoundError: status.HTTP_400_BAD_REQUEST,
+    StoreMismatch: status.HTTP_404_NOT_FOUND,
+    ProductImageNotFound: status.HTTP_404_NOT_FOUND,
+    VariantNotFound: status.HTTP_404_NOT_FOUND,
+    ProductImageConflict: status.HTTP_409_CONFLICT,
 }
 
 CODE_BY_STATUS = {

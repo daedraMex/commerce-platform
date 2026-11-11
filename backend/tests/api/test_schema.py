@@ -233,6 +233,27 @@ def test_schema_documents_staff_me_requires_the_store_header(schema):
     )
 
 
+def test_schema_documents_the_staff_product_list(schema):
+    operation = schema["paths"]["/api/v1/staff/products/"]["get"]
+
+    assert {
+        ("X-Store", "header"),
+        ("search", "query"),
+        ("category", "query"),
+        ("needs_main_image", "query"),
+    } <= _parameter_names(operation)
+    example = _success_example(operation)
+    assert example["results"][0]["slug"] == "frazada-termica"
+    assert example["results"][0]["main_image"]["thumbnail_url"]
+    assert _example_codes(operation, "400") == {
+        "store_header_missing",
+        "store_header_invalid",
+        "store_not_found",
+    }
+    assert _example_codes(operation, "401") == {"not_authenticated", "token_invalid"}
+    assert _example_codes(operation, "403") == {"permission_denied"}
+
+
 def _parameter_names(operation):
     return {(parameter["name"], parameter["in"]) for parameter in operation["parameters"]}
 

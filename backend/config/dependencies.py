@@ -6,6 +6,7 @@ function, so nothing is built or loaded at import time and importing shared neve
 
 from collections.abc import Callable
 
+from apps.catalog.services import CatalogService
 from apps.photos.application.ports import PhotoSubmissionRepository
 from apps.shared.domain.ports import Authorizer, FeatureFlags, StoreResolver
 
@@ -55,3 +56,18 @@ def get_photo_submission_repository() -> PhotoSubmissionRepository:
     from apps.photos.infrastructure.repository import DjangoPhotoSubmissionRepository
 
     return DjangoPhotoSubmissionRepository()
+
+
+def get_catalog_service() -> CatalogService:
+    if get_catalog_service in _overrides:
+        return _overrides[get_catalog_service]()
+
+    from django.db import transaction
+
+    from apps.catalog.repositories import DjangoCatalogRepository, DjangoMediaFiles
+
+    return CatalogService(
+        repository=DjangoCatalogRepository(),
+        files=DjangoMediaFiles(),
+        transaction=transaction.atomic,
+    )

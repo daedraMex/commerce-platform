@@ -28,5 +28,6 @@ urlpatterns = [
     path("health/", include("apps.health.urls")),
     path("auth/", include("apps.accounts.urls")),
     path("staff/", include("apps.accounts.staff_urls")),
+    path("staff/", include("apps.catalog.staff_urls")),
     re_path(r"^.*$", api_not_found),
 ]

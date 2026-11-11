@@ -122,6 +122,17 @@ class ProductImageSerializer(serializers.Serializer):
         return image.variant.sku if image.variant_id is not None else None
 
 
+def _main_image(product):
+    return next(
+        (
+            image
+            for image in product.product_media.all()
+            if image.role == "main" and image.is_active
+        ),
+        None,
+    )
+
+
 class ProductSummarySerializer(serializers.Serializer):
     name = serializers.CharField()
     slug = serializers.CharField()
@@ -129,10 +140,25 @@ class ProductSummarySerializer(serializers.Serializer):
 
     @extend_schema_field(ProductImageSerializer)
     def get_main_image(self, product):
-        image = next(
-            (image for image in product.product_media.all() if image.role == "main"),
-            None,
-        )
+        image = _main_image(product)
+        return ProductImageSerializer(image).data if image is not None else None
+
+
+class StaffProductSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    slug = serializers.CharField()
+    category = CategorySummarySerializer()
+    needs_main_image = serializers.SerializerMethodField()
+    main_image = serializers.SerializerMethodField()
+
+    @extend_schema_field(serializers.BooleanField())
+    def get_needs_main_image(self, product):
+        return _main_image(product) is None
+
+    @extend_schema_field(ProductImageSerializer)
+    def get_main_image(self, product):
+        image = _main_image(product)
         return ProductImageSerializer(image).data if image is not None else None
 
 
