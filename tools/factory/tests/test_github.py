@@ -115,12 +115,14 @@ def test_mark_pr_ready_marks_the_opened_pr():
     assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
 
 
-def test_mark_pr_ready_raises_when_gh_exits_nonzero():
+def test_mark_pr_ready_returns_the_failure_instead_of_raising():
     def run(_argv, cwd, *, timeout, env=None, replace_env=False):
         return CommandResult(exit_code=1, stdout="", stderr="pull request is not a draft")
 
-    with pytest.raises(RuntimeError, match="pull request is not a draft"):
-        GitHub(REPO, run=run).mark_pr_ready(63, "TOKEN")
+    result = GitHub(REPO, run=run).mark_pr_ready(63, "TOKEN")
+
+    assert result.exit_code == 1
+    assert result.stderr == "pull request is not a draft"
 
 
 def test_enable_auto_merge_uses_the_merge_commit_method():

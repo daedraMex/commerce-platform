@@ -314,7 +314,7 @@ class Factory:
         )
         if diff.migrations_changed:
             self.github.add_pr_label(pr_number, MIGRATION_LABEL, token)
-        self.github.mark_pr_ready(pr_number, token)
+        self._mark_pr_ready(pr_number, token)
         self._enable_auto_merge(pr_number, token)
         info = PrReadyInfo(
             ticket_number=ticket.number,
@@ -373,6 +373,23 @@ class Factory:
         )
         self._notify(self.notifier.send_stuck, info)
         return TicketResult(ticket=ticket, ok=False)
+
+    def _mark_pr_ready(self, pr_number: int, token: str) -> None:
+        """Mark the PR ready; a failure leaves it a draft and never fails the ticket."""
+        try:
+            result = self.github.mark_pr_ready(pr_number, token)
+        except Exception as exc:
+            print(
+                f"PR #{pr_number} stays a draft: {short_error(exc)}",
+                file=sys.stderr,
+            )
+            return
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or result.stdout.strip() or f"exit {result.exit_code}"
+            print(
+                f"PR #{pr_number} stays a draft: {short_error(reason)}",
+                file=sys.stderr,
+            )
 
     def _enable_auto_merge(self, pr_number: int, token: str) -> None:
         """Ask GitHub to auto-merge; a repo setting that forbids it is not fatal."""

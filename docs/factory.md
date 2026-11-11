@@ -12,9 +12,10 @@ daily ticket attempts. The decisions behind it are in
   environment variable, so the repo's own `opencode.json` is untouched.
 - It never pushes to `main`, never force-pushes, never approves and never merges
   directly. After opening a PR it marks it ready for review and enables
-  auto-merge with the merge-commit method, so the owner's GitHub approval is the
-  only gate to `main`. If GitHub rejects enabling auto-merge, the run still
-  succeeds and the log says why.
+  auto-merge with the merge-commit method, so every factory PR needs the owner's
+  GitHub approval before it can merge. If marking it ready or enabling
+  auto-merge fails, the run still succeeds and the log says why; a PR that could
+  not be marked ready stays a draft.
 - A human signs twice: marking a ticket agent-ready, then approving the PR on
   GitHub; GitHub performs the auto-merge once the required checks pass.
 
@@ -321,9 +322,11 @@ Run these once, as the admin user unless a step says `factory`.
 
 11. **Protect `main`.** `.github/CODEOWNERS` contains `* @daedraMex`. On
     GitHub: require a pull request before merging, require 1 approval, turn on
-    **Require review from Code Owners**, require the "Backend" and "Ticket
-    link" checks, and disallow bypassing them. The owner's GitHub approval is
-    the only approval that satisfies the ruleset; agents (the factory,
+    **Require review from Code Owners**, and require the "Backend" and "Ticket
+    link" checks. Do not give the factory or any agent a bypass. The repository
+    admin (the owner) may bypass the ruleset in a pull request, but only to
+    merge her own human pull requests, which GitHub does not let her approve;
+    factory pull requests always go through her approval. Agents (the factory,
     evaluators and reviewers) never approve.
 
 ## Migrating an existing machine

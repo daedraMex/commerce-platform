@@ -125,6 +125,8 @@ class FakeGitHub:
         pr_number=101,
         open_factory_prs=0,
         open_factory_prs_error=None,
+        ready_exit=0,
+        ready_stderr="",
         auto_merge_exit=0,
         auto_merge_stderr="",
     ):
@@ -132,6 +134,8 @@ class FakeGitHub:
         self.pr_number = pr_number
         self.open_factory_prs = open_factory_prs
         self.open_factory_prs_error = open_factory_prs_error
+        self.ready_exit = ready_exit
+        self.ready_stderr = ready_stderr
         self.auto_merge_exit = auto_merge_exit
         self.auto_merge_stderr = auto_merge_stderr
         self.created_prs = []
@@ -159,6 +163,7 @@ class FakeGitHub:
 
     def mark_pr_ready(self, number, token):
         self.ready_prs.append((number, token))
+        return CommandResult(exit_code=self.ready_exit, stdout="", stderr=self.ready_stderr)
 
     def enable_auto_merge(self, number, token):
         self.auto_merges.append((number, token))
@@ -359,6 +364,31 @@ def test_auto_merge_failure_keeps_the_run_successful_and_logs_why(tmp_path, caps
     err = capsys.readouterr().err
     assert "auto-merge not enabled for PR #101" in err
     assert "Auto-merge is not allowed for this repository" in err
+
+
+def test_ready_failure_keeps_the_run_successful_and_logs_why(tmp_path, capsys):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        tickets=[make_ticket(7, labels={"ready-for-agent"})],
+        pr_number=101,
+        ready_exit=1,
+        ready_stderr="Pull request is not a draft",
+    )
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert len(github.created_prs) == 1
+    assert github.ready_prs == [(101, "TOKEN")]
+    assert github.auto_merges == [(101, "TOKEN")]
+    assert len(notifier.pr_ready) == 1
+    err = capsys.readouterr().err
+    assert "PR #101 stays a draft" in err
+    assert "Pull request is not a draft" in err
 
 
 def test_fetch_main_runs_before_any_worktree_is_created(tmp_path):

@@ -102,9 +102,12 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Store-scoped features need a test proving one store's data never appears in another.
 
 ## Safety
-- The owner's GitHub approval is the only gate to `main`. Agents — the night
-  factory, evaluators and reviewers — never approve a pull request. The factory
-  may enable auto-merge with merge commits but never approves or merges directly.
+- For factory pull requests, the owner's GitHub approval is the only gate to
+  `main`. Agents — the night factory, evaluators and reviewers — never approve a
+  pull request. The factory may enable auto-merge with merge commits but never
+  approves or merges directly. As repository admin the owner may bypass the
+  ruleset only to merge her own human pull requests, which GitHub does not let
+  her approve.
 - Never read, print or commit .env files, secrets, tokens or credentials.
 - Never run git push, destructive git commands or database drops without asking.
   Exception (night factory only, see ADR): may run `git push origin nf/<ticket-id>`

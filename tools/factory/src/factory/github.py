@@ -70,15 +70,19 @@ class GitHub:
         url = result.stdout.strip().splitlines()[-1].strip()
         return int(url.rstrip("/").rsplit("/", 1)[-1])
 
-    def mark_pr_ready(self, number: int, token: str) -> None:
-        result = self._run(
+    def mark_pr_ready(self, number: int, token: str) -> CommandResult:
+        """Mark the PR ready for review.
+
+        Returns the raw result instead of raising: a failed ``gh pr ready``
+        leaves the PR as a draft, which is not a factory failure because the
+        pull request already exists.
+        """
+        return self._run(
             ["gh", "pr", "ready", str(number), "--repo", self.repo],
             cwd="/",
             timeout=120,
             env={"GH_TOKEN": token},
         )
-        if result.exit_code != 0:
-            raise RuntimeError(f"gh pr ready failed: {result.stderr.strip()}")
 
     def enable_auto_merge(self, number: int, token: str) -> CommandResult:
         """Ask GitHub to merge once checks pass and the owner approves.
