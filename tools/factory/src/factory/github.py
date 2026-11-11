@@ -6,7 +6,6 @@ import json
 import re
 from datetime import datetime
 
-from .git import BOT_COMMIT_NAME
 from .reviews import CHANGES_REQUESTED, ReviewComment, ReviewFix
 from .shell import CommandResult, RunCommand, run_command
 from .tickets import Ticket, parse_blocked_by
@@ -164,14 +163,16 @@ class GitHub:
         author: str,
         owner: str,
         branch_prefix: str = "nf/",
+        attempted_review_ids: frozenset[str] = frozenset(),
         token: str | None = None,
     ) -> list[ReviewFix]:
         """Return open factory PRs whose latest owner review asks for changes.
 
         A PR is a candidate only when its latest review by ``owner`` is
-        ``CHANGES_REQUESTED`` and no commit by ``author`` landed after that
-        review. Results are ordered oldest review first. Any failed ``gh`` call
-        raises, so the caller can skip review fixes and continue.
+        ``CHANGES_REQUESTED`` and no commit landed after that review. Reviews
+        in ``attempted_review_ids`` are never retried. Results are ordered
+        oldest review first. Any failed ``gh`` call raises, so the caller can
+        skip review fixes and continue.
         """
         result = self._run(
             [
@@ -207,17 +208,21 @@ class GitHub:
             review, submitted_at = _latest_owner_review(detail.get("reviews") or [], owner)
             if review is None or submitted_at is None:
                 continue
+            review_id = str(review.get("id") or "")
+            if not review_id or review_id in attempted_review_ids:
+                continue
             if review.get("state") != CHANGES_REQUESTED:
                 continue
-            if _factory_commit_after(detail.get("commits") or [], author, submitted_at):
+            if _commit_after(detail.get("commits") or [], submitted_at):
                 continue
             ticket_number = _ticket_number(pr.get("body", "") or "")
             if ticket_number is None:
                 continue
             ticket = self.get_ticket(ticket_number, token)
-            comments = self._review_comments(number, review.get("id"), token)
+            comments = self._review_comments(number, review_id, token)
             fixes.append(
                 ReviewFix(
+                    review_id=review_id,
                     pr_number=number,
                     branch=branch,
                     ticket=ticket,
@@ -481,20 +486,16 @@ def _latest_owner_review(reviews: list[dict], owner: str) -> tuple[dict | None, 
     return latest[1], latest[0]
 
 
-def _factory_commit_after(commits: list[dict], author: str, review_time: datetime) -> bool:
-    """True when the factory pushed a commit after the review was submitted."""
-    for commit in commits:
-        commit_time = _parse_timestamp(
-            commit.get("committedDate") or commit.get("authoredDate") or ""
-        )
-        if commit_time is None or commit_time <= review_time:
-            continue
-        for commit_author in commit.get("authors") or []:
-            login = (commit_author or {}).get("login", "")
-            name = (commit_author or {}).get("name", "")
-            if _same_login(login, author) or name == BOT_COMMIT_NAME:
-                return True
-    return False
+def _commit_after(commits: list[dict], review_time: datetime) -> bool:
+    """True when the branch head moved after the review was submitted."""
+    commit_times = [
+        _parse_timestamp(commit.get("committedDate") or commit.get("authoredDate") or "")
+        for commit in commits
+    ]
+    times = [commit_time for commit_time in commit_times if commit_time is not None]
+    if not times:
+        return False
+    return max(times) > review_time
 
 
 def _ticket_number(pr_body: str) -> int | None:

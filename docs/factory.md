@@ -48,8 +48,9 @@ The main clone and the worktrees live under `/srv/factory`, outside
 
 /home/factory/          # factory:factory, mode 700
 ├── logs/               # one log file per ticket run, cleaned after 14 days
-├── state/              # mode 700; pause marker and the append-only attempts ledger
+├── state/              # mode 700; pause marker and the append-only ledgers
 │   ├── attempts.log    # mode 600; started + outcome lines per attempt, never readable by factory-agent
+│   ├── review-attempts.log  # mode 600; review ids already attempted, never readable by factory-agent
 │   └── paused          # present only while the factory is paused
 ├── secrets.env         # chmod 600, see below
 └── xolo-bot.pem        # chmod 600, see below
@@ -398,10 +399,16 @@ the normal PR-ready, stuck and aborted messages are unchanged.
 
 At the start of each run, before it picks a new ticket, the factory looks for
 open pull requests it authored on `nf/*` branches whose latest review by the
-repository owner (`daedraMex`) is **CHANGES_REQUESTED** and that have no
-factory commit after that review. Only reviews by the owner count; reviews by
-bots or other agents are ignored. It takes at most one such pull request per
-run, oldest review first.
+repository owner (`daedraMex`) is **CHANGES_REQUESTED** and whose branch head
+has no commit after that review, whoever authored it (the factory, the owner
+or anyone else). Only reviews by the owner count; reviews by bots or other
+agents are ignored. It takes at most one such pull request per run, oldest
+review first.
+
+Every attempted review id is written to `review-attempts.log` (append-only,
+mode `600`) before the agent runs. A review is never retried automatically,
+whatever the outcome; a new review on the same pull request has a new id, so it
+is picked up again.
 
 For that pull request the factory creates a fresh worktree from the PR branch
 (never from `main`) and never force-pushes. The agent receives the linked

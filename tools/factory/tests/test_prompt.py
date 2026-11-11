@@ -56,6 +56,9 @@ def test_compose_prompt_appends_check_feedback():
     )
     assert "check.sh is still failing" in prompt
     assert "1 failed, 9 passed" in prompt
+    assert "failing area's `scripts/check.sh`" in prompt
+    assert "web/console/scripts/check.sh" in prompt
+    assert "from `backend/`" not in prompt
 
 
 def test_compose_prompt_omits_feedback_when_empty():

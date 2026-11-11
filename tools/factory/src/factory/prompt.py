@@ -77,7 +77,8 @@ def _feedback_section(feedback: str) -> str:
         "\n\n## check.sh is still failing\n\n"
         "Here is the latest output:\n\n```\n"
         f"{feedback}\n"
-        "```\n\nFix the failures and re-run `./scripts/check.sh` from `backend/`."
+        "```\n\nFix the failures and re-run the failing area's `scripts/check.sh` "
+        "(for example `backend/scripts/check.sh` or `web/console/scripts/check.sh`)."
     )
 
 

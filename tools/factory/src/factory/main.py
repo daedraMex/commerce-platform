@@ -34,6 +34,7 @@ from .pause import PauseState
 from .pr_body import build_pr_body
 from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, compose_review_prompt, read_command_body
+from .review_attempts import ReviewAttemptLedger
 from .reviews import ReviewFix
 from .runner import AgentRunner
 from .sudoers import verify_sudoers_logging
@@ -86,6 +87,7 @@ class Factory:
         preflight_verify_sudoers_logging=verify_sudoers_logging,
         preflight_clock=None,
         ledger: AttemptLedger | None = None,
+        review_attempts: ReviewAttemptLedger | None = None,
         pause_state: PauseState | None = None,
     ):
         self.settings = settings
@@ -100,6 +102,7 @@ class Factory:
         self._preflight_verify_sudoers_logging = preflight_verify_sudoers_logging
         self._preflight_clock = preflight_clock
         self.ledger = ledger or AttemptLedger(settings.state_dir)
+        self.review_attempts = review_attempts or ReviewAttemptLedger(settings.state_dir)
         self.pause_state = pause_state or PauseState(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
@@ -120,6 +123,7 @@ class Factory:
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
         tickets = self.run_preflight(token=token)
         if review_fix is not None:
+            self.review_attempts.record_attempted(review_fix.review_id)
             return [
                 self._execute(
                     review_fix.ticket,
@@ -192,17 +196,22 @@ class Factory:
         while the normal ticket flow continues. GitHub being unreachable is
         detected earlier, in ``_run_limits``.
         """
+        attempted = self.review_attempts.attempted_ids()
         try:
             fixes = self.github.list_review_fixes(
                 author=FACTORY_BOT_LOGIN,
                 owner=OWNER_LOGIN,
                 branch_prefix=FACTORY_BRANCH_PREFIX,
+                attempted_review_ids=frozenset(attempted),
                 token=token,
             )
         except Exception as exc:
             print(f"skipping review fixes: {short_error(exc)}", file=sys.stderr)
             return None
-        return fixes[0] if fixes else None
+        for fix in fixes:
+            if fix.review_id not in attempted:
+                return fix
+        return None
 
     def run_preflight(self, token: str | None = None) -> list[Ticket]:
         """Run the real-tool preflight and return the tickets it listed."""

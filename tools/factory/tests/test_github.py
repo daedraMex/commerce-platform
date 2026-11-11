@@ -413,7 +413,7 @@ def test_list_review_fixes_accepts_a_commit_before_the_review():
     assert len(GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")) == 1
 
 
-def test_list_review_fixes_ignores_non_factory_commits_after_the_review():
+def test_list_review_fixes_skips_when_an_owner_commit_landed_after_the_review():
     run = FakeGh(
         prs=[_pr(101)],
         pr_details={
@@ -427,7 +427,30 @@ def test_list_review_fixes_ignores_non_factory_commits_after_the_review():
         issue=_issue(7),
     )
 
-    assert len(GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")) == 1
+    assert GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex") == []
+
+
+def test_list_review_fixes_skips_an_already_attempted_review_id():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z"),
+                ],
+                "commits": [],
+            }
+        },
+        issue=_issue(7),
+    )
+
+    fixes = GitHub(REPO, run=run).list_review_fixes(
+        author="xolo-bot",
+        owner="daedraMex",
+        attempted_review_ids=frozenset({"R1"}),
+    )
+
+    assert fixes == []
 
 
 def test_list_review_fixes_orders_by_oldest_review():

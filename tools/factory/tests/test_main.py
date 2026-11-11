@@ -10,6 +10,7 @@ from factory.diff import DiffStats, FileChange
 from factory.ledger import AttemptLedger
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
+from factory.review_attempts import ReviewAttemptLedger
 from factory.reviews import ReviewComment, ReviewFix
 from factory.runner import AgentResult
 from factory.shell import CommandResult
@@ -176,13 +177,23 @@ class FakeGitHub:
         self.listed_with = None
         self.pr_counts = []
         self.review_fix_calls = []
+        self.attempted_review_ids = set()
 
     def list_tickets(self, token=None):
         self.listed_with = token
         return list(self.tickets)
 
-    def list_review_fixes(self, *, author, owner, branch_prefix="nf/", token=None):
+    def list_review_fixes(
+        self,
+        *,
+        author,
+        owner,
+        branch_prefix="nf/",
+        attempted_review_ids=frozenset(),
+        token=None,
+    ):
         self.review_fix_calls.append((author, owner, branch_prefix, token))
+        self.attempted_review_ids = set(attempted_review_ids)
         if self.review_fixes_error is not None:
             raise self.review_fixes_error
         return list(self.review_fixes)
@@ -317,8 +328,9 @@ def make_ticket(number, *, labels=()):
     )
 
 
-def make_review_fix(*, pr_number=101, ticket_number=7, branch="nf/7-ticket-7"):
+def make_review_fix(*, review_id="R1", pr_number=101, ticket_number=7, branch="nf/7-ticket-7"):
     return ReviewFix(
+        review_id=review_id,
         pr_number=pr_number,
         branch=branch,
         ticket=Ticket(number=ticket_number, title=f"Ticket {ticket_number}"),
@@ -352,6 +364,7 @@ def build_factory(
     settings=None,
     token_provider=None,
     ledger=None,
+    review_attempts=None,
     pause_state=None,
 ):
     return Factory(
@@ -367,6 +380,7 @@ def build_factory(
         preflight_verify_sudoers_logging=_noop_verify_sudoers_logging,
         preflight_clock=lambda: 42,
         ledger=ledger,
+        review_attempts=review_attempts,
         pause_state=pause_state,
     )
 
@@ -1131,6 +1145,7 @@ def test_review_fix_runs_before_a_new_ticket_and_records_one_attempt(tmp_path):
     assert len(notifier.review_addressed) == 1
     assert notifier.review_addressed[0].pr_number == 101
     assert ledger.count_today() == 1
+    assert factory.review_attempts.attempted_ids() == {"R1"}
     lines = ledger.path.read_text().splitlines()
     assert [(line.split("\t")[1], line.split("\t")[2]) for line in lines] == [
         ("#7", "started"),
@@ -1276,3 +1291,53 @@ def test_daily_cap_still_blocks_review_fixes(tmp_path):
     assert runner.calls == []
     assert git.fetched_branches == []
     assert [info.reason for info in notifier.paused] == ["daily limit reached"]
+
+
+def test_a_stuck_review_fix_is_not_picked_on_the_next_run(tmp_path):
+    fix = make_review_fix(review_id="R1")
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(review_fixes=[fix])
+    runner = FakeRunner()
+    review_attempts = ReviewAttemptLedger(tmp_path / "state")
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=RecordingNotifier(),
+        review_attempts=review_attempts,
+    )
+
+    first = factory.run()
+    second = factory.run()
+
+    assert len(first) == 1 and not first[0].ok
+    assert second == []
+    assert len(runner.calls) == 5
+    assert review_attempts.attempted_ids() == {"R1"}
+    assert github.attempted_review_ids == {"R1"}
+
+
+def test_a_newer_review_on_the_same_pr_is_picked_up_again(tmp_path):
+    first_fix = make_review_fix(review_id="R1")
+    newer_fix = make_review_fix(review_id="R2")
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(review_fixes=[first_fix])
+    runner = FakeRunner()
+    review_attempts = ReviewAttemptLedger(tmp_path / "state")
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=RecordingNotifier(),
+        review_attempts=review_attempts,
+    )
+
+    factory.run()
+    github.review_fixes = [newer_fix]
+    factory.run()
+
+    assert len(runner.calls) == 10
+    assert github.attempted_review_ids == {"R1"}
+    assert review_attempts.attempted_ids() == {"R1", "R2"}

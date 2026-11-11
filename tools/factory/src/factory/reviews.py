@@ -28,6 +28,7 @@ class ReviewComment:
 class ReviewFix:
     """A pull request whose latest owner review asks for changes."""
 
+    review_id: str
     pr_number: int
     branch: str
     ticket: Ticket
