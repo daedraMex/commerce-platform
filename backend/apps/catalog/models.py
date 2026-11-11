@@ -606,6 +606,12 @@ class Media(models.Model):
         return rendition_url(self, "medium")
 
 
+class ProductMediaQuerySet(models.QuerySet):
+    def active(self):
+        """The links a product-facing reader may return."""
+        return self.filter(is_active=True)
+
+
 class ProductMedia(models.Model):
     """One image linked to a product, optionally for one of its variants."""
 
@@ -624,6 +630,9 @@ class ProductMedia(models.Model):
     media = models.ForeignKey(Media, on_delete=models.PROTECT, related_name="product_media")
     role = models.CharField(max_length=10, choices=Role.choices, default=Role.MAIN)
     position = models.PositiveIntegerField(blank=True)
+    is_active = models.BooleanField(default=True)
+
+    objects = ProductMediaQuerySet.as_manager()
 
     class Meta:
         ordering = ("product", "position", "pk")
@@ -631,8 +640,12 @@ class ProductMedia(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=("product",),
-                condition=Q(role="main"),
+                condition=Q(role="main", is_active=True),
                 name="catalog_productmedia_one_main_per_product",
+            ),
+            models.UniqueConstraint(
+                fields=("product", "media"),
+                name="catalog_productmedia_unique_product_media",
             ),
         ]
 
@@ -666,3 +679,15 @@ class ProductMedia(models.Model):
             raise ValidationError(
                 {"variant": "The variant must belong to the product shown in this image."}
             )
+
+
+def deactivate_product_image(link):
+    """Retire one product image link without changing its position."""
+    link.is_active = False
+    link.save(update_fields=["is_active"])
+
+
+def reactivate_product_image(link):
+    """Restore one product image link without changing its position."""
+    link.is_active = True
+    link.save(update_fields=["is_active"])

@@ -492,3 +492,107 @@ def test_media_admin_is_reachable_by_superusers_only(client, url_name):
 
     assert response.status_code == 302
     assert response.url.startswith(reverse("admin:login"))
+
+
+def test_a_product_media_link_is_active_by_default():
+    home = make_store("home")
+    product = make_product(home)
+    media = make_media(home)
+
+    link = ProductMedia.objects.create(product=product, media=media)
+
+    assert link.is_active is True
+
+
+def test_a_retired_main_does_not_block_a_new_active_main():
+    home = make_store("home")
+    product = make_product(home)
+    retired = make_media(home, key="stores/1/media/retired.jpg", content_hash="retired")
+    active = make_media(home, key="stores/1/media/active.jpg", content_hash="active")
+    ProductMedia.objects.create(
+        product=product,
+        media=retired,
+        role=ProductMedia.Role.MAIN,
+        is_active=False,
+    )
+
+    link = ProductMedia.objects.create(
+        product=product,
+        media=active,
+        role=ProductMedia.Role.MAIN,
+    )
+
+    assert link.is_active is True
+    assert ProductMedia.objects.filter(product=product, role=ProductMedia.Role.MAIN).count() == 2
+
+
+def test_two_active_mains_are_rejected_by_the_database():
+    home = make_store("home")
+    product = make_product(home)
+    first = make_media(home, key="stores/1/media/first.jpg", content_hash="first")
+    second = make_media(home, key="stores/1/media/second.jpg", content_hash="second")
+    ProductMedia.objects.create(product=product, media=first, role=ProductMedia.Role.MAIN)
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ProductMedia.objects.create(product=product, media=second, role=ProductMedia.Role.MAIN)
+
+
+def test_a_product_cannot_link_the_same_media_twice():
+    home = make_store("home")
+    product = make_product(home)
+    media = make_media(home)
+    ProductMedia.objects.create(product=product, media=media, role=ProductMedia.Role.MAIN)
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        ProductMedia.objects.create(
+            product=product,
+            media=media,
+            role=ProductMedia.Role.GALLERY,
+            position=2,
+        )
+
+
+def test_deactivating_and_reactivating_a_link_keeps_its_position():
+    from apps.catalog.models import deactivate_product_image, reactivate_product_image
+
+    home = make_store("home")
+    product = make_product(home)
+    first = make_media(home, key="stores/1/media/first.jpg", content_hash="first")
+    second = make_media(home, key="stores/1/media/second.jpg", content_hash="second")
+    ProductMedia.objects.create(product=product, media=first, role=ProductMedia.Role.MAIN)
+    link = ProductMedia.objects.create(
+        product=product,
+        media=second,
+        role=ProductMedia.Role.GALLERY,
+        position=2,
+    )
+
+    deactivate_product_image(link)
+    link.refresh_from_db()
+    assert link.is_active is False
+    assert link.position == 2
+
+    reactivate_product_image(link)
+    link.refresh_from_db()
+    assert link.is_active is True
+    assert link.position == 2
+
+
+def test_the_active_queryset_returns_only_active_links():
+    home = make_store("home")
+    product = make_product(home)
+    active = make_media(home, key="stores/1/media/active.jpg", content_hash="active")
+    retired = make_media(home, key="stores/1/media/retired.jpg", content_hash="retired")
+    active_link = ProductMedia.objects.create(
+        product=product, media=active, role=ProductMedia.Role.MAIN
+    )
+    ProductMedia.objects.create(
+        product=product,
+        media=retired,
+        role=ProductMedia.Role.GALLERY,
+        position=2,
+        is_active=False,
+    )
+
+    assert list(ProductMedia.objects.active()) == [active_link]
+    assert ProductMedia.objects.count() == 2

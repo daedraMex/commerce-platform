@@ -999,7 +999,7 @@ def _plan_product_images(store, row_plans, prepared_images):
         links = ProductMedia.objects.filter(product_id__in=product_ids).select_related("media")
         for link in links:
             existing_links.setdefault((link.product_id, link.media.content_hash), link)
-            if link.role == ProductMedia.Role.MAIN:
+            if link.role == ProductMedia.Role.MAIN and link.is_active:
                 existing_main.setdefault(link.product_id, link.media.content_hash)
 
     for product_key, groups in requests_by_product.items():
@@ -1064,9 +1064,15 @@ def _plan_product_images(store, row_plans, prepared_images):
             if product.pk is not None:
                 existing_link = existing_links.get((product.pk, content_hash))
             if existing_link is not None:
+                changed = False
                 if existing_link.role != role or existing_link.position != position:
                     existing_link.role = role
                     existing_link.position = position
+                    changed = True
+                if not existing_link.is_active:
+                    existing_link.is_active = True
+                    changed = True
+                if changed:
                     plan.link_updates.append(existing_link)
                     plan.changed_products.add(product_key)
                 continue
@@ -1182,7 +1188,7 @@ def _write(store, plan, operator):
         Media.objects.bulk_create(plan.new_media)
 
     if plan.link_updates:
-        ProductMedia.objects.bulk_update(plan.link_updates, ["role", "position"])
+        ProductMedia.objects.bulk_update(plan.link_updates, ["role", "position", "is_active"])
 
     if plan.product_images:
         ProductMedia.objects.bulk_create(

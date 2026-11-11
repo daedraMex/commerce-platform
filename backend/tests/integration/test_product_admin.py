@@ -494,3 +494,43 @@ def test_admin_removes_the_link_but_not_the_media(admin_client_by_email):
     assert response.status_code == 302
     assert not ProductMedia.objects.filter(pk=link.pk).exists()
     assert Media.objects.filter(pk=media.pk).exists()
+
+
+def test_the_product_media_inline_shows_retired_links_with_an_editable_active_column(
+    admin_client_by_email,
+):
+    from tests.integration.admin_forms import rendered_field_names
+
+    home = make_store("home")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+    media = Media.objects.create(
+        store=home,
+        storage_key="stores/1/media/retired.jpg",
+        content_hash="retired",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    link = ProductMedia.objects.create(product=product, media=media, is_active=False)
+
+    response = admin_client_by_email.get(f"/admin/catalog/product/{product.pk}/change/")
+
+    assert response.status_code == 200
+    assert "product_media-0-is_active" in rendered_field_names(response)
+    formset = next(
+        inline_formset.formset
+        for inline_formset in response.context["inline_admin_formsets"]
+        if inline_formset.formset.model is ProductMedia
+    )
+    assert list(formset.forms[0].fields)[:5] == [
+        "media",
+        "variant",
+        "role",
+        "position",
+        "is_active",
+    ]
+    assert formset.forms[0].instance.pk == link.pk
+    assert formset.forms[0].initial["is_active"] is False
