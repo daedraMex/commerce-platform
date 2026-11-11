@@ -22,10 +22,16 @@ def test_merge_env_passthrough_without_overrides(monkeypatch):
     assert env["PATH"] == "/usr/bin"
 
 
-def test_run_command_kills_the_whole_process_group_on_timeout(tmp_path):
+def test_run_command_kills_the_same_user_process_group_on_timeout(tmp_path):
     pidfile = tmp_path / "child.pid"
+    termfile = tmp_path / "term.marker"
     script = (
-        "import os, subprocess, sys, time\n"
+        "import os, signal, subprocess, sys, time\n"
+        f"open({str(termfile)!r}, 'w').write('started')\n"
+        "def on_term(*_):\n"
+        f"    open({str(termfile)!r}, 'w').write('terminated')\n"
+        "    sys.exit(0)\n"
+        "signal.signal(signal.SIGTERM, on_term)\n"
         f"child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
         f"open({str(pidfile)!r}, 'w').write(str(child.pid))\n"
         "time.sleep(60)\n"
@@ -34,6 +40,7 @@ def test_run_command_kills_the_whole_process_group_on_timeout(tmp_path):
     with pytest.raises(CommandTimeout):
         run_command([sys.executable, "-c", script], str(tmp_path), timeout=1)
 
+    assert termfile.read_text() == "terminated"
     child = int(pidfile.read_text())
     deadline = time.time() + 5
     while time.time() < deadline:

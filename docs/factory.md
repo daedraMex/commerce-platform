@@ -92,7 +92,7 @@ Run these once, as the admin user unless a step says `factory`.
     Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
-    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/pkill -KILL -u factory-agent
     ```
 
     The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
@@ -205,16 +205,25 @@ Run these once, as the admin user unless a step says `factory`.
       -b console-smoke /srv/factory/worktrees/console-smoke origin/main
     sudo -u factory sudo -n -u factory-agent -- \
       /srv/factory/worktrees/console-smoke/web/console/scripts/check.sh
+    # prove a killed check leaves no agent process (and frees port 3000)
+    sudo -u factory timeout 20 sudo -n -u factory-agent -- \
+      /srv/factory/worktrees/console-smoke/web/console/scripts/check.sh || true
+    sudo -u factory-agent /usr/bin/pkill -KILL -u factory-agent
+    pgrep -u factory-agent || echo "no factory-agent processes left"
     sudo -u factory git -C /srv/factory/repo worktree remove --force \
       /srv/factory/worktrees/console-smoke
     sudo -u factory git -C /srv/factory/repo branch -D console-smoke
     ```
-    The console check runs `pnpm install --frozen-lockfile --prefer-offline`
-    from the repo root and `pnpm exec playwright install chromium` before the
-    checks, so a fresh worktree passes; both are fast when the pnpm store and
-    the browser cache are warm. The check runner also sets `CI=true` for the
-    console area, so Playwright never reuses a dev server already listening on
-    port 3000 from another worktree.
+    `pgrep` must print nothing; the `|| echo` only makes that expectation
+    visible. The console check runs `pnpm install --frozen-lockfile
+    --prefer-offline` from the repo root and `pnpm exec playwright install
+    chromium` before the checks, so a fresh worktree passes; both are fast when
+    the pnpm store and the browser cache are warm. The check runner also sets
+    `CI=true` for the console area, so Playwright never reuses a dev server
+    already listening on port 3000 from another worktree. Before a console
+    check it also verifies port 3000 is free, runs the agent cleanup once if it
+    is not, and fails with a clear "port 3000 busy" message if someone else
+    still holds it.
 
 6. **Set up the read-only deploy key and clone** as `factory`. Fetching uses
    the read-only deploy key over SSH; pushes use HTTPS with the minted xolo-bot
@@ -518,10 +527,19 @@ unreachable" as before.
 - **Fix loop.** Before pushing, the factory runs every selected area's
   `scripts/check.sh` in the worktree **as `factory-agent`**, sequentially, each
   in its own process group with its own timeout, with only that area's env
-  allowlist. A timeout kills the whole group, so no `next` or Playwright process
-  is orphaned. The output is labelled per area and truncated; on failure it
+  allowlist. The output is labelled per area and truncated; on failure it
   feeds a truncated tail back to the agent, naming the real failing area and
   script, and retries up to the step budget.
+- **Timeout cleanup.** Sending signals across users does not work — the factory
+  cannot kill `factory-agent` children, so killing the process group from the
+  factory user only reaps sudo. On a timeout the factory first sends SIGTERM to
+  sudo (which relays it to the command), waits up to 20 seconds, then runs
+  `sudo -n -u factory-agent /usr/bin/pkill -KILL -u factory-agent` to kill every
+  remaining agent process. The same cleanup runs after an OpenCode timeout, so
+  no `next`, Playwright or Chromium process survives to hold port 3000. Before a
+  console check the factory verifies port 3000 is free; if it is busy it runs
+  that cleanup once and, if the port is still busy, fails with a clear
+  "port 3000 busy" message instead of a confusing Playwright error.
 - **Worktree cleanup.** Stale and expired worktrees are deleted as their owner
   with the sudoers-allowed `rm -rf` (direct children only; paths outside the
   worktrees directory or containing `..` are refused), then `git worktree

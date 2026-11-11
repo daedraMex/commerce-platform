@@ -20,6 +20,8 @@ def test_runbook_documents_the_console_toolchain_setup():
     assert "corepack enable" in text
     assert "playwright@1.65.0 install-deps chromium" in text
     assert "/srv/factory/worktrees/*/web/console/scripts/check.sh" in text
+    assert "sudo -u factory-agent /usr/bin/pkill -KILL -u factory-agent" in text
+    assert "pgrep -u factory-agent" in text
 
 
 def test_runbook_documents_the_sudoers_migration():
@@ -127,7 +129,8 @@ def test_runbook_documents_the_final_sudoers_file_exactly():
         "/usr/bin/cat, /usr/bin/test, "
         "/srv/factory/worktrees/*/backend/scripts/check.sh, "
         "/srv/factory/worktrees/*/web/console/scripts/check.sh, "
-        "/usr/bin/rm -rf /srv/factory/worktrees/*",
+        "/usr/bin/rm -rf /srv/factory/worktrees/*, "
+        "/usr/bin/pkill -KILL -u factory-agent",
     )
     sudoers = "\n".join(f"    {line}" for line in lines)
 

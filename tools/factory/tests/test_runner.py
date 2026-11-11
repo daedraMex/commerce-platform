@@ -246,3 +246,35 @@ def test_run_marks_timeout(tmp_path):
     runner = AgentRunner(run=timed_out)
     result = runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
     assert result.timed_out is True
+
+
+def test_run_timeout_cleans_up_every_agent_process(tmp_path):
+    from factory.shell import CommandTimeout
+
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append((argv, cwd, env, replace_env))
+        if len(calls) == 1:
+            raise CommandTimeout("slow")
+        return CommandResult(exit_code=0, stdout="", stderr="")
+
+    runner = AgentRunner(run=run, agent_user="factory-agent", base_env={"PATH": "/usr/bin"})
+    result = runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+
+    assert result.timed_out is True
+    assert calls[1] == (
+        [
+            "sudo",
+            "-n",
+            "-u",
+            "factory-agent",
+            "/usr/bin/pkill",
+            "-KILL",
+            "-u",
+            "factory-agent",
+        ],
+        "/",
+        None,
+        False,
+    )

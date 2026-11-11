@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import os
 import re
+import socket
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .areas import Area, select_areas
 from .diff import DiffStats, build_diff_stats
-from .runner import build_check_env, sudo_argv, truncate_check_output
+from .runner import build_check_env, kill_agent_processes, sudo_argv, truncate_check_output
 from .shell import CommandTimeout, RunCommand, run_command
 
 MIN_GIT_VERSION = (2, 46)
@@ -56,6 +58,19 @@ class CheckResult:
     passed: bool
     output: str
     failed_areas: tuple[Area, ...] = ()
+
+
+def port_in_use(port: int) -> bool:
+    """Return True when something is already listening on ``port``."""
+    for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.2)
+                if sock.connect_ex((host, port)) == 0:
+                    return True
+        except OSError:
+            continue
+    return False
 
 
 def worktree_cleanup_path(worktrees_dir: Path, worktree: Path) -> Path:
@@ -138,12 +153,14 @@ class Git:
         agent_home: str | None = None,
         bot_user_id: str | None = None,
         base_env: dict[str, str] | None = None,
+        port_in_use: Callable[[int], bool] = port_in_use,
     ):
         self._run = run
         self._agent_user = agent_user
         self._agent_home = agent_home
         self._bot_user_id = bot_user_id
         self._base_env = dict(base_env if base_env is not None else os.environ)
+        self._port_in_use = port_in_use
 
     def fetch_main(self, repo_dir: Path) -> None:
         result = self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
@@ -287,6 +304,13 @@ class Git:
             }
         )
 
+    def _port_still_busy(self, port: int) -> bool:
+        """Check a fixed port, cleaning up leftover agent servers once first."""
+        if not self._port_in_use(port):
+            return False
+        kill_agent_processes(self._run, self._agent_user)
+        return self._port_in_use(port)
+
     def check(self, worktree: Path, *, areas: tuple[Area, ...] | None = None) -> CheckResult:
         """Run each selected area's check script as the agent user.
 
@@ -307,6 +331,10 @@ class Git:
             if not script.is_file():
                 chunks.append(f"=== {label}: skipped (script not found) ===")
                 continue
+            if area.port is not None and self._port_still_busy(area.port):
+                failed.append(area)
+                chunks.append(f"=== {label}: failed: port {area.port} busy after agent cleanup ===")
+                continue
             env = build_check_env(
                 self._base_env,
                 agent_user=self._agent_user,
@@ -325,6 +353,7 @@ class Git:
                     replace_env=True,
                 )
             except CommandTimeout:
+                kill_agent_processes(self._run, self._agent_user)
                 failed.append(area)
                 chunks.append(f"=== {label}: timed out after {CHECK_TIMEOUT_SECONDS}s ===")
                 continue

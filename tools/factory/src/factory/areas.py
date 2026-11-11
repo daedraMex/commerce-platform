@@ -18,10 +18,11 @@ class Area:
 
     name: str
     script: Path
+    port: int | None = None
 
 
 BACKEND = Area("backend", Path("backend") / "scripts" / "check.sh")
-CONSOLE = Area("console", Path("web") / "console" / "scripts" / "check.sh")
+CONSOLE = Area("console", Path("web") / "console" / "scripts" / "check.sh", port=3000)
 AREAS: tuple[Area, ...] = (BACKEND, CONSOLE)
 
 

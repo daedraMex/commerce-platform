@@ -40,3 +40,8 @@ def test_area_for_path_ignores_unrelated_files():
 def test_area_scripts_are_relative_to_the_worktree_root():
     assert BACKEND.script == Path("backend") / "scripts" / "check.sh"
     assert CONSOLE.script == Path("web") / "console" / "scripts" / "check.sh"
+
+
+def test_only_the_console_area_checks_a_port():
+    assert BACKEND.port is None
+    assert CONSOLE.port == 3000

@@ -346,6 +346,7 @@ def test_check_console_env_sets_ci_and_the_playwright_browser_path(tmp_path):
             "DATABASE_URL": "postgres://db",
             "DEEPSEEK_API_KEY": "dk-123",
         },
+        port_in_use=lambda _port: False,
     ).check(worktree, areas=(CONSOLE,))
 
     argv, cwd, env, replace_env = run.calls[0]
@@ -381,7 +382,7 @@ def test_check_runs_every_selected_area_in_labeled_output(tmp_path):
     ]
     run = SequenceRun(results)
 
-    result = Git(run=run).check(worktree, areas=AREAS)
+    result = Git(run=run, port_in_use=lambda _port: False).check(worktree, areas=AREAS)
 
     assert result.passed is True
     assert result.failed_areas == ()
@@ -401,7 +402,9 @@ def test_check_fails_when_any_area_fails_and_names_the_failing_area(tmp_path):
         CommandResult(exit_code=1, stdout="1 failed", stderr="boom"),
     ]
 
-    result = Git(run=SequenceRun(results)).check(worktree, areas=AREAS)
+    result = Git(run=SequenceRun(results), port_in_use=lambda _port: False).check(
+        worktree, areas=AREAS
+    )
 
     assert result.passed is False
     assert result.failed_areas == (CONSOLE,)
@@ -440,7 +443,7 @@ def test_check_maps_the_changed_files_to_areas(tmp_path):
 
     run.calls = []
 
-    result = Git(run=run).check(worktree)
+    result = Git(run=run, port_in_use=lambda _port: False).check(worktree)
 
     assert result.passed is True
     script_calls = [argv for argv in run.calls if argv[:1] != ["git"]]
@@ -462,18 +465,87 @@ def test_check_truncates_output_fed_to_the_agent(tmp_path):
     assert "truncated" in result.output
 
 
-def test_check_marks_a_timed_out_area_as_failed(tmp_path):
+class TimeoutThenRecord:
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        self.calls.append((argv, cwd, env, replace_env))
+        if len(self.calls) == 1:
+            raise CommandTimeout("slow")
+        return CommandResult(exit_code=0, stdout="", stderr="")
+
+
+def test_check_on_timeout_runs_the_agent_cleanup_through_sudo(tmp_path):
     worktree = tmp_path
     write_script(worktree, BACKEND)
+    run = TimeoutThenRecord()
 
-    def timed_out(argv, cwd, *, timeout, env=None, replace_env=False):
-        raise CommandTimeout("slow")
-
-    result = Git(run=timed_out).check(worktree, areas=(BACKEND,))
+    result = Git(run=run, agent_user="factory-agent").check(worktree, areas=(BACKEND,))
 
     assert result.passed is False
     assert result.failed_areas == (BACKEND,)
     assert "timed out" in result.output
+    assert run.calls[1] == (
+        [
+            "sudo",
+            "-n",
+            "-u",
+            "factory-agent",
+            "/usr/bin/pkill",
+            "-KILL",
+            "-u",
+            "factory-agent",
+        ],
+        "/",
+        None,
+        False,
+    )
+
+
+def test_check_cleans_up_a_busy_console_port_once_then_runs(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, CONSOLE)
+    run = RecordingRun()
+    ports = iter([True, False])
+
+    result = Git(
+        run=run,
+        agent_user="factory-agent",
+        port_in_use=lambda _port: next(ports),
+    ).check(worktree, areas=(CONSOLE,))
+
+    assert result.passed is True
+    assert run.calls[0][0] == [
+        "sudo",
+        "-n",
+        "-u",
+        "factory-agent",
+        "/usr/bin/pkill",
+        "-KILL",
+        "-u",
+        "factory-agent",
+    ]
+    assert run.calls[1][0][-1] == str(worktree / CONSOLE.script)
+
+
+def test_check_fails_with_a_clear_message_when_port_3000_stays_busy(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, CONSOLE)
+    run = RecordingRun()
+
+    result = Git(
+        run=run,
+        agent_user="factory-agent",
+        port_in_use=lambda _port: True,
+    ).check(worktree, areas=(CONSOLE,))
+
+    assert result.passed is False
+    assert result.failed_areas == (CONSOLE,)
+    assert "port 3000 busy" in result.output
+    assert len(run.calls) == 1
+    assert run.calls[0][0][-2:] == ["-u", "factory-agent"]
+    assert str(worktree / CONSOLE.script) not in run.calls[0][0]
 
 
 def test_commit_never_runs_hooks():

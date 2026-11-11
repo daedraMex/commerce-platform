@@ -16,6 +16,8 @@ from .shell import CommandTimeout, RunCommand, run_command
 OPENCODE_CONFIG_PATH = "tools/factory/opencode.factory.json"
 OPENCODE_BIN = "/usr/bin/opencode"
 MAX_CHECK_OUTPUT_CHARS = 4000
+AGENT_KILL_BIN = "/usr/bin/pkill"
+AGENT_KILL_TIMEOUT_SECONDS = 60
 
 BASE_ENV_ALLOWLIST = ("PATH", "HOME", "LANG", "DATABASE_URL")
 
@@ -28,6 +30,28 @@ TEST_SETTINGS = {
     "REDIS_URL": "redis://localhost:6379/0",
     "PYTEST_ADDOPTS": "-p no:cacheprovider",
 }
+
+
+def agent_cleanup_argv(agent_user: str) -> list[str]:
+    """The sudo-gated command that kills every process the agent still owns.
+
+    The factory cannot signal ``factory-agent`` processes directly: signals
+    across users fail with EPERM, so ``killpg`` from the factory user only
+    reaches sudo. Running ``pkill`` as the agent user cleans up whatever sudo
+    could not relay the timeout to (next, Playwright, Chromium).
+    """
+    return ["sudo", "-n", "-u", agent_user, AGENT_KILL_BIN, "-KILL", "-u", agent_user]
+
+
+def kill_agent_processes(run: RunCommand, agent_user: str | None) -> None:
+    """Best-effort cleanup of any agent process left by a timed-out command."""
+    if not agent_user:
+        return
+    try:
+        run(agent_cleanup_argv(agent_user), "/", timeout=AGENT_KILL_TIMEOUT_SECONDS)
+    except Exception:
+        # Cleanup is best effort; the timeout itself is the reported failure.
+        pass
 
 
 def sudo_argv(agent_user: str, argv: list[str], env: dict[str, str]) -> list[str]:
@@ -167,6 +191,7 @@ class AgentRunner:
                 replace_env=True,
             )
         except CommandTimeout:
+            kill_agent_processes(self._run, self.agent_user)
             return AgentResult(exit_code=None, stdout="", stderr="", timed_out=True)
         return AgentResult(
             exit_code=result.exit_code,
