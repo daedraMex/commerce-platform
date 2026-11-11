@@ -43,6 +43,21 @@ If ports 5432 or 6379 are already taken on your machine, override them:
 After changing backend code, rebuild the worker so it picks up the changes:
 `docker compose up -d --build worker`.
 
+## Deploying
+
+After deploying a change that adds rendition sizes or bumps
+`MEDIA_RENDITION_VERSION` (including the first deploy of renditions, when
+existing Media have none yet), create the missing renditions for every store:
+
+```bash
+uv run python manage.py regenerate_renditions --store <slug>
+```
+
+The command only writes missing keys and never rewrites an existing rendition,
+so it is safe to run again. To change how renditions are encoded, bump
+`MEDIA_RENDITION_VERSION` so they get new keys instead of overwriting cached
+objects.
+
 ## Layout
 
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv

@@ -313,6 +313,8 @@ class ProductListView(StoreScopedMixin, generics.ListAPIView):
 
 PRODUCT_IMAGE_EXAMPLE = {
     "url": "https://media.example.com/stores/1/media/abc123.jpg",
+    "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+    "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
     "role": "main",
     "position": 1,
     "alt_text": "Blue flannel blanket with a moon pattern",

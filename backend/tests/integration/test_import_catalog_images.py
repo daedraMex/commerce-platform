@@ -215,7 +215,9 @@ def test_a_file_named_twice_is_stored_once_and_reimporting_adds_nothing(tmp_path
     assert "Rows created: 0" in first_output
     assert "Rows updated: 0" in first_output
     assert "Rows unchanged: 1" in first_output
-    stored_files = [path for path in media_root.rglob("*") if path.is_file()]
+    stored_files = [
+        path for path in media_root.rglob("*") if path.is_file() and "renditions" not in path.parts
+    ]
     assert len(stored_files) == 2
 
 

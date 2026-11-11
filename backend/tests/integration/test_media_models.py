@@ -410,7 +410,7 @@ def test_media_admin_shows_a_thumbnail_in_the_list(admin_client_by_email, media_
 
     assert response.status_code == 200
     assert b"<img" in response.content
-    assert media.public_url.encode() in response.content
+    assert media.thumbnail_url.encode() in response.content
 
 
 def test_media_admin_shows_a_thumbnail_on_the_change_page(admin_client_by_email, media_root):
@@ -421,7 +421,7 @@ def test_media_admin_shows_a_thumbnail_on_the_change_page(admin_client_by_email,
 
     assert response.status_code == 200
     assert b"<img" in response.content
-    assert media.public_url.encode() in response.content
+    assert media.thumbnail_url.encode() in response.content
 
 
 def test_a_product_has_at_most_one_main_image():

@@ -102,6 +102,12 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Derived WebP renditions of public product media, named by the URL field they feed.
+# Bump MEDIA_RENDITION_VERSION when the encoding changes, so the immutable cache
+# never serves bytes from an older algorithm under the same key.
+MEDIA_RENDITION_SIZES = {"thumbnail": 320, "medium": 800}
+MEDIA_RENDITION_VERSION = 1
+
 # Public product media. R2 in staging and production; local files in development and tests.
 R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="")
 R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
