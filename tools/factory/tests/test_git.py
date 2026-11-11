@@ -439,3 +439,81 @@ def test_verify_git_version_rejects_unparseable_output():
 def test_verify_git_version_rejects_a_failed_command():
     with pytest.raises(GitVersionError, match="could not determine"):
         verify_git_version(run=RecordingRun(CommandResult(127, "", "git: command not found")))
+
+
+def test_fetch_branch_fetches_the_review_branch():
+    run = RecordingRun()
+    repo = Path("/srv/factory/repo")
+
+    Git(run=run).fetch_branch(repo, "nf/7-ticket-7")
+
+    assert run.calls == [
+        (["git", "fetch", "origin", "nf/7-ticket-7"], str(repo), None, False),
+    ]
+
+
+def test_fetch_branch_raises_when_the_fetch_fails():
+    run = RecordingRun(CommandResult(exit_code=128, stdout="", stderr="could not read from remote"))
+
+    with pytest.raises(RuntimeError, match="git fetch failed: could not read from remote"):
+        Git(run=run).fetch_branch(Path("/srv/factory/repo"), "nf/7-ticket-7")
+
+
+def test_create_worktree_from_uses_the_given_base():
+    run = RecordingRun()
+    repo = Path("/srv/factory/repo")
+    worktree = Path("/srv/factory/worktrees/nf-7-ticket-7")
+
+    Git(run=run).create_worktree_from(repo, worktree, "nf/7-ticket-7", "origin/nf/7-ticket-7")
+
+    assert run.calls == [
+        (
+            [
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                "nf/7-ticket-7",
+                str(worktree),
+                "origin/nf/7-ticket-7",
+            ],
+            str(repo),
+            None,
+            False,
+        ),
+    ]
+
+
+def test_head_sha_reads_rev_parse():
+    run = RecordingRun(CommandResult(0, "abc123\n", ""))
+
+    assert Git(run=run).head_sha(Path("/work")) == "abc123"
+    assert run.calls[0][0] == ["git", "rev-parse", "HEAD"]
+
+
+def test_head_sha_raises_when_rev_parse_fails():
+    run = RecordingRun(CommandResult(128, "", "fatal: not a git repository"))
+
+    with pytest.raises(RuntimeError, match="could not read HEAD"):
+        Git(run=run).head_sha(Path("/work"))
+
+
+def test_diff_stats_since_uses_the_given_base():
+    results = [
+        CommandResult(0, "2\t1\tbackend/apps/x/views.py\n", ""),
+        CommandResult(0, "backend/tests/test_x.py\n", ""),
+    ]
+    run = SequenceRun(results)
+
+    stats = Git(run=run).diff_stats_since(Path("/work"), "base123")
+
+    assert stats.files[0].path == "backend/apps/x/views.py"
+    assert stats.new_tests == ("backend/tests/test_x.py",)
+    assert run.calls[0][0] == ["git", "diff", "base123..HEAD", "--numstat"]
+    assert run.calls[1][0] == [
+        "git",
+        "diff",
+        "base123..HEAD",
+        "--diff-filter=A",
+        "--name-only",
+    ]

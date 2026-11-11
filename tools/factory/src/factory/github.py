@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime
 
+from .git import BOT_COMMIT_NAME
+from .reviews import CHANGES_REQUESTED, ReviewComment, ReviewFix
 from .shell import CommandResult, RunCommand, run_command
 from .tickets import Ticket, parse_blocked_by
 
@@ -155,6 +158,184 @@ class GitHub:
             and str(pr.get("headRefName", "")).startswith(branch_prefix)
         )
 
+    def list_review_fixes(
+        self,
+        *,
+        author: str,
+        owner: str,
+        branch_prefix: str = "nf/",
+        token: str | None = None,
+    ) -> list[ReviewFix]:
+        """Return open factory PRs whose latest owner review asks for changes.
+
+        A PR is a candidate only when its latest review by ``owner`` is
+        ``CHANGES_REQUESTED`` and no commit by ``author`` landed after that
+        review. Results are ordered oldest review first. Any failed ``gh`` call
+        raises, so the caller can skip review fixes and continue.
+        """
+        result = self._run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self.repo,
+                "--state",
+                "open",
+                "--limit",
+                "1000",
+                "--json",
+                "number,headRefName,author,body",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            raise GitHubError(f"gh pr list failed: {result.stderr.strip() or result.exit_code}")
+        prs = self._json_list(result.stdout, "gh pr list")
+
+        fixes: list[ReviewFix] = []
+        for pr in prs:
+            if not _same_login((pr.get("author") or {}).get("login", ""), author):
+                continue
+            branch = str(pr.get("headRefName", ""))
+            if not branch.startswith(branch_prefix):
+                continue
+            number = int(pr["number"])
+            detail = self._reviews_and_commits(number, token)
+            review, submitted_at = _latest_owner_review(detail.get("reviews") or [], owner)
+            if review is None or submitted_at is None:
+                continue
+            if review.get("state") != CHANGES_REQUESTED:
+                continue
+            if _factory_commit_after(detail.get("commits") or [], author, submitted_at):
+                continue
+            ticket_number = _ticket_number(pr.get("body", "") or "")
+            if ticket_number is None:
+                continue
+            ticket = self.get_ticket(ticket_number, token)
+            comments = self._review_comments(number, review.get("id"), token)
+            fixes.append(
+                ReviewFix(
+                    pr_number=number,
+                    branch=branch,
+                    ticket=ticket,
+                    review_body=review.get("body", "") or "",
+                    comments=comments,
+                    submitted_at=submitted_at,
+                )
+            )
+        fixes.sort(key=lambda fix: fix.submitted_at)
+        return fixes
+
+    def get_ticket(self, number: int, token: str | None = None) -> Ticket:
+        """Read one issue, for a review fix that is not a fresh ticket."""
+        result = self._run(
+            [
+                "gh",
+                "issue",
+                "view",
+                str(number),
+                "--repo",
+                self.repo,
+                "--json",
+                "number,title,body,labels",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            raise GitHubError(f"gh issue view failed: {result.stderr.strip() or result.exit_code}")
+        try:
+            obj = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GitHubError("gh issue view returned invalid JSON") from exc
+        if not isinstance(obj, dict):
+            raise GitHubError("gh issue view returned an unexpected JSON shape")
+        return self._to_ticket(obj)
+
+    def _reviews_and_commits(self, number: int, token: str | None) -> dict:
+        result = self._run(
+            [
+                "gh",
+                "pr",
+                "view",
+                str(number),
+                "--repo",
+                self.repo,
+                "--json",
+                "reviews,commits",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            raise GitHubError(f"gh pr view failed: {result.stderr.strip() or result.exit_code}")
+        try:
+            detail = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GitHubError("gh pr view returned invalid JSON") from exc
+        if not isinstance(detail, dict):
+            raise GitHubError("gh pr view returned an unexpected JSON shape")
+        return detail
+
+    def _review_comments(
+        self,
+        number: int,
+        review_id: str | None,
+        token: str | None,
+    ) -> tuple[ReviewComment, ...]:
+        if not review_id:
+            return ()
+        result = self._run(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                f"repos/{self.repo}/pulls/{number}/reviews/{review_id}/comments",
+                "--jq",
+                ".[] | {path, line, original_line, body}",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            raise GitHubError(
+                f"gh api review comments failed: {result.stderr.strip() or result.exit_code}"
+            )
+        comments: list[ReviewComment] = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise GitHubError("gh api review comments returned invalid JSON") from exc
+            line_number = obj.get("line")
+            if line_number is None:
+                line_number = obj.get("original_line")
+            comments.append(
+                ReviewComment(
+                    path=obj.get("path", "") or "",
+                    line=line_number,
+                    body=obj.get("body", "") or "",
+                )
+            )
+        return tuple(comments)
+
+    def _json_list(self, text: str, source: str) -> list[dict]:
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise GitHubError(f"{source} returned invalid JSON") from exc
+        if not isinstance(value, list):
+            raise GitHubError(f"{source} returned an unexpected JSON shape")
+        return value
+
     def add_issue_label(self, number: int, label: str, token: str) -> None:
         self._run(
             ["gh", "issue", "edit", str(number), "--repo", self.repo, "--add-label", label],
@@ -281,3 +462,50 @@ def _same_login(login: str, author: str) -> bool:
 
 def _normalize_login(login: str) -> str:
     return login.removesuffix("[bot]").removeprefix("app/")
+
+
+def _latest_owner_review(reviews: list[dict], owner: str) -> tuple[dict | None, datetime | None]:
+    """Return the owner's most recent review and when it was submitted."""
+    latest: tuple[datetime, dict] | None = None
+    for review in reviews:
+        login = (review.get("author") or {}).get("login", "")
+        if not _same_login(login, owner):
+            continue
+        submitted_at = _parse_timestamp(review.get("submittedAt", ""))
+        if submitted_at is None:
+            continue
+        if latest is None or submitted_at > latest[0]:
+            latest = (submitted_at, review)
+    if latest is None:
+        return None, None
+    return latest[1], latest[0]
+
+
+def _factory_commit_after(commits: list[dict], author: str, review_time: datetime) -> bool:
+    """True when the factory pushed a commit after the review was submitted."""
+    for commit in commits:
+        commit_time = _parse_timestamp(
+            commit.get("committedDate") or commit.get("authoredDate") or ""
+        )
+        if commit_time is None or commit_time <= review_time:
+            continue
+        for commit_author in commit.get("authors") or []:
+            login = (commit_author or {}).get("login", "")
+            name = (commit_author or {}).get("name", "")
+            if _same_login(login, author) or name == BOT_COMMIT_NAME:
+                return True
+    return False
+
+
+def _ticket_number(pr_body: str) -> int | None:
+    match = _CLOSES_RE.search(pr_body)
+    return int(match.group(1)) if match else None
+
+
+def _parse_timestamp(value: str) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None

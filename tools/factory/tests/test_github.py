@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -16,21 +17,45 @@ def read_fixture(name: str) -> str:
 class FakeGh:
     """Answer the gh calls with outputs recorded from the real CLI."""
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        prs=None,
+        pr_details=None,
+        review_comments=None,
+        issue=None,
+    ):
         self.calls = []
+        self.prs = prs
+        self.pr_details = pr_details or {}
+        self.review_comments = review_comments or []
+        self.issue = issue
 
     def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
         self.calls.append((argv, cwd, env))
         if argv[:3] == ["gh", "issue", "list"]:
             stdout = read_fixture("gh_issue_list.json")
         elif argv[:3] == ["gh", "issue", "view"]:
-            stdout = read_fixture("gh_issue_view_open.json")
+            fields = argv[argv.index("--json") + 1] if "--json" in argv else ""
+            if fields == "state":
+                stdout = read_fixture("gh_issue_view_open.json")
+            elif self.issue is not None:
+                stdout = json.dumps(self.issue)
+            else:
+                stdout = read_fixture("gh_issue_view_open.json")
         elif argv[:3] == ["gh", "pr", "list"]:
             fields = argv[argv.index("--json") + 1] if "--json" in argv else ""
-            if "author" in fields:
+            if self.prs is not None:
+                stdout = json.dumps(self.prs)
+            elif "author" in fields:
                 stdout = read_fixture("gh_pr_list_open.json")
             else:
                 stdout = read_fixture("gh_pr_list.json")
+        elif argv[:3] == ["gh", "pr", "view"]:
+            number = int(argv[3])
+            stdout = json.dumps(self.pr_details.get(number, {}))
+        elif argv[:2] == ["gh", "api"]:
+            stdout = "\n".join(json.dumps(comment) for comment in self.review_comments)
         elif argv[:3] == ["gh", "pr", "create"]:
             stdout = read_fixture("gh_pr_create.txt")
         elif argv[:3] in (["gh", "pr", "ready"], ["gh", "pr", "merge"]):
@@ -216,3 +241,250 @@ def test_open_pr_ticket_numbers_raises_on_invalid_json():
 
     with pytest.raises(GitHubError, match="invalid JSON"):
         GitHub(REPO, run=run)._open_pr_ticket_numbers("TOKEN")
+
+
+def _review(login, state, submitted_at, *, body="", review_id="R1"):
+    return {
+        "id": review_id,
+        "author": {"login": login},
+        "state": state,
+        "body": body,
+        "submittedAt": submitted_at,
+    }
+
+
+def _commit(login, committed_at, *, name="xolo-bot[bot]"):
+    return {
+        "authoredDate": committed_at,
+        "committedDate": committed_at,
+        "authors": [{"login": login, "name": name}],
+    }
+
+
+def _pr(number, *, branch="nf/7-ticket-7", login="app/xolo-bot", body="Closes #7"):
+    return {
+        "number": number,
+        "headRefName": branch,
+        "author": {"login": login},
+        "body": body,
+    }
+
+
+def _issue(number=7):
+    return {
+        "number": number,
+        "title": f"Ticket {number}",
+        "body": f"Body for #{number}",
+        "labels": [{"name": "ready-for-agent"}],
+    }
+
+
+def test_list_review_fixes_picks_only_owner_changes_requested():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review(
+                        "daedraMex",
+                        "CHANGES_REQUESTED",
+                        "2026-11-10T10:00:00Z",
+                        body="Please fix this.",
+                    )
+                ],
+                "commits": [_commit("xolo-bot[bot]", "2026-11-10T09:00:00Z")],
+            }
+        },
+        review_comments=[
+            {
+                "path": "backend/apps/x/views.py",
+                "line": 42,
+                "original_line": 42,
+                "body": "Rename this.",
+            },
+            {
+                "path": "backend/apps/x/models.py",
+                "line": None,
+                "original_line": 9,
+                "body": "This line moved.",
+            },
+        ],
+        issue=_issue(7),
+    )
+
+    fixes = GitHub(REPO, run=run).list_review_fixes(
+        author="xolo-bot", owner="daedraMex", token="TOKEN"
+    )
+
+    assert len(fixes) == 1
+    fix = fixes[0]
+    assert fix.pr_number == 101
+    assert fix.branch == "nf/7-ticket-7"
+    assert fix.ticket.number == 7
+    assert fix.ticket.title == "Ticket 7"
+    assert fix.review_body == "Please fix this."
+    assert [(c.path, c.line, c.body) for c in fix.comments] == [
+        ("backend/apps/x/views.py", 42, "Rename this."),
+        ("backend/apps/x/models.py", 9, "This line moved."),
+    ]
+    assert "/reviews/R1/comments" in run.calls[-1][0][3]
+    assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
+
+
+def test_list_review_fixes_skips_an_approved_owner_review():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("daedraMex", "APPROVED", "2026-11-10T10:00:00Z"),
+                ],
+                "commits": [],
+            }
+        },
+    )
+
+    assert GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex") == []
+
+
+def test_list_review_fixes_ignores_bot_reviews():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("app/xolo-bot", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z"),
+                ],
+                "commits": [],
+            }
+        },
+    )
+
+    assert GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex") == []
+
+
+def test_list_review_fixes_uses_the_latest_owner_review():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z"),
+                    _review("daedraMex", "APPROVED", "2026-11-10T11:00:00Z"),
+                ],
+                "commits": [],
+            }
+        },
+    )
+
+    assert GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex") == []
+
+
+def test_list_review_fixes_skips_when_a_factory_commit_landed_after_the_review():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z"),
+                ],
+                "commits": [_commit("xolo-bot[bot]", "2026-11-10T10:30:00Z")],
+            }
+        },
+    )
+
+    assert GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex") == []
+
+
+def test_list_review_fixes_accepts_a_commit_before_the_review():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z"),
+                ],
+                "commits": [_commit("xolo-bot[bot]", "2026-11-10T09:00:00Z")],
+            }
+        },
+        issue=_issue(7),
+    )
+
+    assert len(GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")) == 1
+
+
+def test_list_review_fixes_ignores_non_factory_commits_after_the_review():
+    run = FakeGh(
+        prs=[_pr(101)],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z"),
+                ],
+                "commits": [_commit("daedraMex", "2026-11-10T10:30:00Z", name="Erika Flores")],
+            }
+        },
+        issue=_issue(7),
+    )
+
+    assert len(GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")) == 1
+
+
+def test_list_review_fixes_orders_by_oldest_review():
+    run = FakeGh(
+        prs=[
+            _pr(102, branch="nf/9-ticket-9", body="Closes #9"),
+            _pr(101, branch="nf/7-ticket-7", body="Closes #7"),
+        ],
+        pr_details={
+            101: {
+                "reviews": [
+                    _review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T11:00:00Z"),
+                ],
+                "commits": [],
+            },
+            102: {
+                "reviews": [
+                    _review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z"),
+                ],
+                "commits": [],
+            },
+        },
+        issue=_issue(7),
+    )
+
+    fixes = GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")
+
+    assert [fix.pr_number for fix in fixes] == [102, 101]
+
+
+def test_list_review_fixes_ignores_prs_from_other_authors_or_branches():
+    run = FakeGh(
+        prs=[
+            _pr(101, login="daedraMex"),
+            _pr(102, branch="feat/human"),
+        ],
+    )
+
+    assert GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex") == []
+
+
+def test_list_review_fixes_raises_when_the_pr_list_fails():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=1, stdout="", stderr="network down")
+
+    with pytest.raises(GitHubError, match="network down"):
+        GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")
+
+
+def test_list_review_fixes_raises_when_the_review_view_fails():
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        if argv[:3] == ["gh", "pr", "list"]:
+            return CommandResult(exit_code=0, stdout=json.dumps([_pr(101)]), stderr="")
+        return CommandResult(exit_code=1, stdout="", stderr="review lookup failed")
+
+    with pytest.raises(GitHubError, match="review lookup failed"):
+        GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")

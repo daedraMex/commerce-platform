@@ -23,6 +23,7 @@ from .notify import (
     NullNotifier,
     PausedInfo,
     PrReadyInfo,
+    ReviewAddressedInfo,
     RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
@@ -32,7 +33,8 @@ from .outcomes import build_issue_comment
 from .pause import PauseState
 from .pr_body import build_pr_body
 from .preflight import Preflight, PreflightError, short_error
-from .prompt import compose_prompt, read_command_body
+from .prompt import compose_prompt, compose_review_prompt, read_command_body
+from .reviews import ReviewFix
 from .runner import AgentRunner
 from .sudoers import verify_sudoers_logging
 from .tickets import (
@@ -50,6 +52,7 @@ MIGRATION_LABEL = "migration"
 LOG_TAIL_LINES = 30
 FACTORY_BOT_LOGIN = "xolo-bot"
 FACTORY_BRANCH_PREFIX = "nf/"
+OWNER_LOGIN = "daedraMex"
 
 
 @dataclass(frozen=True)
@@ -100,10 +103,13 @@ class Factory:
         self.pause_state = pause_state or PauseState(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
-        token, paused_for = self._pause_reason()
+        token, open_prs, paused_for = self._run_limits()
         if paused_for is not None:
-            if self.pause_state.enter(paused_for):
-                self._notify(self.notifier.send_paused, PausedInfo(reason=paused_for))
+            self._enter_pause(paused_for)
+            return []
+        review_fix = self._select_review_fix(token)
+        if review_fix is None and open_prs >= self.settings.max_open_prs:
+            self._enter_pause(self._open_pr_pause_reason(open_prs))
             return []
         self.pause_state.clear()
         cleanup_old(
@@ -112,32 +118,34 @@ class Factory:
             remove_dir=self._remove_expired_worktree,
         )
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
-        tickets = select_tickets(
-            self.run_preflight(token=token), max_tickets=self.settings.max_tickets
-        )
+        tickets = self.run_preflight(token=token)
+        if review_fix is not None:
+            return [
+                self._execute(
+                    review_fix.ticket,
+                    lambda: self._run_review_fix(review_fix),
+                    f"#{review_fix.ticket.number} review on PR #{review_fix.pr_number}",
+                )
+            ]
         results: list[TicketResult] = []
-        for ticket in tickets:
-            started_at = self.ledger.now()
-            self.ledger.record_started(ticket.number, started_at=started_at)
-            try:
-                result = self._run_ticket(ticket)
-            except Exception as exc:
-                self.ledger.record_outcome(ticket.number, "failed", finished_at=self.ledger.now())
-                raise RunFailed(f"#{ticket.number} {ticket.title}", short_error(exc)) from exc
-            except BaseException:
-                self.ledger.record_outcome(ticket.number, "failed", finished_at=self.ledger.now())
-                raise
-            self.ledger.record_outcome(
-                ticket.number,
-                "ok" if result.ok else "stuck",
-                finished_at=self.ledger.now(),
+        for ticket in select_tickets(tickets, max_tickets=self.settings.max_tickets):
+            result = self._execute(
+                ticket,
+                lambda t=ticket: self._run_ticket(t),
+                f"#{ticket.number} {ticket.title}",
             )
             results.append(result)
             if not result.ok:
                 break
         return results
 
-    def _pause_reason(self) -> tuple[str | None, str | None]:
+    def _run_limits(self) -> tuple[str | None, int, str | None]:
+        """Mint a token, read the open-PR count and check the daily cap.
+
+        The open-PR cap is not applied here: a review fix on an existing PR
+        must still run when the cap is reached. It is checked before a new
+        ticket is picked. The daily cap does apply to every attempt.
+        """
         try:
             token = self.token_provider.mint(self.settings.repo)
             open_prs = self.github.count_open_factory_prs(
@@ -146,13 +154,55 @@ class Factory:
                 token=token,
             )
         except Exception:
-            return None, "GitHub unreachable"
-        if open_prs >= self.settings.max_open_prs:
-            noun = "PR" if open_prs == 1 else "PRs"
-            return token, f"{open_prs} {noun} waiting for review"
+            return None, 0, "GitHub unreachable"
         if self.ledger.count_today() >= self.settings.max_tickets_per_day:
-            return token, "daily limit reached"
-        return token, None
+            return token, open_prs, "daily limit reached"
+        return token, open_prs, None
+
+    def _open_pr_pause_reason(self, open_prs: int) -> str:
+        noun = "PR" if open_prs == 1 else "PRs"
+        return f"{open_prs} {noun} waiting for review"
+
+    def _enter_pause(self, reason: str) -> None:
+        if self.pause_state.enter(reason):
+            self._notify(self.notifier.send_paused, PausedInfo(reason=reason))
+
+    def _execute(self, ticket: Ticket, operation, phase: str) -> TicketResult:
+        started_at = self.ledger.now()
+        self.ledger.record_started(ticket.number, started_at=started_at)
+        try:
+            result = operation()
+        except Exception as exc:
+            self.ledger.record_outcome(ticket.number, "failed", finished_at=self.ledger.now())
+            raise RunFailed(phase, short_error(exc)) from exc
+        except BaseException:
+            self.ledger.record_outcome(ticket.number, "failed", finished_at=self.ledger.now())
+            raise
+        self.ledger.record_outcome(
+            ticket.number,
+            "ok" if result.ok else "stuck",
+            finished_at=self.ledger.now(),
+        )
+        return result
+
+    def _select_review_fix(self, token: str | None) -> ReviewFix | None:
+        """Pick the oldest review that asks for changes, or None.
+
+        Listing failures are not fatal: review fixes are skipped for this run
+        while the normal ticket flow continues. GitHub being unreachable is
+        detected earlier, in ``_run_limits``.
+        """
+        try:
+            fixes = self.github.list_review_fixes(
+                author=FACTORY_BOT_LOGIN,
+                owner=OWNER_LOGIN,
+                branch_prefix=FACTORY_BRANCH_PREFIX,
+                token=token,
+            )
+        except Exception as exc:
+            print(f"skipping review fixes: {short_error(exc)}", file=sys.stderr)
+            return None
+        return fixes[0] if fixes else None
 
     def run_preflight(self, token: str | None = None) -> list[Ticket]:
         """Run the real-tool preflight and return the tickets it listed."""
@@ -275,6 +325,163 @@ class Factory:
             failing_check=f"step budget exceeded ({self.settings.attempts} attempts)",
             attempts=made,
         )
+
+    def _run_review_fix(self, fix: ReviewFix) -> TicketResult:
+        ticket = fix.ticket
+        model = select_model(
+            ticket.labels,
+            default_model=self.settings.factory_model,
+            strong_model=self.settings.factory_strong_model,
+        )
+        branch = fix.branch
+        worktree = worktree_path(self.settings.worktrees_dir, branch)
+        self._remove_stale_ticket_worktree(worktree, branch)
+        self.git.fetch_branch(self.settings.repo_dir, branch)
+        worktree = self.git.create_worktree_from(
+            self.settings.repo_dir, worktree, branch, f"origin/{branch}"
+        )
+        base_sha = self.git.head_sha(worktree)
+        self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
+        command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
+        log_path = self._log_path(ticket)
+        deadline = time.monotonic() + self.settings.time_limit_seconds
+        made = 0
+        decisions = ""
+        feedback = ""
+        for _step in range(1, self.settings.attempts + 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return self._stuck(
+                    ticket,
+                    model=model,
+                    decisions=decisions,
+                    log_path=log_path,
+                    worktree=worktree,
+                    open_question=None,
+                    failing_check="time budget exceeded",
+                    attempts=made,
+                )
+            prompt = compose_review_prompt(
+                ticket,
+                model=model,
+                branch=branch,
+                command_template=command_template,
+                overlay=self.overlay,
+                review_body=fix.review_body,
+                comments=fix.comments,
+                feedback=feedback,
+            )
+            result = self.runner.run(
+                worktree=worktree,
+                model=model,
+                prompt=prompt,
+                timeout_seconds=int(remaining),
+            )
+            made += 1
+            self._write_log(ticket, result)
+            decisions = self.git.read_file(worktree, DECISIONS_FILE)
+            open_question = extract_open_question(decisions)
+
+            if open_question:
+                return self._stuck(
+                    ticket,
+                    model=model,
+                    decisions=decisions,
+                    log_path=log_path,
+                    worktree=worktree,
+                    open_question=open_question,
+                    failing_check="decision needed",
+                    attempts=made,
+                )
+            if result.timed_out:
+                return self._stuck(
+                    ticket,
+                    model=model,
+                    decisions=decisions,
+                    log_path=log_path,
+                    worktree=worktree,
+                    open_question=None,
+                    failing_check="time budget exceeded",
+                    attempts=made,
+                )
+            passed, check_output = self.git.check(worktree)
+            if passed:
+                return self._review_success(
+                    fix,
+                    model=model,
+                    worktree=worktree,
+                    decisions=decisions,
+                    log_path=log_path,
+                    base_sha=base_sha,
+                    attempts=made,
+                )
+            feedback = check_output
+        return self._stuck(
+            ticket,
+            model=model,
+            decisions=decisions,
+            log_path=log_path,
+            worktree=worktree,
+            open_question=None,
+            failing_check=f"step budget exceeded ({self.settings.attempts} attempts)",
+            attempts=made,
+        )
+
+    def _review_success(
+        self,
+        fix: ReviewFix,
+        *,
+        model: str,
+        worktree: Path,
+        decisions: str,
+        log_path: Path,
+        base_sha: str,
+        attempts: int,
+    ) -> TicketResult:
+        ticket = fix.ticket
+        if not self.git.commit_all(worktree, f"fix: address review on #{fix.pr_number}"):
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check="no changes made for the review",
+                attempts=attempts,
+            )
+        diff = self.git.diff_stats_since(worktree, base_sha)
+        if touches_protected_paths(f.path for f in diff.files):
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check="protected path changed",
+                attempts=attempts,
+            )
+        token = self.token_provider.mint(self.settings.repo)
+        self.git.push(worktree, fix.branch, token)
+        sha = self.git.head_sha(worktree)
+        self.github.comment(
+            fix.pr_number,
+            f"Addressed the review in {sha}; please re-review.",
+            token,
+        )
+        info = ReviewAddressedInfo(
+            pr_number=fix.pr_number,
+            ticket_number=ticket.number,
+            branch=fix.branch,
+            model=model,
+            commit_sha=sha,
+            comments=len(fix.comments),
+            pr_url=self._pr_url(fix.pr_number),
+            ticket_url=self._ticket_url(ticket.number),
+        )
+        self._notify(self.notifier.send_review_addressed, info)
+        return TicketResult(ticket=ticket, ok=True)
 
     def _success(
         self,

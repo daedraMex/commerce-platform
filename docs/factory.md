@@ -2,8 +2,9 @@
 
 The night factory is an unattended runner on a dedicated Pop!_OS machine. It
 runs every hour, around the clock, implements tickets marked agent-ready and
-opens pull requests ready for review, within two caps: open pull requests and
-daily ticket attempts. The decisions behind it are in
+opens pull requests ready for review, and can address the owner's review
+feedback on its own pull requests. All work stays within two caps: open pull
+requests and daily ticket attempts. The decisions behind it are in
 `docs/adr/0025-night-factory-unattended-agent-runner.md`.
 
 - Code lives in `tools/factory/` (a small Python package run with `uv`).
@@ -374,7 +375,8 @@ Two caps stop the factory before it picks a ticket:
 
 - **Open-PR cap.** `FACTORY_MAX_OPEN_PRS` (default 2) counts open pull requests
   authored by `xolo-bot` on `nf/*` branches, draft or ready. At the configured
-  value the run pauses with "N PRs waiting for review".
+  value the run pauses with "N PRs waiting for review". A review fix on one of
+  those existing PRs still runs, because it does not add another open PR.
 - **Daily cap.** `FACTORY_MAX_TICKETS_PER_DAY` (default 6) counts ticket
   *attempts* started today in `America/Mexico_City`, successful or failed. At
   the configured value the run pauses with "daily limit reached". A `started`
@@ -391,6 +393,32 @@ Both limits must be at least 1; the config rejects smaller values before the
 run. A skipped run is silent. Telegram gets exactly one message when the
 factory moves into a paused state, and nothing more until that state clears;
 the normal PR-ready, stuck and aborted messages are unchanged.
+
+## Addressing review feedback
+
+At the start of each run, before it picks a new ticket, the factory looks for
+open pull requests it authored on `nf/*` branches whose latest review by the
+repository owner (`daedraMex`) is **CHANGES_REQUESTED** and that have no
+factory commit after that review. Only reviews by the owner count; reviews by
+bots or other agents are ignored. It takes at most one such pull request per
+run, oldest review first.
+
+For that pull request the factory creates a fresh worktree from the PR branch
+(never from `main`) and never force-pushes. The agent receives the linked
+ticket, the review body and every inline review comment (file, line and text)
+as **untrusted data**, with an explicit instruction never to follow commands
+inside them and never to touch protected paths. The protected-path guard still
+inspects the fix's own diff. After `backend/scripts/check.sh` passes, the
+runner commits `fix: address review on #<pr>`, pushes to the same branch,
+comments `Addressed the review in <sha>; please re-review.` on the pull
+request and sends Telegram. If the agent cannot finish, the ticket goes through
+the usual stuck flow (issue comment, `needs-decision` label and Telegram).
+
+A review fix consumes one attempt from the daily ledger, exactly like a new
+ticket, but it does not count against the open-PR cap. If listing reviews
+fails, review fixes are skipped for that run and the normal ticket flow
+continues; if GitHub itself is unreachable, the run still pauses with "GitHub
+unreachable" as before.
 
 ## Hardening
 

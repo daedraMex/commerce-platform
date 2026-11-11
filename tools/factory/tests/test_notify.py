@@ -5,6 +5,7 @@ from urllib.error import HTTPError
 from factory.notify import (
     PausedInfo,
     PrReadyInfo,
+    ReviewAddressedInfo,
     RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
@@ -12,6 +13,8 @@ from factory.notify import (
     build_paused_message,
     build_pr_ready_keyboard,
     build_pr_ready_message,
+    build_review_addressed_keyboard,
+    build_review_addressed_message,
     build_run_failed_message,
     build_stuck_message,
     escape_html,
@@ -229,3 +232,25 @@ def test_telegram_notifier_logs_and_swallows_unexpected_errors(capsys):
     assert "RuntimeError" in err
     assert "token123" not in err
     assert "chat456" not in err
+
+
+def test_review_addressed_message_names_the_pr_commit_and_comments():
+    info = ReviewAddressedInfo(
+        pr_number=101,
+        ticket_number=7,
+        branch="nf/7-ticket-7",
+        model="deepseek/deepseek-flash",
+        commit_sha="a" * 40,
+        comments=3,
+        pr_url="https://github.com/r/pull/101",
+        ticket_url="https://github.com/r/issues/7",
+    )
+
+    message = build_review_addressed_message(info)
+
+    assert "Review addressed" in message
+    assert "PR #101" in message
+    assert "nf/7-ticket-7" in message
+    assert "a" * 40 in message
+    assert "Review comments: 3" in message
+    assert build_review_addressed_keyboard(info)[0][0]["text"] == "PR"

@@ -10,6 +10,7 @@ from factory.diff import DiffStats, FileChange
 from factory.ledger import AttemptLedger
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
+from factory.reviews import ReviewComment, ReviewFix
 from factory.runner import AgentResult
 from factory.shell import CommandResult
 from factory.tickets import Ticket, worktree_path
@@ -45,17 +46,27 @@ class FakeGit:
         self.committed = []
         self.pushed = []
         self.worktrees = []
+        self.created_from = []
+        self.fetched_branches = []
+        self.diff_since = []
         self.removed_worktrees = []
         self.deleted_branches = []
         self.events = []
         self.operations = []
         self.existing_worktrees = set()
         self.existing_branches = set()
+        self.head_sha_value = "a" * 40
 
     def fetch_main(self, repo_dir):
         self.events.append("fetch_main")
         if self.fetch_error is not None:
             raise self.fetch_error
+
+    def fetch_branch(self, repo_dir, branch):
+        self.events.append("fetch_branch")
+        if self.fetch_error is not None:
+            raise self.fetch_error
+        self.fetched_branches.append(branch)
 
     def verify_commit_identity(self, repo_dir):
         self.events.append("verify_commit_identity")
@@ -75,6 +86,13 @@ class FakeGit:
         self.events.append("create_worktree")
         self.operations.append(("create_worktree", branch))
         self.worktrees.append((branch, worktree))
+        return worktree
+
+    def create_worktree_from(self, repo_dir, worktree, branch, base):
+        self.events.append("create_worktree")
+        self.operations.append(("create_worktree", branch))
+        self.worktrees.append((branch, worktree))
+        self.created_from.append((branch, base))
         return worktree
 
     def remove_worktree(self, repo_dir, worktree, worktrees_dir):
@@ -114,6 +132,13 @@ class FakeGit:
     def diff_stats(self, worktree):
         return self.diff
 
+    def diff_stats_since(self, worktree, base):
+        self.diff_since.append((str(worktree), base))
+        return self.diff
+
+    def head_sha(self, worktree):
+        return self.head_sha_value
+
     def push(self, worktree, branch, token):
         self.pushed.append((branch, token))
 
@@ -129,6 +154,8 @@ class FakeGitHub:
         ready_stderr="",
         auto_merge_exit=0,
         auto_merge_stderr="",
+        review_fixes=None,
+        review_fixes_error=None,
     ):
         self.tickets = tickets or []
         self.pr_number = pr_number
@@ -138,6 +165,8 @@ class FakeGitHub:
         self.ready_stderr = ready_stderr
         self.auto_merge_exit = auto_merge_exit
         self.auto_merge_stderr = auto_merge_stderr
+        self.review_fixes = review_fixes or []
+        self.review_fixes_error = review_fixes_error
         self.created_prs = []
         self.ready_prs = []
         self.auto_merges = []
@@ -146,10 +175,17 @@ class FakeGitHub:
         self.pr_labels = []
         self.listed_with = None
         self.pr_counts = []
+        self.review_fix_calls = []
 
     def list_tickets(self, token=None):
         self.listed_with = token
         return list(self.tickets)
+
+    def list_review_fixes(self, *, author, owner, branch_prefix="nf/", token=None):
+        self.review_fix_calls.append((author, owner, branch_prefix, token))
+        if self.review_fixes_error is not None:
+            raise self.review_fixes_error
+        return list(self.review_fixes)
 
     def count_open_factory_prs(self, *, author, branch_prefix="nf/", token=None):
         self.pr_counts.append((author, branch_prefix, token))
@@ -234,6 +270,7 @@ class RecordingNotifier:
         self.stuck = []
         self.run_failed = []
         self.paused = []
+        self.review_addressed = []
 
     def send_pr_ready(self, info):
         self.pr_ready.append(info)
@@ -246,6 +283,9 @@ class RecordingNotifier:
 
     def send_paused(self, info):
         self.paused.append(info)
+
+    def send_review_addressed(self, info):
+        self.review_addressed.append(info)
 
 
 def make_settings(tmp_path):
@@ -274,6 +314,19 @@ def make_ticket(number, *, labels=()):
         number=number,
         title=f"Ticket {number}",
         labels=frozenset(labels),
+    )
+
+
+def make_review_fix(*, pr_number=101, ticket_number=7, branch="nf/7-ticket-7"):
+    return ReviewFix(
+        pr_number=pr_number,
+        branch=branch,
+        ticket=Ticket(number=ticket_number, title=f"Ticket {ticket_number}"),
+        review_body="Please rename this.",
+        comments=(
+            ReviewComment(path="backend/apps/x/views.py", line=42, body="Use a better name."),
+        ),
+        submitted_at=datetime(2026, 11, 10, 10, 0, tzinfo=MEXICO_CITY),
     )
 
 
@@ -1035,3 +1088,191 @@ def test_notification_failure_keeps_the_pr_success_and_ledger_outcome(tmp_path, 
     err = capsys.readouterr().err
     assert "token123" not in err
     assert "chat456" not in err
+
+
+def test_review_fix_runs_before_a_new_ticket_and_records_one_attempt(tmp_path):
+    fix = make_review_fix()
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        tickets=[make_ticket(8, labels={"ready-for-agent"})],
+        review_fixes=[fix],
+    )
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    ledger = AttemptLedger(tmp_path / "state")
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        ledger=ledger,
+    )
+
+    results = factory.run()
+
+    assert [result.ticket.number for result in results] == [7]
+    assert len(runner.calls) == 1
+    assert "Please rename this." in runner.calls[0]["prompt"]
+    assert "Use a better name." in runner.calls[0]["prompt"]
+    assert "untrusted data" in runner.calls[0]["prompt"]
+    assert git.fetched_branches == ["nf/7-ticket-7"]
+    assert git.created_from == [("nf/7-ticket-7", "origin/nf/7-ticket-7")]
+    assert git.committed == ["fix: address review on #101"]
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+    assert github.created_prs == []
+    assert github.comments == [
+        (
+            101,
+            f"Addressed the review in {'a' * 40}; please re-review.",
+            "TOKEN",
+        )
+    ]
+    assert len(notifier.review_addressed) == 1
+    assert notifier.review_addressed[0].pr_number == 101
+    assert ledger.count_today() == 1
+    lines = ledger.path.read_text().splitlines()
+    assert [(line.split("\t")[1], line.split("\t")[2]) for line in lines] == [
+        ("#7", "started"),
+        ("#7", "ok"),
+    ]
+
+
+def test_review_fix_takes_only_the_first_candidate_per_run(tmp_path):
+    first = make_review_fix(pr_number=101, ticket_number=7, branch="nf/7-ticket-7")
+    second = make_review_fix(pr_number=102, ticket_number=9, branch="nf/9-ticket-9")
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[first, second])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=RecordingNotifier(),
+    )
+
+    results = factory.run()
+
+    assert [result.ticket.number for result in results] == [7]
+    assert git.fetched_branches == ["nf/7-ticket-7"]
+    assert len(runner.calls) == 1
+
+
+def test_review_fix_failure_uses_the_stuck_flow(tmp_path):
+    fix = make_review_fix()
+    git = FakeGit(check_passed=False, decisions="- Tried X.")
+    github = FakeGitHub(review_fixes=[fix])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=notifier,
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == []
+    assert len(github.comments) == 1
+    assert github.comments[0][0] == 7
+    assert github.comments[0][1].startswith("The night factory could not finish")
+    assert github.issue_labels == [(7, "needs-decision", "TOKEN")]
+    assert "protected" not in notifier.stuck[0].failing_check
+
+
+def test_review_fix_protected_path_goes_stuck_without_push(tmp_path):
+    diff = DiffStats(
+        files=(FileChange(path=".github/workflows/ci.yml", added=3, deleted=0),),
+    )
+    git = FakeGit(check_passed=True, diff=diff, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=notifier,
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == []
+    assert notifier.stuck[0].failing_check == "protected path changed"
+
+
+def test_review_fix_listing_failure_is_skipped_and_a_ticket_still_runs(tmp_path, capsys):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        tickets=[make_ticket(8, labels={"ready-for-agent"})],
+        review_fixes_error=RuntimeError("reviews unavailable"),
+    )
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=RecordingNotifier(),
+    )
+
+    results = factory.run()
+
+    assert [result.ticket.number for result in results] == [8]
+    assert git.fetched_branches == []
+    assert "skipping review fixes: reviews unavailable" in capsys.readouterr().err
+
+
+def test_review_fix_runs_even_when_the_open_pr_cap_is_reached(tmp_path):
+    settings = replace(make_settings(tmp_path), max_open_prs=1)
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        review_fixes=[make_review_fix()],
+        open_factory_prs=1,
+    )
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=notifier,
+        settings=settings,
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert notifier.paused == []
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+
+
+def test_daily_cap_still_blocks_review_fixes(tmp_path):
+    now = datetime(2026, 11, 10, 10, 0, tzinfo=MEXICO_CITY)
+    settings = replace(make_settings(tmp_path), max_tickets_per_day=1)
+    ledger = AttemptLedger(settings.state_dir, clock=lambda: now)
+    ledger.record_started(1, started_at=now)
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        settings=settings,
+        ledger=ledger,
+    )
+
+    results = factory.run()
+
+    assert results == []
+    assert runner.calls == []
+    assert git.fetched_branches == []
+    assert [info.reason for info in notifier.paused] == ["daily limit reached"]

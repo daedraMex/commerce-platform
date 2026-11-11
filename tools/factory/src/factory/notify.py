@@ -33,6 +33,20 @@ class Notifier(Protocol):
 
     def send_paused(self, info: PausedInfo) -> None: ...
 
+    def send_review_addressed(self, info: ReviewAddressedInfo) -> None: ...
+
+
+@dataclass(frozen=True)
+class ReviewAddressedInfo:
+    pr_number: int
+    ticket_number: int
+    branch: str
+    model: str
+    commit_sha: str
+    comments: int
+    pr_url: str
+    ticket_url: str
+
 
 @dataclass(frozen=True)
 class PrReadyInfo:
@@ -262,6 +276,31 @@ def build_paused_message(info: PausedInfo) -> str:
     )
 
 
+def build_review_addressed_message(info: ReviewAddressedInfo) -> str:
+    return _bound_message(
+        "\n".join(
+            [
+                f"<b>Review addressed</b> — PR #{info.pr_number} (#{info.ticket_number})",
+                f"Branch: <code>{escape_html(info.branch)}</code>",
+                f"Model: <code>{escape_html(info.model)}</code>",
+                f"Commit: <code>{escape_html(info.commit_sha)}</code>",
+                f"Review comments: {info.comments}",
+            ]
+        )
+    )
+
+
+def build_review_addressed_keyboard(
+    info: ReviewAddressedInfo,
+) -> list[list[dict[str, str]]]:
+    return [
+        [
+            {"text": "PR", "url": info.pr_url},
+            {"text": "Ticket", "url": info.ticket_url},
+        ]
+    ]
+
+
 def build_pr_ready_keyboard(info: PrReadyInfo) -> list[list[dict[str, str]]]:
     return [
         [
@@ -333,6 +372,9 @@ class NullNotifier:
     def send_paused(self, info: PausedInfo) -> None:
         return None
 
+    def send_review_addressed(self, info: ReviewAddressedInfo) -> None:
+        return None
+
 
 class TelegramNotifier:
     """Send messages to one fixed chat id via the Bot API."""
@@ -353,6 +395,12 @@ class TelegramNotifier:
 
     def send_paused(self, info: PausedInfo) -> None:
         self._send(build_paused_message(info), [])
+
+    def send_review_addressed(self, info: ReviewAddressedInfo) -> None:
+        self._send(
+            build_review_addressed_message(info),
+            build_review_addressed_keyboard(info),
+        )
 
     def _send(self, text: str, keyboard: list[list[dict[str, str]]]) -> None:
         url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
