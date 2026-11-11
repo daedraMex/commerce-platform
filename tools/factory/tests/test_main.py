@@ -932,3 +932,33 @@ def test_stuck_keeps_worktree_and_includes_handoff(tmp_path):
     assert info.worktree.endswith("nf-7-ticket-7")
     assert Path(info.worktree).parent == settings.worktrees_dir
     assert info.handoff_command == f"ssh factory@host && cd {info.worktree}"
+
+
+def test_notification_failure_keeps_the_pr_success_and_ledger_outcome(tmp_path, capsys):
+    from factory.notify import TelegramNotifier
+
+    def post(url, payload):
+        raise RuntimeError(f"telegram is down: {url} {payload['chat_id']}")
+
+    notifier = TelegramNotifier("token123", "chat456", post=post)
+    ledger = AttemptLedger(tmp_path / "state")
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], pr_number=101)
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=notifier,
+        ledger=ledger,
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert len(github.created_prs) == 1
+    lines = ledger.path.read_text().splitlines()
+    assert [line.split("\t")[2] for line in lines] == ["started", "ok"]
+    err = capsys.readouterr().err
+    assert "token123" not in err
+    assert "chat456" not in err

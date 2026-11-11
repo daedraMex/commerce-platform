@@ -1,3 +1,7 @@
+import io
+import json
+from urllib.error import HTTPError
+
 from factory.notify import (
     PausedInfo,
     PrReadyInfo,
@@ -6,6 +10,7 @@ from factory.notify import (
     TelegramNotifier,
     build_handoff_command,
     build_paused_message,
+    build_pr_ready_keyboard,
     build_pr_ready_message,
     build_run_failed_message,
     build_stuck_message,
@@ -146,3 +151,81 @@ def test_telegram_notifier_posts_to_one_chat_id():
     assert "reply_markup" in sent["payload"]
     assert "token123" in sent["url"]
     assert "getUpdates" not in sent["url"]
+
+
+def _assert_valid_html(text):
+    index = 0
+    while (index := text.find("&", index)) != -1:
+        assert any(text.startswith(entity, index) for entity in ("&amp;", "&lt;", "&gt;"))
+        index += 1
+    if "<" in text:
+        assert text.rfind("<") < text.rfind(">")
+
+
+def test_pr_ready_message_stays_within_telegram_limit_with_huge_inputs():
+    tests = tuple(f"backend/tests/api/test_very_long_case_name_{i}.py" for i in range(300))
+    decisions = "- A very long decision. " * 2000
+    info = _pr_ready(new_tests=tests, decisions=decisions)
+
+    message = build_pr_ready_message(info)
+
+    assert len(message) <= 4096
+    assert message.startswith("<b>PR ready</b>")
+    assert message.endswith("… full text in the PR")
+    assert "+" in message and "more" in message
+    assert build_pr_ready_keyboard(info)[0][0]["text"] == "PR"
+    _assert_valid_html(message)
+
+
+def test_pr_ready_message_truncates_new_tests_before_decisions():
+    tests = tuple(f"backend/tests/api/test_case_{i}.py" for i in range(500))
+    decisions = "- Keep this decision."
+    message = build_pr_ready_message(_pr_ready(new_tests=tests, decisions=decisions))
+
+    assert len(message) <= 4096
+    assert decisions in message
+    assert "+" in message and "more" in message
+    assert message.endswith("… full text in the PR")
+
+
+def test_pr_ready_message_truncates_decisions_without_splitting_entities_or_tags():
+    decisions = "<&>" * 5000
+    message = build_pr_ready_message(_pr_ready(new_tests=(), decisions=decisions))
+
+    assert len(message) <= 4096
+    assert message.startswith("<b>PR ready</b>")
+    assert "<b>Decisions</b>" in message
+    assert message.endswith("… full text in the PR")
+    _assert_valid_html(message)
+
+
+def test_telegram_notifier_logs_and_swallows_http_errors(capsys):
+    def post(url, payload):
+        body = io.BytesIO(
+            json.dumps({"ok": False, "description": "Bad Request: message is too long"}).encode()
+        )
+        raise HTTPError(url, 400, "Bad Request", {}, body)
+
+    notifier = TelegramNotifier("token123", "chat456", post=post)
+
+    notifier.send_pr_ready(_pr_ready())
+
+    err = capsys.readouterr().err
+    assert "status=400" in err
+    assert "message is too long" in err
+    assert "token123" not in err
+    assert "chat456" not in err
+
+
+def test_telegram_notifier_logs_and_swallows_unexpected_errors(capsys):
+    def post(url, payload):
+        raise RuntimeError(f"{url} {payload['chat_id']}")
+
+    notifier = TelegramNotifier("token123", "chat456", post=post)
+
+    notifier.send_stuck(_stuck())
+
+    err = capsys.readouterr().err
+    assert "RuntimeError" in err
+    assert "token123" not in err
+    assert "chat456" not in err
