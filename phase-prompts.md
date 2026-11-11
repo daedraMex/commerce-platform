@@ -318,6 +318,10 @@ apps/inventory
   later as a data change. A transfer between stores is an outbound and an inbound
   movement with reason=transfer. Reservation must lock the row (select_for_update)
   to avoid overselling under concurrency.
+- Squishies sell both as sealed boxes and as loose pieces: separate variants, each
+  with its own SKU and stock. Add an "open box" stock movement that converts one
+  sealed box into N loose pieces (outbound 1 box, inbound N pieces) as one recorded
+  operation with its reason, so stock never drifts.
 - Exposed to other modules through a StockService port.
 
 apps/orders
@@ -465,6 +469,11 @@ Phase 8 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
 Goal: the anime store and the external channels.
 - The anime store on the same storefront: its domain and its theme, no new app.
+- Product lines: new lines (stickers, notebooks, markers, squishies, bags and
+  backpacks) are categories of the anime store when they share its anime/kawaii
+  audience; a line becomes a new store only when it has a different buyer (for
+  example generic kids' toys bought by parents). home stays separate. Stores are
+  data (create_store) and categories are data (ADR-0024).
 - apps/integrations:
   - TikTok Shop: a Celery Beat task that imports TikTok orders as Order with
     channel=tiktok (idempotent by external_id) and pushes stock levels to TikTok.
@@ -509,7 +518,10 @@ Goal: scheduled, validated and approved social media posts.
     (shots, duration, hook, on-screen text) in the style of the reference videos. The
     staff records the videos and uploads them through Quetzal (Phase 4d); there is no
     AI-generated video. The bundle recommendation logic is shared with Phase 12
-    (suggested bundles); design it once.
+    (suggested bundles); design it once. A set is a bundle composed by
+    recommendation (x pieces of x models, based on what sells) and approved by
+    staff. A bundle has no stock of its own: its availability is computed from its
+    components' loose-piece stock, and selling one decrements the components.
 - Celery Beat creates posts from schedules; rejected posts regenerate at most twice,
   then go to needs_review. Add a social.propose_post permission for content_editor
   (a new data migration, ADR-0021); approval requires social.approve_post, so posts
