@@ -177,7 +177,10 @@ def test_schema_documents_token_refresh_with_an_example_per_status(schema):
     operation = schema["paths"]["/api/v1/auth/token/refresh/"]["post"]
 
     success = operation["responses"]["200"]["content"]["application/json"]
-    assert any("access" in example["value"] for example in success["examples"].values())
+    assert any(
+        "access" in example["value"] and "refresh" in example["value"]
+        for example in success["examples"].values()
+    )
 
     validation = operation["responses"]["400"]["content"]["application/problem+json"]
     assert any(
@@ -189,6 +192,24 @@ def test_schema_documents_token_refresh_with_an_example_per_status(schema):
     assert any(
         example["value"]["code"] == "token_invalid" for example in unauthorized["examples"].values()
     )
+
+
+def test_schema_documents_token_refresh_response_as_a_token_pair(schema):
+    component = schema["components"]["schemas"]["TokenRefreshResponse"]
+
+    assert set(component["required"]) == {"access", "refresh"}
+
+
+def test_schema_documents_logout_with_an_example_per_status(schema):
+    operation = schema["paths"]["/api/v1/auth/logout/"]["post"]
+
+    assert operation["requestBody"]["content"]["application/json"]["schema"] == {
+        "$ref": "#/components/schemas/LogoutRequest"
+    }
+    assert "204" in operation["responses"]
+    assert "content" not in operation["responses"]["204"]
+    assert _example_codes(operation, "400") == {"validation_error"}
+    assert _example_codes(operation, "401") == {"not_authenticated", "token_invalid"}
 
 
 def _example_codes(operation, status):

@@ -1,6 +1,8 @@
+from django.core.exceptions import ObjectDoesNotExist
 from rest_framework import serializers
 from rest_framework.exceptions import AuthenticationFailed
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 
 
 class InvalidCredentials(AuthenticationFailed):
@@ -16,6 +18,23 @@ class EmailTokenObtainPairSerializer(TokenObtainPairSerializer):
             return super().validate(attrs)
         except AuthenticationFailed as exc:
             raise InvalidCredentials() from exc
+
+
+class RefreshTokenInvalid(InvalidToken):
+    """One answer for every unusable refresh token, so callers cannot tell why it failed."""
+
+    default_detail = "Token is invalid"
+
+
+class RotatingTokenRefreshSerializer(TokenRefreshSerializer):
+    """Rotates the refresh token, and reports a blacklisted, expired or malformed token,
+    or one whose user is inactive or gone, the same way."""
+
+    def validate(self, attrs):
+        try:
+            return super().validate(attrs)
+        except (TokenError, AuthenticationFailed, ObjectDoesNotExist) as exc:
+            raise RefreshTokenInvalid() from exc
 
 
 class TokenObtainRequestSerializer(serializers.Serializer):
@@ -34,6 +53,13 @@ class TokenPairResponseSerializer(serializers.Serializer):
 
 class TokenRefreshResponseSerializer(serializers.Serializer):
     access = serializers.CharField()
+    refresh = serializers.CharField(
+        help_text="Replaces the refresh token sent, which can no longer be used."
+    )
+
+
+class LogoutRequestSerializer(serializers.Serializer):
+    refresh = serializers.CharField(help_text="Your refresh token to invalidate.")
 
 
 class StaffStoreSerializer(serializers.Serializer):
