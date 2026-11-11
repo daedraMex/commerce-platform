@@ -138,6 +138,11 @@ class Git:
         if result.exit_code != 0:
             raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
 
+    def fetch_branch(self, repo_dir: Path, branch: str) -> None:
+        result = self._run(["git", "fetch", "origin", branch], str(repo_dir), timeout=300)
+        if result.exit_code != 0:
+            raise RuntimeError(f"git fetch failed: {result.stderr.strip()}")
+
     def worktree_exists(self, repo_dir: Path, worktree: Path) -> bool:
         result = self._run(["git", "worktree", "list", "--porcelain"], str(repo_dir), timeout=120)
         if result.exit_code != 0:
@@ -180,8 +185,11 @@ class Git:
         return result.exit_code == 0
 
     def create_worktree(self, repo_dir: Path, worktree: Path, branch: str) -> Path:
+        return self.create_worktree_from(repo_dir, worktree, branch, "origin/main")
+
+    def create_worktree_from(self, repo_dir: Path, worktree: Path, branch: str, base: str) -> Path:
         result = self._run(
-            ["git", "worktree", "add", "-b", branch, str(worktree), "origin/main"],
+            ["git", "worktree", "add", "-b", branch, str(worktree), base],
             str(repo_dir),
             timeout=300,
         )
@@ -264,12 +272,29 @@ class Git:
             output += ("\n" if output else "") + result.stderr
         return result.exit_code == 0, truncate_check_output(output.strip())
 
+    def head_sha(self, worktree: Path) -> str:
+        result = self._run(["git", "rev-parse", "HEAD"], str(worktree), timeout=60)
+        if result.exit_code != 0:
+            raise RuntimeError(f"could not read HEAD: {result.stderr.strip()}")
+        return result.stdout.strip()
+
     def diff_stats(self, worktree: Path) -> DiffStats:
         numstat = self._run(
             ["git", "diff", "origin/main...HEAD", "--numstat"], str(worktree), timeout=120
         ).stdout
         new_files = self._run(
             ["git", "diff", "origin/main...HEAD", "--diff-filter=A", "--name-only"],
+            str(worktree),
+            timeout=120,
+        ).stdout.splitlines()
+        return build_diff_stats(numstat, new_files)
+
+    def diff_stats_since(self, worktree: Path, base: str) -> DiffStats:
+        numstat = self._run(
+            ["git", "diff", f"{base}..HEAD", "--numstat"], str(worktree), timeout=120
+        ).stdout
+        new_files = self._run(
+            ["git", "diff", f"{base}..HEAD", "--diff-filter=A", "--name-only"],
             str(worktree),
             timeout=120,
         ).stdout.splitlines()
