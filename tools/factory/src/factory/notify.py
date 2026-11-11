@@ -9,11 +9,19 @@ the log is referenced by path, never by content.
 from __future__ import annotations
 
 import json
+import logging
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 from urllib import request
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
+
+TELEGRAM_MAX_MESSAGE_CHARS = 4096
+TRUNCATION_NOTICE = "… full text in the PR"
+
+logger = logging.getLogger(__name__)
+logger.addHandler(logging.NullHandler())
 
 
 class Notifier(Protocol):
@@ -71,20 +79,141 @@ def escape_html(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def _safe_prefix(text: str, limit: int) -> str:
+    """The longest prefix that fits and never splits an HTML entity or tag."""
+    if limit <= 0:
+        return ""
+    if len(text) <= limit:
+        return text
+    index = 0
+    last_safe = 0
+    while index < limit:
+        char = text[index]
+        if char == "<":
+            end = text.find(">", index)
+            if end == -1 or end >= limit:
+                return text[:index]
+            index = end + 1
+            last_safe = index
+        elif char == "&":
+            end = text.find(";", index)
+            if end == -1 or end >= limit:
+                return text[:index]
+            index = end + 1
+            last_safe = index
+        else:
+            index += 1
+            last_safe = index
+    return text[:last_safe]
+
+
+def _tags_to_close(text: str) -> str:
+    open_tags: list[str] = []
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "<":
+            end = text.find(">", index)
+            if end == -1:
+                break
+            tag = text[index + 1 : end].strip()
+            if tag.startswith("/"):
+                name = tag[1:].split()[0].lower()
+                for position in range(len(open_tags) - 1, -1, -1):
+                    if open_tags[position] == name:
+                        del open_tags[position:]
+                        break
+            elif tag and not tag.startswith("!") and not tag.endswith("/"):
+                open_tags.append(tag.split()[0].lower())
+            index = end + 1
+        elif char == "&":
+            end = text.find(";", index)
+            if end == -1:
+                break
+            index = end + 1
+        else:
+            index += 1
+    return "".join(f"</{name}>" for name in reversed(open_tags))
+
+
+def _bound_message(text: str) -> str:
+    if len(text) <= TELEGRAM_MAX_MESSAGE_CHARS:
+        return text
+    limit = TELEGRAM_MAX_MESSAGE_CHARS - len(TRUNCATION_NOTICE) - 1
+    while limit > 0:
+        prefix = _safe_prefix(text, limit)
+        result = prefix.rstrip() + _tags_to_close(prefix) + "\n" + TRUNCATION_NOTICE
+        if len(result) <= TELEGRAM_MAX_MESSAGE_CHARS:
+            return result
+        limit -= len(result) - TELEGRAM_MAX_MESSAGE_CHARS
+    return _safe_prefix(text, TELEGRAM_MAX_MESSAGE_CHARS)
+
+
+def _fit_new_tests(tests: tuple[str, ...], limit: int) -> str | None:
+    full = "New tests: " + ", ".join(tests)
+    if len(full) <= limit:
+        return full
+    prefix = "New tests: "
+    kept: list[str] = []
+    for index, test in enumerate(tests):
+        remaining = len(tests) - index - 1
+        candidate = prefix + ", ".join([*kept, test])
+        if remaining:
+            candidate += f", +{remaining} more"
+        if len(candidate) <= limit:
+            kept.append(test)
+        else:
+            break
+    remaining = len(tests) - len(kept)
+    if not kept:
+        minimal = prefix + f"+{remaining} more"
+        return minimal if len(minimal) <= limit else None
+    return prefix + ", ".join(kept) + f", +{remaining} more"
+
+
 def build_pr_ready_message(info: PrReadyInfo) -> str:
-    lines = [
-        f"<b>PR ready</b> — #{info.ticket_number} {escape_html(info.ticket_title)}",
-        f"Branch: <code>{escape_html(info.branch)}</code>",
-        f"Model: <code>{escape_html(info.model)}</code>",
-        f"Check: {escape_html(info.check_status)}",
-        f"Migrations: {'yes' if info.migrations_changed else 'no'}",
-        f"Files: {len(info.files)} (+{_sum(info.files, 1)}/−{_sum(info.files, 2)})",
-    ]
-    if info.new_tests:
-        lines.append("New tests: " + ", ".join(escape_html(t) for t in info.new_tests))
-    if info.decisions.strip():
-        lines += ["", "<b>Decisions</b>", "", escape_html(info.decisions.strip())]
-    return "\n".join(lines)
+    header = "\n".join(
+        [
+            f"<b>PR ready</b> — #{info.ticket_number} {escape_html(info.ticket_title)}",
+            f"Branch: <code>{escape_html(info.branch)}</code>",
+            f"Model: <code>{escape_html(info.model)}</code>",
+            f"Check: {escape_html(info.check_status)}",
+            f"Migrations: {'yes' if info.migrations_changed else 'no'}",
+            f"Files: {len(info.files)} (+{_sum(info.files, 1)}/−{_sum(info.files, 2)})",
+        ]
+    )
+    tests = tuple(escape_html(test) for test in info.new_tests)
+    decisions = escape_html(info.decisions.strip())
+
+    def render(tests_line: str | None, decisions_text: str, *, truncated: bool) -> str:
+        parts = [header]
+        if tests_line:
+            parts.append(tests_line)
+        if decisions_text:
+            parts += ["", "<b>Decisions</b>", "", decisions_text]
+        if truncated:
+            parts += ["", TRUNCATION_NOTICE]
+        return "\n".join(parts)
+
+    tests_line = "New tests: " + ", ".join(tests) if tests else None
+    message = render(tests_line, decisions, truncated=False)
+    if len(message) <= TELEGRAM_MAX_MESSAGE_CHARS:
+        return message
+
+    tests_line = None
+    if tests:
+        base = render(None, decisions, truncated=True)
+        tests_line = _fit_new_tests(tests, TELEGRAM_MAX_MESSAGE_CHARS - len(base) - 1)
+        if tests_line is None:
+            tests_line = f"New tests: +{len(tests)} more"
+    message = render(tests_line, decisions, truncated=True)
+    if len(message) <= TELEGRAM_MAX_MESSAGE_CHARS:
+        return message
+
+    base = render(tests_line, "", truncated=True)
+    available = TELEGRAM_MAX_MESSAGE_CHARS - len(base) - len("\n\n<b>Decisions</b>\n\n")
+    decisions = _safe_prefix(decisions, available).rstrip()
+    return _bound_message(render(tests_line, decisions, truncated=True))
 
 
 def build_handoff_command(*, host: str | None, worktree: str) -> str:
@@ -108,24 +237,28 @@ def build_stuck_message(info: StuckInfo) -> str:
         f"Worktree: <code>{escape_html(info.worktree)}</code>",
         f"Enter: <code>{escape_html(info.handoff_command)}</code>",
     ]
-    return "\n".join(lines)
+    return _bound_message("\n".join(lines))
 
 
 def build_run_failed_message(info: RunFailedInfo) -> str:
-    return "\n".join(
-        [
-            "<b>Night factory aborted</b>",
-            escape_html(info.reason),
-        ]
+    return _bound_message(
+        "\n".join(
+            [
+                "<b>Night factory aborted</b>",
+                escape_html(info.reason),
+            ]
+        )
     )
 
 
 def build_paused_message(info: PausedInfo) -> str:
-    return "\n".join(
-        [
-            "<b>Night factory paused</b>",
-            escape_html(info.reason),
-        ]
+    return _bound_message(
+        "\n".join(
+            [
+                "<b>Night factory paused</b>",
+                escape_html(info.reason),
+            ]
+        )
     )
 
 
@@ -151,13 +284,38 @@ def build_stuck_keyboard(info: StuckInfo) -> list[list[dict[str, str]]]:
 PostFn = Callable[[str, dict], None]
 
 
+class TelegramError(RuntimeError):
+    def __init__(self, description: str, *, status: int | None = None):
+        self.status = status
+        self.description = description
+        super().__init__(description)
+
+
+def _telegram_description(exc: HTTPError) -> str:
+    try:
+        body = exc.read().decode("utf-8", "replace")
+    except Exception:
+        return str(getattr(exc, "reason", ""))
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return body.strip()
+    description = payload.get("description")
+    if isinstance(description, str) and description.strip():
+        return description
+    return body.strip()
+
+
 def _http_post(url: str, payload: dict) -> None:
     data = json.dumps(payload).encode("utf-8")
     req = request.Request(url, data=data, headers={"Content-Type": "application/json"})
     try:
-        request.urlopen(req, timeout=30)
+        with request.urlopen(req, timeout=30) as response:
+            response.read()
+    except HTTPError as exc:
+        raise TelegramError(_telegram_description(exc), status=exc.code) from exc
     except URLError as exc:
-        raise RuntimeError(f"Telegram send failed: {exc}") from exc
+        raise TelegramError(str(exc.reason)) from exc
 
 
 class NullNotifier:
@@ -206,7 +364,33 @@ class TelegramNotifier:
         }
         if keyboard:
             payload["reply_markup"] = json.dumps({"inline_keyboard": keyboard})
-        self._post(url, payload)
+        try:
+            self._post(url, payload)
+        except TelegramError as exc:
+            self._log_failure(exc.status, exc.description)
+        except HTTPError as exc:
+            self._log_failure(exc.code, _telegram_description(exc))
+        except URLError as exc:
+            self._log_failure(None, str(exc.reason))
+        except Exception as exc:
+            self._log_failure(None, f"{type(exc).__name__}: {exc}")
+
+    def _log_failure(self, status: int | None, description: str) -> None:
+        description = self._redact(description)
+        if status is None:
+            message = f"Telegram notification failed: {description}"
+        else:
+            message = f"Telegram notification failed: status={status} description={description}"
+        logger.error(message)
+        print(message, file=sys.stderr)
+
+    def _redact(self, text: str) -> str:
+        text = str(text)
+        if self._bot_token:
+            text = text.replace(self._bot_token, "<redacted>")
+        if self._chat_id:
+            text = text.replace(self._chat_id, "<redacted>")
+        return text
 
 
 def _sum(files: tuple[tuple[str, int, int], ...], index: int) -> int:

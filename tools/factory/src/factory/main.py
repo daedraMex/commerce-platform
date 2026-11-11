@@ -103,7 +103,7 @@ class Factory:
         token, paused_for = self._pause_reason()
         if paused_for is not None:
             if self.pause_state.enter(paused_for):
-                self.notifier.send_paused(PausedInfo(reason=paused_for))
+                self._notify(self.notifier.send_paused, PausedInfo(reason=paused_for))
             return []
         self.pause_state.clear()
         cleanup_old(
@@ -328,7 +328,7 @@ class Factory:
             diff_url=self._diff_url(pr_number),
             ticket_url=self._ticket_url(ticket.number),
         )
-        self.notifier.send_pr_ready(info)
+        self._notify(self.notifier.send_pr_ready, info)
         return TicketResult(ticket=ticket, ok=True)
 
     def _stuck(
@@ -369,8 +369,15 @@ class Factory:
                 host=self.settings.handoff_host, worktree=str(worktree)
             ),
         )
-        self.notifier.send_stuck(info)
+        self._notify(self.notifier.send_stuck, info)
         return TicketResult(ticket=ticket, ok=False)
+
+    def _notify(self, send, info) -> None:
+        """Notifications are best effort; a delivery failure never changes the outcome."""
+        try:
+            send(info)
+        except Exception as exc:
+            print(f"notification failed: {type(exc).__name__}", file=sys.stderr)
 
     def _log_path(self, ticket: Ticket) -> Path:
         self.settings.logs_dir.mkdir(parents=True, exist_ok=True)
