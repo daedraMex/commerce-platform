@@ -341,13 +341,15 @@ apps/orders
   with a minimum margin per piece checked against the variant's cost and each channel's
   commission. Wholesale is sold mainly through direct channels (the WhatsApp sales agent,
   ROADMAP Phase 10); retail through TikTok Shop and the storefront.
-- Two bundle kinds. A fixed bundle always has the same components (the starter kit for
-  resellers and the squishy sets). An assorted bundle is N pieces drawn from a pool (the
-  variants of one product or a collection) with optional rules such as a maximum per
-  variant; it is sellable when the pool has enough stock under those rules. At order time
-  the system picks the mix highest stock first, reserves and decrements each chosen
-  variant, and the order lists the exact pieces to pack (for example 4 Tanjiro, 5 Nezuko
-  and 3 Zenitsu).
+- Selling bundles is part of this phase: staff create them by hand with Bundle and
+  BundleItem. Keychain dozens and the starter kit are products from day one and need no
+  sales history. There are two bundle kinds. A fixed bundle always has the same components
+  (the starter kit for resellers and the squishy sets). An assorted bundle is N pieces drawn
+  from a pool (the variants of one product or a collection) with optional rules such as a
+  maximum per variant; it is sellable when the pool has enough stock under those rules. At
+  order time the system picks the mix highest stock first, reserves and decrements each
+  chosen variant, and the order lists the exact pieces to pack (for example 4 Tanjiro,
+  5 Nezuko and 3 Zenitsu).
 - Map OutOfStock and InvalidTransition to 409 in the domain exception handler.
 
 Analytics readiness (issue #1, analytics): later reports read orders directly, so from
@@ -546,14 +548,9 @@ Goal: scheduled, validated and approved social media posts.
   - Video script use case: recommends product bundles and writes recording scripts
     (shots, duration, hook, on-screen text) in the style of the reference videos. The
     staff records the videos and uploads them through Quetzal (Phase 4d); there is no
-    AI-generated video. The bundle recommendation logic is shared with Phase 12
-    (suggested bundles); design it once. There are fixed bundles, whose components are
-    always the same (the starter kit for resellers and the squishy sets), and assorted
-    bundles, which draw N pieces from a pool (the variants of one product or a
-    collection) with optional rules such as a maximum per variant, like an assorted
-    dozen of Demon Slayer keychains. A bundle has no stock of its own: its availability
-    is computed from its components' stock, and selling one decrements each chosen
-    component.
+    AI-generated video. Selling fixed and assorted bundles is already part of Phase 5
+    (Bundle and BundleItem); here the agents only recommend them. The bundle
+    recommendation logic is shared with Phase 12 (suggested bundles); design it once.
 - Celery Beat creates posts from schedules; rejected posts regenerate at most twice,
   then go to needs_review. Add a social.propose_post permission for content_editor
   (a new data migration, ADR-0021); approval requires social.approve_post, so posts
@@ -614,18 +611,14 @@ Goal: a customer app for every store.
 ```
 Phase 12 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
-Goal: raise the average ticket with combinations that already sell together.
+Goal: raise the average ticket by recommending combinations that already sell together.
 - Basket analysis over OrderItem (frequent pairs, margin, stock).
-- `@paquetes` agent that names and describes them; Bundle and BundleItem as drafts with
-  approval; selling bundles in the web stores. Bundle recommendation is shared with Phase 9
-  (video scripts) and designed once. There are fixed bundles, whose components are always the
-  same (the starter kit for resellers and the squishy sets), and assorted bundles, which draw
-  N pieces from a pool (the variants of one product or a collection) with optional rules such
-  as a maximum per variant, like an assorted dozen of keychains or 12 Spider-Man keychains
-  mixing the blue and red colors. A bundle has no stock of its own: its availability is
-  computed from its components' stock, and selling one decrements each chosen component; the
-  order lists the exact pieces to pack.
+- `@paquetes` agent that names and describes bundles and proposes drafts for approval on the
+  Bundle and BundleItem that already exist from Phase 5. This phase only recommends bundles;
+  selling fixed and assorted bundles belongs to Phase 5. Bundle recommendation is shared with
+  Phase 9 (video scripts) and designed once. Examples: an assorted dozen of keychains or 12
+  Spider-Man keychains mixing the blue and red colors.
 ```
 
-**Done when:** the weekly suggestion generates a bundle, you approve it and it can be bought.
+**Done when:** the weekly suggestion proposes a bundle, you approve it and it can be sold through the Phase 5 flow.
 **Requirement:** at least a few months of sales history.

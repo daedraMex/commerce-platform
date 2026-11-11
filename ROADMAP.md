@@ -200,14 +200,17 @@ registrada con su motivo), para que el stock nunca se descuadre.
 1, 6 y 12 piezas) con un margen mínimo por pieza que se valida contra el costo y la comisión de
 cada canal. El mayoreo se vende sobre todo por canales directos (el agente de ventas de WhatsApp
 de la fase 10); el menudeo, por TikTok Shop y el storefront.
-**Paquetes:** hay dos tipos. El paquete fijo siempre lleva los mismos componentes (el kit de
-inicio para revendedores y los sets de squishies). El paquete surtido lleva N piezas de un
-conjunto (las variantes de un producto o una colección) con reglas opcionales como un máximo
-por variante; se puede vender cuando el conjunto tiene stock suficiente bajo esas reglas. Al
-tomar el pedido el sistema elige la mezcla empezando por la variante con más stock, reserva y
-descuenta cada variante elegida, y el pedido lista las piezas exactas que hay que empacar (por
-ejemplo, 4 Tanjiro, 5 Nezuko y 3 Zenitsu). Una docena surtida de llaveros de Demon Slayer o 12
-llaveros de Spider-Man mezclando los colores azul y rojo son paquetes surtidos.
+**Paquetes:** la venta de paquetes es parte de esta fase; el staff los crea a mano con `Bundle`
+y `BundleItem`, porque los llaveros por docena y el kit de inicio son productos desde el primer
+día y no necesitan historial de ventas. Hay dos tipos. El paquete fijo siempre lleva los mismos
+componentes (el kit de inicio para revendedores y los sets de squishies). El paquete surtido
+lleva N piezas de un conjunto (las variantes de un producto o una colección) con reglas
+opcionales como un máximo por variante; se puede vender cuando el conjunto tiene stock
+suficiente bajo esas reglas. Al tomar el pedido el sistema elige la mezcla empezando por la
+variante con más stock, reserva y descuenta cada variante elegida, y el pedido lista las piezas
+exactas que hay que empacar (por ejemplo, 4 Tanjiro, 5 Nezuko y 3 Zenitsu). Una docena surtida
+de llaveros de Demon Slayer o 12 llaveros de Spider-Man mezclando los colores azul y rojo son
+paquetes surtidos.
 **Criterio de salida:** un pedido descuenta stock en una sola transacción y pedir de más de una variante
 que se vende desde stock devuelve 409 (vender sin stock una variante sobre pedido se decide en el
 /grill-with-docs de la fase 5).
@@ -271,7 +274,7 @@ una opción obligatoria "Personaje" (una variante por personaje o pose, cada una
 SKU, stock y foto) y una opción "Color" opcional solo cuando un personaje viene en varios
 colores (por ejemplo, Spider-Man azul y rojo). Nunca se usa "Color" para decir el personaje:
 rompe los filtros del storefront, los feeds de catálogo y el texto que escriben los agentes.
-Talla y material son atributos de la categoría, iguales para todas las variantes.
+Tamaño y material son atributos de la categoría, iguales para todas las variantes.
 **Criterio de salida:** una venta en TikTok Shop aparece como pedido y descuenta stock.
 
 ### Fase 9 — Plataforma de agentes y publicación en Instagram
@@ -284,12 +287,9 @@ Talla y material son atributos de la categoría, iguales para todas las variante
 - Los agentes también recomiendan paquetes de productos y escriben guiones de grabación
   (tomas, duración, gancho, texto en pantalla) al estilo de los videos de referencia; el
   staff graba los videos y los sube por Quetzal (fase 4d). Nada de video generado por IA.
-  La lógica de paquetes se comparte con la fase 12 y se diseña una sola vez: hay paquetes fijos,
-  que siempre llevan los mismos componentes (el kit de inicio para revendedores y los sets de
-  squishies), y paquetes surtidos, que llevan N piezas de un conjunto (las variantes de un
-  producto o una colección) con reglas opcionales como un máximo por variante, como una docena
-  surtida de llaveros de Demon Slayer. Un paquete no tiene stock propio: su disponibilidad se
-  calcula con el stock de sus componentes y venderlo descuenta cada componente elegido.
+  La venta de paquetes fijos y surtidos ya existe desde la fase 5 (`Bundle` y `BundleItem`);
+  aquí los agentes solo los recomiendan. La lógica de recomendación se comparte con la fase 12
+  y se diseña una sola vez.
 - Menciones desde Ghosty Teams: agentes webhook que llegan a `/api/v1/ops/agents/invoke/`,
   con verificación de origen, permisos del usuario y tope de relevos entre agentes.
 - `evals/` con dataset y graders por agente, corriendo en el CI cuando cambian los prompts.
@@ -317,18 +317,15 @@ link y el pedido aparece como venta de esa conversación.
 responde, la conversación pasa a ventas.
 
 ### Fase 12 — Paquetes sugeridos
-**Objetivo:** subir el ticket promedio con combinaciones que ya se venden juntas.
+**Objetivo:** subir el ticket promedio recomendando combinaciones que ya se venden juntas.
 **Entregables:** análisis de canasta sobre `OrderItem` (pares frecuentes, margen, stock);
-agente `@paquetes` que nombra y describe; `Bundle` y `BundleItem` como borrador con aprobación;
-venta de paquetes en las tiendas web. La recomendación de paquetes se comparte con la fase 9
-(guiones de video) y se diseña una sola vez. Hay paquetes fijos, que siempre llevan los mismos
-componentes (el kit de inicio para revendedores y los sets de squishies), y paquetes surtidos,
-que llevan N piezas de un conjunto (las variantes de un producto o una colección) con reglas
-opcionales como un máximo por variante, como una docena surtida de llaveros o 12 llaveros de
-Spider-Man mezclando los colores azul y rojo. Un paquete no tiene stock propio: su
-disponibilidad se calcula con el stock de sus componentes y venderlo descuenta cada componente
-elegido; el pedido lista las piezas exactas que hay que empacar.
-**Criterio de salida:** la sugerencia semanal genera un paquete, lo apruebas y se puede comprar.
+agente `@paquetes` que nombra y describe y propone borradores sobre los `Bundle` y `BundleItem`
+que ya existen desde la fase 5, para aprobación. Esta fase solo recomienda paquetes; la venta
+de paquetes fijos y surtidos es de la fase 5. La lógica de recomendación se comparte con la
+fase 9 (guiones de video) y se diseña una sola vez. Ejemplos de recomendación: una docena
+surtida de llaveros o 12 llaveros de Spider-Man mezclando los colores azul y rojo.
+**Criterio de salida:** la sugerencia semanal propone un paquete, lo apruebas y se puede vender
+con el flujo de la fase 5.
 **Requisito:** al menos unos meses de historial de ventas.
 
 ### Fase 13 — Observabilidad y endurecimiento
