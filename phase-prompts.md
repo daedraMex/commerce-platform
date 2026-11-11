@@ -138,7 +138,7 @@ Phase 3 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
 Goal: stores and store-scoped role-based access control.
 - apps/stores: Store (slug unique, name, domain) and a `create_store` management command.
-  The `anime` and `home` stores are created with that command, never with a migration.
+  The `anime`, `kawaii` and `home` stores are created with that command, never with a migration.
 - Per-store feature flags: StoreFeatureFlag (store, code, enabled, unique store+code) and a
   service to ask whether a flag is on for a store. No third-party flag library.
 - Update the X-Store middleware to load the Store; unknown or missing store returns 400
@@ -318,6 +318,10 @@ apps/inventory
   later as a data change. A transfer between stores is an outbound and an inbound
   movement with reason=transfer. Reservation must lock the row (select_for_update)
   to avoid overselling under concurrency.
+- Squishies sell both as sealed boxes and as loose pieces: separate variants, each
+  with its own SKU and stock. Add an "open box" stock movement that converts one
+  sealed box into N loose pieces (outbound 1 box, inbound N pieces) as one recorded
+  operation with its reason, so stock never drifts.
 - Exposed to other modules through a StockService port.
 
 apps/orders
@@ -458,13 +462,20 @@ Goal: the blankets store live at its own domain.
 
 ---
 
-## Phase 8 — Second store and sales channels
+## Phase 8 — Anime and kawaii stores and sales channels
 
 ```
 Phase 8 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
-Goal: the anime store and the external channels.
-- The anime store on the same storefront: its domain and its theme, no new app.
+Goal: the anime and kawaii stores and the external channels.
+- The `anime` store on the same storefront: its domain and its theme, no new app.
+- The `kawaii` store on the same storefront too: its own domain and theme, no new app.
+- Product lines: stores are split by audience into three: `kawaii` (kawaii
+  stationery: BTS holders, keychains, lomo cards, notebooks, stickers, pens,
+  squishies), `anime` (anime merchandise: caps, t-shirts and other anime
+  products) and `home` (blankets). Bags and backpacks go to `anime` or `kawaii`
+  by design. A new store only when a line has a different buyer. Stores are data
+  (create_store) and categories are data (ADR-0024).
 - apps/integrations:
   - TikTok Shop: a Celery Beat task that imports TikTok orders as Order with
     channel=tiktok (idempotent by external_id) and pushes stock levels to TikTok.
@@ -509,7 +520,10 @@ Goal: scheduled, validated and approved social media posts.
     (shots, duration, hook, on-screen text) in the style of the reference videos. The
     staff records the videos and uploads them through Quetzal (Phase 4d); there is no
     AI-generated video. The bundle recommendation logic is shared with Phase 12
-    (suggested bundles); design it once.
+    (suggested bundles); design it once. A set is a bundle composed by
+    recommendation (x pieces of x models, based on what sells) and approved by
+    staff. A bundle has no stock of its own: its availability is computed from its
+    components' loose-piece stock, and selling one decrements the components.
 - Celery Beat creates posts from schedules; rejected posts regenerate at most twice,
   then go to needs_review. Add a social.propose_post permission for content_editor
   (a new data migration, ADR-0021); approval requires social.approve_post, so posts

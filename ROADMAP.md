@@ -1,6 +1,6 @@
 # Roadmap — commerce-platform
 
-Plataforma de comercio multi-tienda (`anime` y `home`) con un solo backend en Django + DRF,
+Plataforma de comercio multi-tienda (`anime`, `kawaii` y `home`) con un solo backend en Django + DRF,
 tiendas web en Next.js, app móvil en React Native y una plataforma de agentes
 (publicación en Instagram, ventas por WhatsApp, seguimiento y paquetes sugeridos).
 
@@ -144,7 +144,7 @@ GitHub Actions corriendo pruebas en cada PR.
 
 ### Fase 3 — Tiendas y RBAC
 **Objetivo:** que cada persona solo pueda hacer lo que su rol le permite en cada tienda.
-**Entregables:** `Store` y el comando `create_store` (con él se crean `anime` y `home`);
+**Entregables:** `Store` y el comando `create_store` (con él se crean `anime`, `kawaii` y `home`);
 `StoreFeatureFlag` por tienda; `Permission`, `Role`, `StoreMembership`;
 roles iniciales (`owner`, `store_admin`, `content_editor`, `warehouse`, `support`);
 permisos que usarán las fases siguientes; puerto `Authorizer` y su implementación; `IsStoreStaff`.
@@ -189,7 +189,10 @@ pública del producto devuelve su URL; el storefront lo muestra en la fase 7.
 **Objetivo:** vender sin vender de más.
 **Entregables:** módulos `inventory` y `orders` con clean architecture; `ReserveStock`, `PlaceOrder`,
 `CancelOrder`; historial de movimientos; copia de datos en cada `OrderItem`; skill propia
-`new-domain-module`.
+`new-domain-module`. Los squishies se venden en caja cerrada y en pieza suelta, como variantes
+distintas con su propio SKU y su propio stock; un movimiento de "abrir caja" convierte una caja
+cerrada en N piezas sueltas (salida de 1 caja y entrada de N piezas en una sola operación
+registrada con su motivo), para que el stock nunca se descuadre.
 **Criterio de salida:** un pedido descuenta stock en una sola transacción y pedir de más de una variante
 que se vende desde stock devuelve 409 (vender sin stock una variante sobre pedido se decide en el
 /grill-with-docs de la fase 5).
@@ -229,10 +232,15 @@ con previews. Usa el `packages/api-client` y la sesión con BFF (ADR-0027) que y
 completo por tienda se decide en su /grill-with-docs.
 **Criterio de salida:** alguien compra una frazada en tu dominio.
 
-### Fase 8 — Tienda de anime y canales
+### Fase 8 — Tiendas de anime y kawaii, y canales
 **Objetivo:** vender en todos los canales sin descuadrar el stock.
-**Entregables:** `anime` en el mismo storefront (su dominio y su tema, sin app nueva); sincronización de pedidos y stock con TikTok Shop; feeds de catálogo
+**Entregables:** `anime` y `kawaii` en el mismo storefront (cada una con su dominio y su tema, sin app nueva); sincronización de pedidos y stock con TikTok Shop; feeds de catálogo
 para Meta y TikTok; eventos de conversión desde el servidor; UTM guardados en el pedido.
+**Líneas de producto:** las tiendas se dividen por público en tres: `kawaii` (papelería kawaii:
+portatarjetas de BTS, llaveros, lomo cards, libretas, stickers, plumas y squishies), `anime`
+(mercancía de anime: gorras, playeras y otros productos de anime) y `home` (frazadas). Las bolsas
+y mochilas van a `anime` o `kawaii` según su diseño. Una línea solo se vuelve tienda nueva cuando
+tiene otro comprador. Las tiendas son datos (`create_store`) y las categorías también (ADR-0024).
 **Criterio de salida:** una venta en TikTok Shop aparece como pedido y descuenta stock.
 
 ### Fase 9 — Plataforma de agentes y publicación en Instagram
@@ -245,7 +253,10 @@ para Meta y TikTok; eventos de conversión desde el servidor; UTM guardados en e
 - Los agentes también recomiendan paquetes de productos y escriben guiones de grabación
   (tomas, duración, gancho, texto en pantalla) al estilo de los videos de referencia; el
   staff graba los videos y los sube por Quetzal (fase 4d). Nada de video generado por IA.
-  La lógica de paquetes se comparte con la fase 12 y se diseña una sola vez.
+  La lógica de paquetes se comparte con la fase 12 y se diseña una sola vez: un set es un paquete
+  armado por recomendación (x piezas de x modelos, según lo que se vende) que el staff aprueba;
+  no tiene stock propio, su disponibilidad se calcula con el stock en pieza suelta de sus
+  componentes y venderlo descuenta los componentes.
 - Menciones desde Ghosty Teams: agentes webhook que llegan a `/api/v1/ops/agents/invoke/`,
   con verificación de origen, permisos del usuario y tope de relevos entre agentes.
 - `evals/` con dataset y graders por agente, corriendo en el CI cuando cambian los prompts.
@@ -277,7 +288,10 @@ responde, la conversación pasa a ventas.
 **Entregables:** análisis de canasta sobre `OrderItem` (pares frecuentes, margen, stock);
 agente `@paquetes` que nombra y describe; `Bundle` y `BundleItem` como borrador con aprobación;
 venta de paquetes en las tiendas web. La recomendación de paquetes se comparte con la fase 9
-(guiones de video) y se diseña una sola vez.
+(guiones de video) y se diseña una sola vez. Un set es un paquete armado por recomendación
+(x piezas de x modelos, según lo que se vende) que el staff aprueba; no tiene stock propio, su
+disponibilidad se calcula con el stock en pieza suelta de sus componentes y venderlo descuenta
+los componentes.
 **Criterio de salida:** la sugerencia semanal genera un paquete, lo apruebas y se puede comprar.
 **Requisito:** al menos unos meses de historial de ventas.
 
