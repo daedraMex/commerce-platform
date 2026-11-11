@@ -684,3 +684,65 @@ def test_the_report_has_no_image_lines_without_images(tmp_path, media_root):
 
     assert "Images stored" not in output
     assert "Images would be" not in output
+
+
+def test_reimport_reactivates_a_retired_link_without_duplicating_it(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_image(images, "main.jpg", size=(10, 20))
+    csv_path = write_csv(tmp_path, [row(main_image="main.jpg")])
+    run_import(store="home", csv=str(csv_path), operator="operator@example.com", images=str(images))
+    product = Product.objects.get()
+    link = ProductMedia.objects.get()
+    ProductMedia.objects.filter(pk=link.pk).update(is_active=False)
+
+    output = run_import(
+        store="home", csv=str(csv_path), operator="operator@example.com", images=str(images)
+    )
+
+    link.refresh_from_db()
+    assert ProductMedia.objects.filter(product=product, media=link.media).count() == 1
+    assert link.is_active is True
+    assert link.position == 1
+    assert "Rows updated: 1" in output
+    assert "Images linked: 1" in output
+
+
+def test_a_retired_main_does_not_block_a_new_main_in_the_import(tmp_path, media_root):
+    home = make_store()
+    make_superuser()
+    make_category(home)
+    make_supplier(home)
+    images = tmp_path / "images"
+    write_image(images, "first.jpg", size=(10, 20))
+    write_image(images, "second.jpg", size=(30, 40))
+    first_csv = write_csv(tmp_path, [row(main_image="first.jpg")], filename="first.csv")
+    run_import(
+        store="home",
+        csv=str(first_csv),
+        operator="operator@example.com",
+        images=str(images),
+    )
+    product = Product.objects.get()
+    retired = ProductMedia.objects.get()
+    ProductMedia.objects.filter(pk=retired.pk).update(is_active=False)
+
+    second_csv = write_csv(tmp_path, [row(main_image="second.jpg")], filename="second.csv")
+    output = run_import(
+        store="home",
+        csv=str(second_csv),
+        operator="operator@example.com",
+        images=str(images),
+    )
+
+    assert "Rows rejected: 0" in output
+    links = ordered_links(product)
+    summary = [(link.role, link.is_active, (link.media.width, link.media.height)) for link in links]
+    assert summary == [
+        ("main", False, (10, 20)),
+        ("main", True, (30, 40)),
+    ]
+    assert "Rows updated: 1" in output

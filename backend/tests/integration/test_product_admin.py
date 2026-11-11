@@ -453,7 +453,9 @@ def test_product_media_inline_offers_only_the_products_store_media(admin_client_
     assert isinstance(field.widget.widget, AutocompleteSelect)
 
 
-def test_admin_removes_the_link_but_not_the_media(admin_client_by_email):
+def test_the_product_media_inline_retires_a_link_instead_of_deleting_it(
+    admin_client_by_email,
+):
     home = make_store("home", "Home")
     supplier = make_supplier(home)
     design = make_design(home, supplier)
@@ -492,5 +494,77 @@ def test_admin_removes_the_link_but_not_the_media(admin_client_by_email):
     )
 
     assert response.status_code == 302
-    assert not ProductMedia.objects.filter(pk=link.pk).exists()
+    assert ProductMedia.objects.filter(pk=link.pk).exists()
     assert Media.objects.filter(pk=media.pk).exists()
+
+
+def test_the_product_media_inline_offers_no_delete_checkbox(admin_client_by_email):
+    from tests.integration.admin_forms import rendered_field_names
+
+    home = make_store("home", "Home")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+    media = Media.objects.create(
+        store=home,
+        storage_key="stores/1/media/photo.jpg",
+        content_hash="photo",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    ProductMedia.objects.create(product=product, media=media)
+
+    response = admin_client_by_email.get(f"/admin/catalog/product/{product.pk}/change/")
+
+    assert response.status_code == 200
+    names = rendered_field_names(response)
+    assert "product_media-0-DELETE" not in names
+    assert "product_media-__prefix__-DELETE" not in names
+    formset = next(
+        inline_formset.formset
+        for inline_formset in response.context["inline_admin_formsets"]
+        if inline_formset.formset.model is ProductMedia
+    )
+    assert formset.can_delete is False
+
+
+def test_the_product_media_inline_shows_retired_links_with_an_editable_active_column(
+    admin_client_by_email,
+):
+    from tests.integration.admin_forms import rendered_field_names
+
+    home = make_store("home")
+    supplier = make_supplier(home)
+    design = make_design(home, supplier)
+    category = make_category(home)
+    product = Product.objects.create(store=home, category=category, design=design)
+    media = Media.objects.create(
+        store=home,
+        storage_key="stores/1/media/retired.jpg",
+        content_hash="retired",
+        mime_type="image/jpeg",
+        width=800,
+        height=600,
+    )
+    link = ProductMedia.objects.create(product=product, media=media, is_active=False)
+
+    response = admin_client_by_email.get(f"/admin/catalog/product/{product.pk}/change/")
+
+    assert response.status_code == 200
+    assert "product_media-0-is_active" in rendered_field_names(response)
+    formset = next(
+        inline_formset.formset
+        for inline_formset in response.context["inline_admin_formsets"]
+        if inline_formset.formset.model is ProductMedia
+    )
+    assert list(formset.forms[0].fields)[:5] == [
+        "media",
+        "variant",
+        "role",
+        "position",
+        "is_active",
+    ]
+    assert formset.forms[0].instance.pk == link.pk
+    assert formset.forms[0].initial["is_active"] is False

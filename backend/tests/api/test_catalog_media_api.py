@@ -274,3 +274,100 @@ def test_product_list_query_count_does_not_grow_with_images(client, django_asser
         response = client.get(PRODUCTS_URL, {"page_size": 50}, HTTP_X_STORE="home")
 
     assert response.json()["count"] == 50
+
+
+def test_product_detail_excludes_retired_images_including_a_retired_main(client, media_base_url):
+    home = make_store("home")
+    product = make_product(home)
+    make_variant(product)
+    retired_main = make_media(
+        home, key="stores/1/media/retired-main.jpg", content_hash="retired-main"
+    )
+    retired_gallery = make_media(
+        home, key="stores/1/media/retired-gallery.jpg", content_hash="retired-gallery"
+    )
+    active_gallery = make_media(
+        home, key="stores/1/media/active-gallery.jpg", content_hash="active-gallery"
+    )
+    ProductMedia.objects.create(
+        product=product,
+        media=retired_main,
+        role=ProductMedia.Role.MAIN,
+        is_active=False,
+    )
+    ProductMedia.objects.create(
+        product=product,
+        media=retired_gallery,
+        role=ProductMedia.Role.GALLERY,
+        position=2,
+        is_active=False,
+    )
+    ProductMedia.objects.create(
+        product=product,
+        media=active_gallery,
+        role=ProductMedia.Role.GALLERY,
+        position=3,
+    )
+
+    response = client.get(detail_url(product), HTTP_X_STORE="home")
+
+    images = response.json()["images"]
+    assert [image["url"] for image in images] == [
+        "https://media.example.com/stores/1/media/active-gallery.jpg"
+    ]
+    assert "retired" not in response.content.decode()
+
+
+def test_the_variant_lookup_ignores_a_retired_main_image(client, media_base_url):
+    home = make_store("home")
+    product = make_product(home)
+    variant = make_variant(product)
+    retired_main = make_media(
+        home, key="stores/1/media/retired-main.jpg", content_hash="retired-main"
+    )
+    ProductMedia.objects.create(
+        product=product,
+        media=retired_main,
+        role=ProductMedia.Role.MAIN,
+        is_active=False,
+    )
+
+    response = client.get(VARIANTS_URL.format(sku=variant.sku), HTTP_X_STORE="home")
+
+    assert response.json()["product"]["main_image"] is None
+
+
+def test_retired_links_never_appear_in_another_store(client, media_base_url):
+    home = make_store("home")
+    anime = make_store("anime")
+    home_product = make_product(home, name="Home blanket", slug="home-blanket")
+    anime_product = make_product(anime, name="Anime blanket", slug="anime-blanket")
+    make_variant(home_product)
+    make_variant(anime_product)
+    home_media = make_media(
+        home, key="stores/1/media/home.jpg", content_hash="home", alt_text="Home photo"
+    )
+    anime_media = make_media(
+        anime, key="stores/2/media/anime.jpg", content_hash="anime", alt_text="Anime photo"
+    )
+    ProductMedia.objects.create(
+        product=home_product,
+        media=home_media,
+        role=ProductMedia.Role.MAIN,
+        is_active=False,
+    )
+    ProductMedia.objects.create(
+        product=anime_product,
+        media=anime_media,
+        role=ProductMedia.Role.GALLERY,
+    )
+
+    home_response = client.get(detail_url(home_product), HTTP_X_STORE="home")
+    anime_response = client.get(detail_url(anime_product), HTTP_X_STORE="anime")
+
+    assert home_response.json()["images"] == []
+    assert [image["url"] for image in anime_response.json()["images"]] == [
+        "https://media.example.com/stores/2/media/anime.jpg"
+    ]
+    assert "Anime photo" not in home_response.content.decode()
+    assert "Home photo" not in anime_response.content.decode()

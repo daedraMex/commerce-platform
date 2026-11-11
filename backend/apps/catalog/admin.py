@@ -342,7 +342,8 @@ class ProductMediaInline(admin.TabularInline):
     model = ProductMedia
     autocomplete_fields = ("media",)
     extra = 0
-    fields = ("media", "variant", "role", "position")
+    can_delete = False
+    fields = ("media", "variant", "role", "position", "is_active")
     ordering = ("position",)
 
     def get_formset(self, request, obj=None, **kwargs):

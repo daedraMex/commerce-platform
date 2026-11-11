@@ -200,7 +200,8 @@ PRODUCT_PAGE_EXAMPLE = OpenApiExample(
 def product_images(store_id):
     """The store's product images, with the main image first."""
     return (
-        ProductMedia.objects.filter(media__store_id=store_id)
+        ProductMedia.objects.active()
+        .filter(media__store_id=store_id)
         .select_related("media", "variant")
         .annotate(
             role_order=Case(
@@ -215,8 +216,10 @@ def product_images(store_id):
 
 def main_product_images():
     """The main image of each product, for a summary that shows one."""
-    return ProductMedia.objects.filter(role=ProductMedia.Role.MAIN).select_related(
-        "media", "variant"
+    return (
+        ProductMedia.objects.active()
+        .filter(role=ProductMedia.Role.MAIN)
+        .select_related("media", "variant")
     )
 
 
