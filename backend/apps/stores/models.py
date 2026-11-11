@@ -1,3 +1,5 @@
+import re
+
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models.functions import Lower
@@ -5,6 +7,9 @@ from django.db.models.functions import Lower
 from apps.shared.domain.store import STORE_SLUG_MAX_LENGTH, is_valid_store_slug
 
 FEATURE_FLAG_CODE_MAX_LENGTH = STORE_SLUG_MAX_LENGTH
+
+ACCENT_COLOR_DEFAULT = "#4f46e5"
+_ACCENT_COLOR_REGEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 def validate_store_slug(value):
@@ -24,9 +29,22 @@ def validate_feature_flag_code(value):
         )
 
 
+def validate_accent_color(value):
+    if not isinstance(value, str) or _ACCENT_COLOR_REGEX.fullmatch(value) is None:
+        raise ValidationError(
+            "Use a six-digit hex color such as #4f46e5.",
+            code="invalid_accent_color",
+        )
+
+
 def normalize_domain(value):
     """Lowercase a domain; no domain is NULL, never "", so domainless stores never collide."""
     return value.lower() if value else None
+
+
+def normalize_accent_color(value):
+    """Lowercase a hex color; the database constraint stores only lowercase hex."""
+    return value.lower() if value else value
 
 
 class Store(models.Model):
@@ -37,6 +55,11 @@ class Store(models.Model):
     )
     name = models.CharField(max_length=200)
     domain = models.CharField(max_length=253, unique=True, null=True, blank=True)
+    accent_color = models.CharField(
+        max_length=7,
+        default=ACCENT_COLOR_DEFAULT,
+        validators=[validate_accent_color],
+    )
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -48,6 +71,10 @@ class Store(models.Model):
                 | (models.Q(domain=Lower("domain")) & ~models.Q(domain="")),
                 name="stores_store_domain_lowercase_or_null",
             ),
+            models.CheckConstraint(
+                condition=models.Q(accent_color__regex=r"^#[0-9a-f]{6}$"),
+                name="stores_store_accent_color_hex",
+            ),
         ]
 
     def __str__(self):
@@ -55,11 +82,14 @@ class Store(models.Model):
 
     def save(self, *args, **kwargs):
         self.domain = normalize_domain(self.domain)
+        self.accent_color = normalize_accent_color(self.accent_color)
         super().save(*args, **kwargs)
 
     def clean(self):
-        # Runs before the admin's unique checks, so they compare the stored form.
+        # Runs before the admin's unique checks and the constraint check, so both compare
+        # the stored form.
         self.domain = normalize_domain(self.domain)
+        self.accent_color = normalize_accent_color(self.accent_color)
 
 
 class StoreFeatureFlag(models.Model):

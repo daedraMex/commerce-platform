@@ -3,7 +3,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission as DjangoPermission
 
 from apps.accounts.models import Role, StoreMembership
-from apps.stores.models import Store, StoreFeatureFlag
+from apps.stores.models import ACCENT_COLOR_DEFAULT, Store, StoreFeatureFlag
 from tests.integration.admin_forms import STORE_ADMIN_EMPTY_INLINES, inline
 
 pytestmark = pytest.mark.django_db
@@ -26,7 +26,13 @@ def test_admin_deactivates_a_store(admin_client_by_email):
     response = admin_client_by_email.post(
         f"/admin/stores/store/{store.pk}/change/",
         # An unchecked checkbox is left out of the form, which clears is_active.
-        {"slug": "home", "name": "Home", "domain": "", **STORE_ADMIN_EMPTY_INLINES},
+        {
+            "slug": "home",
+            "name": "Home",
+            "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
+            **STORE_ADMIN_EMPTY_INLINES,
+        },
     )
 
     assert response.status_code == 302
@@ -34,14 +40,46 @@ def test_admin_deactivates_a_store(admin_client_by_email):
     assert store.is_active is False
 
 
+def test_admin_change_form_saves_a_new_accent_color_lowercase(admin_client_by_email):
+    store = Store.objects.create(slug="home", name="Home")
+
+    response = admin_client_by_email.post(
+        f"/admin/stores/store/{store.pk}/change/",
+        {
+            "slug": "home",
+            "name": "Home",
+            "domain": "",
+            "accent_color": "#ABCDEF",
+            "is_active": "on",
+            **STORE_ADMIN_EMPTY_INLINES,
+        },
+    )
+
+    assert response.status_code == 302
+    store.refresh_from_db()
+    assert store.accent_color == "#abcdef"
+
+
 def test_admin_stores_a_blank_domain_as_null_and_a_domain_lowercase(admin_client_by_email):
     admin_client_by_email.post(
         "/admin/stores/store/add/",
-        {"slug": "anime", "name": "Anime", "domain": "", **STORE_ADMIN_EMPTY_INLINES},
+        {
+            "slug": "anime",
+            "name": "Anime",
+            "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
+            **STORE_ADMIN_EMPTY_INLINES,
+        },
     )
     admin_client_by_email.post(
         "/admin/stores/store/add/",
-        {"slug": "home", "name": "Home", "domain": "", **STORE_ADMIN_EMPTY_INLINES},
+        {
+            "slug": "home",
+            "name": "Home",
+            "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
+            **STORE_ADMIN_EMPTY_INLINES,
+        },
     )
     admin_client_by_email.post(
         "/admin/stores/store/add/",
@@ -49,6 +87,7 @@ def test_admin_stores_a_blank_domain_as_null_and_a_domain_lowercase(admin_client
             "slug": "blankets",
             "name": "Blankets",
             "domain": "Blankets.Example.com",
+            "accent_color": ACCENT_COLOR_DEFAULT,
             **STORE_ADMIN_EMPTY_INLINES,
         },
     )
@@ -71,7 +110,13 @@ def test_admin_never_deletes_a_store(admin_client_by_email):
 def test_admin_rejects_a_malformed_slug(admin_client_by_email):
     response = admin_client_by_email.post(
         "/admin/stores/store/add/",
-        {"slug": "Home", "name": "Home", "domain": "", **STORE_ADMIN_EMPTY_INLINES},
+        {
+            "slug": "Home",
+            "name": "Home",
+            "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
+            **STORE_ADMIN_EMPTY_INLINES,
+        },
     )
 
     assert response.status_code == 200
@@ -87,6 +132,7 @@ def test_admin_does_not_rename_an_existing_store(admin_client_by_email):
             "slug": "blankets",
             "name": "Home",
             "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
             "is_active": "on",
             **STORE_ADMIN_EMPTY_INLINES,
         },
@@ -121,6 +167,7 @@ def test_admin_posting_a_membership_delete_leaves_the_row(admin_client_by_email)
             "slug": "home",
             "name": "Home",
             "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
             "is_active": "on",
             **STORE_ADMIN_EMPTY_INLINES,
             **inline(
@@ -164,6 +211,7 @@ def test_admin_turns_a_feature_flag_on_for_a_store(admin_client_by_email):
             "slug": "home",
             "name": "Home",
             "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
             "is_active": "on",
             **STORE_ADMIN_EMPTY_INLINES,
             **inline(
@@ -215,6 +263,7 @@ def test_a_non_superuser_staff_user_cannot_turn_a_feature_flag_on(
         {
             "name": "Home",
             "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
             "is_active": "on",
             **STORE_ADMIN_EMPTY_INLINES,
             **inline(

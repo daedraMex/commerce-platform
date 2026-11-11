@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 
 from apps.accounts.models import Permission, Role, StoreMembership
-from apps.stores.models import Store
+from apps.stores.models import ACCENT_COLOR_DEFAULT, Store
 from tests.integration.admin_forms import STORE_ADMIN_EMPTY_INLINES, inline
 
 pytestmark = pytest.mark.django_db
@@ -75,6 +75,7 @@ def test_adding_a_membership_on_the_store_page_is_recorded_in_the_admin_log(
         {
             "name": "Home",
             "domain": "",
+            "accent_color": ACCENT_COLOR_DEFAULT,
             "is_active": "on",
             **STORE_ADMIN_EMPTY_INLINES,
             **inline(
