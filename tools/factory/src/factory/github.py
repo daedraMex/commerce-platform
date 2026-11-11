@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 
-from .shell import RunCommand, run_command
+from .shell import CommandResult, RunCommand, run_command
 from .tickets import Ticket, parse_blocked_by
 
 _CLOSES_RE = re.compile(r"(?:Closes|Part of)\s+#(\d+)", re.IGNORECASE)
@@ -69,6 +69,39 @@ class GitHub:
         # gh prints the PR URL on the last line; the number is its trailing segment.
         url = result.stdout.strip().splitlines()[-1].strip()
         return int(url.rstrip("/").rsplit("/", 1)[-1])
+
+    def mark_pr_ready(self, number: int, token: str) -> None:
+        result = self._run(
+            ["gh", "pr", "ready", str(number), "--repo", self.repo],
+            cwd="/",
+            timeout=120,
+            env={"GH_TOKEN": token},
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(f"gh pr ready failed: {result.stderr.strip()}")
+
+    def enable_auto_merge(self, number: int, token: str) -> CommandResult:
+        """Ask GitHub to merge once checks pass and the owner approves.
+
+        Returns the raw result instead of raising: a repository without
+        auto-merge enabled is not a factory failure, so the caller logs why
+        and keeps the successful run.
+        """
+        return self._run(
+            [
+                "gh",
+                "pr",
+                "merge",
+                str(number),
+                "--repo",
+                self.repo,
+                "--auto",
+                "--merge",
+            ],
+            cwd="/",
+            timeout=120,
+            env={"GH_TOKEN": token},
+        )
 
     def count_open_factory_prs(
         self,

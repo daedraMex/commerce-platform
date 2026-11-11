@@ -2,16 +2,21 @@
 
 The night factory is an unattended runner on a dedicated Pop!_OS machine. It
 runs every hour, around the clock, implements tickets marked agent-ready and
-opens draft pull requests, within two caps: open pull requests and daily ticket
-attempts. The decisions behind it are in
+opens pull requests ready for review, within two caps: open pull requests and
+daily ticket attempts. The decisions behind it are in
 `docs/adr/0025-night-factory-unattended-agent-runner.md`.
 
 - Code lives in `tools/factory/` (a small Python package run with `uv`).
 - It is governed by the factory-only OpenCode config
   `tools/factory/opencode.factory.json`, loaded via the `OPENCODE_CONFIG`
   environment variable, so the repo's own `opencode.json` is untouched.
-- It never pushes to `main`, never force-pushes, never merges. A human signs
-  twice: marking a ticket agent-ready, then approving and merging the PR.
+- It never pushes to `main`, never force-pushes, never approves and never merges
+  directly. After opening a PR it marks it ready for review and enables
+  auto-merge with the merge-commit method, so the owner's GitHub approval is the
+  only gate to `main`. If GitHub rejects enabling auto-merge, the run still
+  succeeds and the log says why.
+- A human signs twice: marking a ticket agent-ready, then approving the PR on
+  GitHub; GitHub performs the auto-merge once the required checks pass.
 
 ## Prerequisites
 
@@ -314,9 +319,12 @@ Run these once, as the admin user unless a step says `factory`.
     systemctl --user daemon-reload && systemctl --user restart factory.timer
     ```
 
-11. **Protect `main`.** On GitHub: require a pull request before merging,
-    require 1 approval, require the "Backend" and "Ticket link" checks, and
-    disallow bypassing them.
+11. **Protect `main`.** Commit `.github/CODEOWNERS` with `* @daedraMex`. On
+    GitHub: require a pull request before merging, require 1 approval, turn on
+    **Require review from Code Owners**, require the "Backend" and "Ticket
+    link" checks, and disallow bypassing them. The owner's GitHub approval is
+    the only approval that satisfies the ruleset; agents (the factory,
+    evaluators and reviewers) never approve.
 
 ## Migrating an existing machine
 

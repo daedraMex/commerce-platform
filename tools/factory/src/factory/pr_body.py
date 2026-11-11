@@ -1,4 +1,4 @@
-"""Draft pull request body."""
+"""Pull request body."""
 
 from __future__ import annotations
 

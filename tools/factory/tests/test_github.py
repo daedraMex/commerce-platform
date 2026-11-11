@@ -33,6 +33,8 @@ class FakeGh:
                 stdout = read_fixture("gh_pr_list.json")
         elif argv[:3] == ["gh", "pr", "create"]:
             stdout = read_fixture("gh_pr_create.txt")
+        elif argv[:3] in (["gh", "pr", "ready"], ["gh", "pr", "merge"]):
+            stdout = ""
         else:
             stdout = "{}"
         return CommandResult(exit_code=0, stdout=stdout, stderr="")
@@ -102,6 +104,56 @@ def test_create_draft_pr_reads_the_number_from_recorded_output():
     assert number == 63
     assert run.calls[-1][0][:3] == ["gh", "pr", "create"]
     assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
+
+
+def test_mark_pr_ready_marks_the_opened_pr():
+    run = FakeGh()
+
+    GitHub(REPO, run=run).mark_pr_ready(63, "TOKEN")
+
+    assert run.calls[-1][0] == ["gh", "pr", "ready", "63", "--repo", REPO]
+    assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
+
+
+def test_mark_pr_ready_raises_when_gh_exits_nonzero():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=1, stdout="", stderr="pull request is not a draft")
+
+    with pytest.raises(RuntimeError, match="pull request is not a draft"):
+        GitHub(REPO, run=run).mark_pr_ready(63, "TOKEN")
+
+
+def test_enable_auto_merge_uses_the_merge_commit_method():
+    run = FakeGh()
+
+    result = GitHub(REPO, run=run).enable_auto_merge(63, "TOKEN")
+
+    assert result.exit_code == 0
+    assert run.calls[-1][0] == [
+        "gh",
+        "pr",
+        "merge",
+        "63",
+        "--repo",
+        REPO,
+        "--auto",
+        "--merge",
+    ]
+    assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
+
+
+def test_enable_auto_merge_returns_the_failure_instead_of_raising():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(
+            exit_code=1,
+            stdout="",
+            stderr="Auto-merge is not allowed for this repository",
+        )
+
+    result = GitHub(REPO, run=run).enable_auto_merge(63, "TOKEN")
+
+    assert result.exit_code == 1
+    assert result.stderr == "Auto-merge is not allowed for this repository"
 
 
 def test_count_open_factory_prs_filters_by_author_and_nf_prefix():

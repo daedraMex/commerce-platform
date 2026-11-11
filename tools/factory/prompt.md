@@ -27,8 +27,10 @@ fetch it from GitHub.
 6. Never edit AGENTS.md, CLAUDE.md, opencode.json, any other opencode config,
    `.github/`, `tools/factory/`, or `docs/adr/`.
 
-7. Do not run `code-review` or any self-review — a human reviews the draft PR.
-   Do not push, open pull requests, or merge; the runner does that.
+7. Do not run `code-review` or any self-review — a human reviews and approves
+   the pull request. Never approve a pull request. Do not push, open pull
+   requests, or merge; the runner opens it and enables auto-merge, but it never
+   approves.
 
 8. Do not commit. Leave your changes in the worktree; the runner commits them.
 

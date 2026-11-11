@@ -11,6 +11,7 @@ from factory.ledger import AttemptLedger
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
 from factory.runner import AgentResult
+from factory.shell import CommandResult
 from factory.tickets import Ticket, worktree_path
 
 MEXICO_CITY = ZoneInfo("America/Mexico_City")
@@ -124,12 +125,18 @@ class FakeGitHub:
         pr_number=101,
         open_factory_prs=0,
         open_factory_prs_error=None,
+        auto_merge_exit=0,
+        auto_merge_stderr="",
     ):
         self.tickets = tickets or []
         self.pr_number = pr_number
         self.open_factory_prs = open_factory_prs
         self.open_factory_prs_error = open_factory_prs_error
+        self.auto_merge_exit = auto_merge_exit
+        self.auto_merge_stderr = auto_merge_stderr
         self.created_prs = []
+        self.ready_prs = []
+        self.auto_merges = []
         self.comments = []
         self.issue_labels = []
         self.pr_labels = []
@@ -149,6 +156,15 @@ class FakeGitHub:
     def create_draft_pr(self, *, branch, title, body, token):
         self.created_prs.append((branch, title, body, token))
         return self.pr_number
+
+    def mark_pr_ready(self, number, token):
+        self.ready_prs.append((number, token))
+
+    def enable_auto_merge(self, number, token):
+        self.auto_merges.append((number, token))
+        return CommandResult(
+            exit_code=self.auto_merge_exit, stdout="", stderr=self.auto_merge_stderr
+        )
 
     def add_pr_label(self, number, label, token):
         self.pr_labels.append((number, label, token))
@@ -297,7 +313,7 @@ def build_factory(
     )
 
 
-def test_success_opens_draft_pr_and_notifies(tmp_path):
+def test_success_opens_ready_pr_enables_auto_merge_and_notifies(tmp_path, capsys):
     git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
     github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], pr_number=101)
     runner = FakeRunner()
@@ -315,7 +331,34 @@ def test_success_opens_draft_pr_and_notifies(tmp_path):
     assert "Model: deepseek/deepseek-flash" in body
     assert "Chose A." in body
     assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+    assert github.ready_prs == [(101, "TOKEN")]
+    assert github.auto_merges == [(101, "TOKEN")]
+    assert capsys.readouterr().err == ""
     assert len(notifier.pr_ready) == 1
+
+
+def test_auto_merge_failure_keeps_the_run_successful_and_logs_why(tmp_path, capsys):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        tickets=[make_ticket(7, labels={"ready-for-agent"})],
+        pr_number=101,
+        auto_merge_exit=1,
+        auto_merge_stderr="Auto-merge is not allowed for this repository",
+    )
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert github.ready_prs == [(101, "TOKEN")]
+    assert github.auto_merges == [(101, "TOKEN")]
+    assert len(notifier.pr_ready) == 1
+    err = capsys.readouterr().err
+    assert "auto-merge not enabled for PR #101" in err
+    assert "Auto-merge is not allowed for this repository" in err
 
 
 def test_fetch_main_runs_before_any_worktree_is_created(tmp_path):
