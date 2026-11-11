@@ -57,7 +57,6 @@ class Store(models.Model):
     domain = models.CharField(max_length=253, unique=True, null=True, blank=True)
     accent_color = models.CharField(
         max_length=7,
-        blank=True,
         default=ACCENT_COLOR_DEFAULT,
         validators=[validate_accent_color],
     )
@@ -91,12 +90,6 @@ class Store(models.Model):
         # the stored form.
         self.domain = normalize_domain(self.domain)
         self.accent_color = normalize_accent_color(self.accent_color)
-        # The field's validator skips "", which blank=True lets through; validate it here.
-        if self.accent_color == "":
-            try:
-                validate_accent_color(self.accent_color)
-            except ValidationError as error:
-                raise ValidationError({"accent_color": error}) from error
 
 
 class StoreFeatureFlag(models.Model):

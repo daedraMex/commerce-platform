@@ -14,7 +14,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='store',
             name='accent_color',
-            field=models.CharField(blank=True, default=apps.stores.models.ACCENT_COLOR_DEFAULT, max_length=7, validators=[apps.stores.models.validate_accent_color]),
+            field=models.CharField(default='#4f46e5', max_length=7, validators=[apps.stores.models.validate_accent_color]),
         ),
         migrations.AddConstraint(
             model_name='store',
