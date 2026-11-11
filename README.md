@@ -70,7 +70,8 @@ cd backend && uv run python manage.py dump_openapi --check   # fail on drift
 ```
 
 `backend/scripts/check.sh` runs the drift check, so a change to the API must be
-accompanied by a regenerated and committed `openapi.json`.
+accompanied by a regenerated and committed `openapi.json`. Breaking API changes
+are recorded in [docs/api-changes.md](docs/api-changes.md).
 
 ## Deploying
 

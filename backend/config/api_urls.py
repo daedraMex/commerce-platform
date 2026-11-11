@@ -5,6 +5,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny
 
+from apps.accounts.views import MeView
+
 
 @extend_schema(exclude=True)
 @api_view(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
@@ -27,7 +29,7 @@ urlpatterns = [
     path("catalog/", include("apps.catalog.urls")),
     path("health/", include("apps.health.urls")),
     path("auth/", include("apps.accounts.urls")),
-    path("staff/", include("apps.accounts.staff_urls")),
+    path("me/", MeView.as_view(), name="me"),
     path("staff/", include("apps.catalog.staff_urls")),
     re_path(r"^.*$", api_not_found),
 ]

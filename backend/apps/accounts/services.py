@@ -32,6 +32,21 @@ def get_active_membership(*, user, store_id):
     )
 
 
+def get_active_memberships(*, user):
+    """Return every active membership of ``user``, with store, role and permissions loaded.
+
+    Inactive memberships, inactive users and inactive stores grant nothing, so none of
+    them appear here either.
+    """
+    if not user.is_authenticated:
+        return StoreMembership.objects.none()
+    return (
+        _active_memberships(user_id=user.id)
+        .select_related("store", "role")
+        .prefetch_related("role__permissions")
+    )
+
+
 def has_store_permission(*, user_id, store_id, permission):
     """Return whether the user's active membership in the store has a role holding ``permission``.
 
@@ -45,14 +60,17 @@ def has_store_permission(*, user_id, store_id, permission):
     )
 
 
-def _active_memberships(*, user_id, store_id):
-    # The one definition of an active membership, shared by IsStoreStaff and the Authorizer.
-    # The user and the store must be active too: the Authorizer also runs from use cases,
-    # Celery tasks and agents, where no authentication or store resolver has run (ADR-0019).
-    return StoreMembership.objects.filter(
+def _active_memberships(*, user_id, store_id=None):
+    # The one definition of an active membership, shared by IsStoreStaff, the Authorizer
+    # and the global /me/ list. The user and the store must be active too: the Authorizer
+    # also runs from use cases, Celery tasks and agents, where no authentication or store
+    # resolver has run (ADR-0019).
+    memberships = StoreMembership.objects.filter(
         user_id=user_id,
-        store_id=store_id,
         is_active=True,
         user__is_active=True,
         store__is_active=True,
     )
+    if store_id is not None:
+        memberships = memberships.filter(store_id=store_id)
+    return memberships
