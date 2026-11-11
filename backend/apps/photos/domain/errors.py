@@ -49,3 +49,47 @@ class ConcurrentModification(PhotoSubmissionError):
 
 class DuplicateIdempotencyKey(PhotoSubmissionError):
     code = "submission_duplicate_idempotency_key"
+
+
+class QuadValidationError(PhotoSubmissionError):
+    """Staff corners cannot describe the photographed product."""
+
+    code = "quad_invalid"
+
+
+class InvalidQuadCorners(QuadValidationError):
+    code = "quad_invalid_corners"
+
+
+class QuadOutOfBounds(QuadValidationError):
+    code = "quad_out_of_bounds"
+
+
+class QuadSelfIntersecting(QuadValidationError):
+    code = "quad_self_intersecting"
+
+
+class QuadNonConvex(QuadValidationError):
+    code = "quad_non_convex"
+
+
+class QuadTooSmall(QuadValidationError):
+    code = "quad_too_small"
+
+
+class CropSourceMissing(PhotoSubmissionError):
+    """A crop needs a photographed size or four corners to choose its ratio."""
+
+    code = "crop_missing_source"
+
+
+class InvalidPhotographedSize(PhotoSubmissionError):
+    """A photographed size must be a positive (width, height) pair."""
+
+    code = "crop_invalid_size"
+
+
+class InvalidChannelMeans(PhotoSubmissionError):
+    """Light correction needs one non-negative mean per colour channel."""
+
+    code = "light_invalid_channel_means"
