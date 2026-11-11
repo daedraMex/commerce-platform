@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from apps.photos.domain.errors import InvalidChannelMeans
 from apps.photos.domain.pipeline import PIPELINE_VERSION
 
-MAX_GAIN = 2.0
-MIN_GAIN = 0.5
+MAX_GAIN = 1.15
+MIN_GAIN = 0.85
 AUTOCONTRAST_CUTOFF = 1
 
 

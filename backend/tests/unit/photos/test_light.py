@@ -22,18 +22,24 @@ def test_a_neutral_image_needs_unit_gains():
 
 
 def test_gray_world_balances_a_colour_cast():
-    plan = plan_light_correction((50, 100, 100))
+    plan = plan_light_correction((95, 100, 105))
 
-    assert plan.red_gain == pytest.approx(250 / 150)
-    assert plan.green_gain == pytest.approx(250 / 300)
-    assert plan.blue_gain == pytest.approx(250 / 300)
+    assert plan.red_gain == pytest.approx(100 / 95)
+    assert plan.green_gain == pytest.approx(1.0)
+    assert plan.blue_gain == pytest.approx(100 / 105)
+
+
+def test_the_caps_are_gentle_corrections():
+    assert MAX_GAIN == 1.15
+    assert MIN_GAIN == 0.85
 
 
 def test_gains_are_capped_when_a_channel_is_far_off():
     plan = plan_light_correction((1, 100, 100))
 
     assert plan.red_gain == MAX_GAIN
-    assert plan.green_gain == pytest.approx(201 / 300)
+    assert plan.green_gain == MIN_GAIN
+    assert plan.blue_gain == MIN_GAIN
     assert plan.red_gain <= MAX_GAIN
 
 

@@ -38,9 +38,9 @@ def crop_ratio(
     *,
     kind: SubmissionKind,
     size: tuple[float, float] | None = None,
-    corners=None,
+    pixel_corners=None,
 ) -> AspectRatio:
-    """Pick the target ratio from the photographed size, the quad or the 4:5 fallback."""
+    """Pick the target ratio from the photographed size, the pixel quad or the 4:5 fallback."""
     kind = SubmissionKind(kind)
     if kind is SubmissionKind.GROUP:
         return FALLBACK_CROP_RATIO
@@ -50,9 +50,9 @@ def crop_ratio(
         return photographed
     if kind is SubmissionKind.CONTOUR:
         return FALLBACK_CROP_RATIO
-    if corners is None:
+    if pixel_corners is None:
         raise CropSourceMissing("A rectangle photo needs a size or its four corners.")
-    return quad_aspect_ratio(corners)
+    return quad_aspect_ratio(pixel_corners)
 
 
 def fit_crop(frame: CropRect, ratio: AspectRatio) -> CropRect:

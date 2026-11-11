@@ -36,13 +36,15 @@ def test_a_contour_photo_without_a_size_falls_back_to_four_by_five():
 
 
 def test_a_rectangle_photo_uses_the_photographed_size_ratio():
-    assert crop_ratio(kind=SubmissionKind.RECTANGLE, size=SIZE, corners=TALL_QUAD) == (
-        AspectRatio(210, 160)
-    )
+    assert crop_ratio(
+        kind=SubmissionKind.RECTANGLE, size=SIZE, pixel_corners=TALL_QUAD
+    ) == AspectRatio(210, 160)
 
 
 def test_a_rectangle_photo_without_a_size_uses_the_quad_ratio():
-    assert crop_ratio(kind=SubmissionKind.RECTANGLE, corners=TALL_QUAD) == AspectRatio(200, 400)
+    assert crop_ratio(kind=SubmissionKind.RECTANGLE, pixel_corners=TALL_QUAD) == AspectRatio(
+        200, 400
+    )
 
 
 def test_a_rectangle_photo_without_a_size_or_corners_is_rejected():

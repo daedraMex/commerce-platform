@@ -18,17 +18,35 @@ from apps.photos.domain.geometry import AspectRatio, Point
 MIN_QUAD_AREA_RATIO = 0.02
 
 
+def to_pixels(corners, width: int, height: int) -> tuple[Point, Point, Point, Point]:
+    """Scale normalized corners to pixels of the EXIF-normalized original.
+
+    The console sends the four tapped corners as fractions between 0 and 1 of
+    the EXIF-normalized original, and ``PhotoSubmission.corners`` stores those
+    fractions. This converts them to the pixel corners that the quad rules use.
+    """
+    if width <= 0 or height <= 0:
+        raise ValueError("The image dimensions must be positive.")
+
+    points = parse_quad(corners)
+    return tuple(Point(point.x * width, point.y * height) for point in points)
+
+
 def validate_quad(
-    corners,
+    pixel_corners,
     *,
     image_width: int,
     image_height: int,
 ) -> tuple[Point, Point, Point, Point]:
-    """Return the corners as points, or raise the first rule they break."""
+    """Return the pixel corners in canonical order, or raise the first rule they break.
+
+    The corners are returned as top-left, top-right, bottom-right, bottom-left
+    (clockwise on screen, with y pointing down), whatever order they were tapped.
+    """
     if image_width <= 0 or image_height <= 0:
         raise ValueError("The image dimensions must be positive.")
 
-    points = parse_quad(corners)
+    points = parse_quad(pixel_corners)
     if any(
         point.x < 0 or point.x > image_width or point.y < 0 or point.y > image_height
         for point in points
@@ -40,7 +58,7 @@ def validate_quad(
         raise QuadNonConvex("The corners must form a convex quadrilateral.")
     if quad_area(points) < MIN_QUAD_AREA_RATIO * image_width * image_height:
         raise QuadTooSmall("The selected area is too small to become a product photo.")
-    return points
+    return _order_corners(points)
 
 
 def parse_quad(corners) -> tuple[Point, Point, Point, Point]:
@@ -52,9 +70,9 @@ def parse_quad(corners) -> tuple[Point, Point, Point, Point]:
     return tuple(_parse_point(corner) for corner in corners)
 
 
-def quad_area(corners) -> float:
-    """The area enclosed by the corners, in square pixels."""
-    points = parse_quad(corners)
+def quad_area(pixel_corners) -> float:
+    """The area enclosed by the pixel corners, in square pixels."""
+    points = parse_quad(pixel_corners)
     doubled = sum(
         point.x * next_point.y - next_point.x * point.y
         for point, next_point in zip(points, (*points[1:], points[0]), strict=True)
@@ -62,14 +80,26 @@ def quad_area(corners) -> float:
     return abs(doubled) / 2
 
 
-def quad_aspect_ratio(corners) -> AspectRatio:
-    """The ratio of the quad, averaging each pair of opposite edges."""
-    top_left, top_right, bottom_right, bottom_left = parse_quad(corners)
+def quad_aspect_ratio(pixel_corners) -> AspectRatio:
+    """The ratio of the pixel quad, averaging each pair of opposite edges."""
+    top_left, top_right, bottom_right, bottom_left = _order_corners(parse_quad(pixel_corners))
     width = (_distance(top_left, top_right) + _distance(bottom_left, bottom_right)) / 2
     height = (_distance(top_right, bottom_right) + _distance(top_left, bottom_left)) / 2
     if width <= 0 or height <= 0:
         raise QuadTooSmall("The quad has no measurable width or height.")
     return AspectRatio(width, height)
+
+
+def _order_corners(points: tuple[Point, Point, Point, Point]) -> tuple[Point, Point, Point, Point]:
+    """Return the corners as top-left, top-right, bottom-right, bottom-left."""
+    center_x = sum(point.x for point in points) / 4
+    center_y = sum(point.y for point in points) / 4
+    clockwise = sorted(points, key=lambda point: math.atan2(point.y - center_y, point.x - center_x))
+    start = min(
+        range(4),
+        key=lambda index: (clockwise[index].x + clockwise[index].y, clockwise[index].x),
+    )
+    return tuple(clockwise[(start + offset) % 4] for offset in range(4))
 
 
 def _parse_point(value) -> Point:

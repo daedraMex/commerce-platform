@@ -14,6 +14,7 @@ from apps.photos.domain.quad import (
     MIN_QUAD_AREA_RATIO,
     quad_area,
     quad_aspect_ratio,
+    to_pixels,
     validate_quad,
 )
 
@@ -31,26 +32,44 @@ TALL = [
     {"x": 300, "y": 500},
     {"x": 100, "y": 500},
 ]
+NORMALIZED_SQUARE = [
+    {"x": 0.1, "y": 0.1},
+    {"x": 0.9, "y": 0.1},
+    {"x": 0.9, "y": 0.9},
+    {"x": 0.1, "y": 0.9},
+]
 
 
 def validate(corners):
     return validate_quad(corners, image_width=IMAGE_WIDTH, image_height=IMAGE_HEIGHT)
 
 
-def test_a_convex_quad_in_any_rotation_passes():
+def test_a_convex_quad_is_returned_in_canonical_order():
     reversed_square = list(reversed(SQUARE))
 
-    assert validate(SQUARE) == (
+    expected = (
         Point(100, 100),
         Point(900, 100),
         Point(900, 900),
         Point(100, 900),
     )
-    assert validate(reversed_square) == (
-        Point(100, 900),
-        Point(900, 900),
-        Point(900, 100),
+    assert validate(SQUARE) == expected
+    assert validate(reversed_square) == expected
+
+
+def test_a_counter_clockwise_quad_from_another_corner_is_reordered():
+    counter_clockwise_from_bottom_right = [
+        {"x": 900, "y": 900},
+        {"x": 900, "y": 100},
+        {"x": 100, "y": 100},
+        {"x": 100, "y": 900},
+    ]
+
+    assert validate(counter_clockwise_from_bottom_right) == (
         Point(100, 100),
+        Point(900, 100),
+        Point(900, 900),
+        Point(100, 900),
     )
 
 
@@ -143,6 +162,25 @@ def test_a_quad_below_the_minimum_area_is_rejected():
 
     assert error.value.code == "quad_too_small"
     assert MIN_QUAD_AREA_RATIO > 0
+
+
+def test_to_pixels_scales_normalized_corners_to_the_image():
+    assert to_pixels(NORMALIZED_SQUARE, 4000, 3000) == (
+        Point(400, 300),
+        Point(3600, 300),
+        Point(3600, 2700),
+        Point(400, 2700),
+    )
+
+
+def test_the_same_normalized_quad_has_the_photographed_ratio_on_each_orientation():
+    landscape = quad_aspect_ratio(to_pixels(NORMALIZED_SQUARE, 4000, 3000))
+    portrait = quad_aspect_ratio(to_pixels(NORMALIZED_SQUARE, 3000, 4000))
+
+    assert landscape == AspectRatio(3200, 2400)
+    assert portrait == AspectRatio(2400, 3200)
+    assert landscape.value == pytest.approx(4 / 3)
+    assert portrait.value == pytest.approx(3 / 4)
 
 
 def test_the_area_uses_the_shoelace_formula():
