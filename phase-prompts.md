@@ -138,7 +138,7 @@ Phase 3 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
 Goal: stores and store-scoped role-based access control.
 - apps/stores: Store (slug unique, name, domain) and a `create_store` management command.
-  The `anime` and `home` stores are created with that command, never with a migration.
+  The `anime`, `kawaii` and `home` stores are created with that command, never with a migration.
 - Per-store feature flags: StoreFeatureFlag (store, code, enabled, unique store+code) and a
   service to ask whether a flag is on for a store. No third-party flag library.
 - Update the X-Store middleware to load the Store; unknown or missing store returns 400
@@ -462,18 +462,20 @@ Goal: the blankets store live at its own domain.
 
 ---
 
-## Phase 8 — Second store and sales channels
+## Phase 8 — Anime and kawaii stores and sales channels
 
 ```
 Phase 8 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 
-Goal: the anime store and the external channels.
-- The anime store on the same storefront: its domain and its theme, no new app.
-- Product lines: new lines (stickers, notebooks, markers, squishies, bags and
-  backpacks) are categories of the anime store when they share its anime/kawaii
-  audience; a line becomes a new store only when it has a different buyer (for
-  example generic kids' toys bought by parents). home stays separate. Stores are
-  data (create_store) and categories are data (ADR-0024).
+Goal: the anime and kawaii stores and the external channels.
+- The `anime` store on the same storefront: its domain and its theme, no new app.
+- The `kawaii` store on the same storefront too: its own domain and theme, no new app.
+- Product lines: stores are split by audience into three: `kawaii` (kawaii
+  stationery: BTS holders, keychains, lomo cards, notebooks, stickers, pens,
+  squishies), `anime` (anime merchandise: caps, t-shirts and other anime
+  products) and `home` (blankets). Bags and backpacks go to `anime` or `kawaii`
+  by design. A new store only when a line has a different buyer. Stores are data
+  (create_store) and categories are data (ADR-0024).
 - apps/integrations:
   - TikTok Shop: a Celery Beat task that imports TikTok orders as Order with
     channel=tiktok (idempotent by external_id) and pushes stock levels to TikTok.

@@ -1,6 +1,6 @@
 # Roadmap — commerce-platform
 
-Plataforma de comercio multi-tienda (`anime` y `home`) con un solo backend en Django + DRF,
+Plataforma de comercio multi-tienda (`anime`, `kawaii` y `home`) con un solo backend en Django + DRF,
 tiendas web en Next.js, app móvil en React Native y una plataforma de agentes
 (publicación en Instagram, ventas por WhatsApp, seguimiento y paquetes sugeridos).
 
@@ -144,7 +144,7 @@ GitHub Actions corriendo pruebas en cada PR.
 
 ### Fase 3 — Tiendas y RBAC
 **Objetivo:** que cada persona solo pueda hacer lo que su rol le permite en cada tienda.
-**Entregables:** `Store` y el comando `create_store` (con él se crean `anime` y `home`);
+**Entregables:** `Store` y el comando `create_store` (con él se crean `anime`, `kawaii` y `home`);
 `StoreFeatureFlag` por tienda; `Permission`, `Role`, `StoreMembership`;
 roles iniciales (`owner`, `store_admin`, `content_editor`, `warehouse`, `support`);
 permisos que usarán las fases siguientes; puerto `Authorizer` y su implementación; `IsStoreStaff`.
@@ -232,14 +232,15 @@ con previews. Usa el `packages/api-client` y la sesión con BFF (ADR-0027) que y
 completo por tienda se decide en su /grill-with-docs.
 **Criterio de salida:** alguien compra una frazada en tu dominio.
 
-### Fase 8 — Tienda de anime y canales
+### Fase 8 — Tiendas de anime y kawaii, y canales
 **Objetivo:** vender en todos los canales sin descuadrar el stock.
-**Entregables:** `anime` en el mismo storefront (su dominio y su tema, sin app nueva); sincronización de pedidos y stock con TikTok Shop; feeds de catálogo
+**Entregables:** `anime` y `kawaii` en el mismo storefront (cada una con su dominio y su tema, sin app nueva); sincronización de pedidos y stock con TikTok Shop; feeds de catálogo
 para Meta y TikTok; eventos de conversión desde el servidor; UTM guardados en el pedido.
-**Líneas de producto:** las líneas nuevas (stickers, libretas, marcadores, squishies, bolsas y
-mochilas) son categorías de `anime` cuando comparten su público anime/kawaii; una línea es tienda
-nueva solo cuando tiene otro comprador (por ejemplo, juguetes genéricos que compran los papás).
-`home` sigue aparte. Las tiendas son datos (`create_store`) y las categorías también (ADR-0024).
+**Líneas de producto:** las tiendas se dividen por público en tres: `kawaii` (papelería kawaii:
+portatarjetas de BTS, llaveros, lomo cards, libretas, stickers, plumas y squishies), `anime`
+(mercancía de anime: gorras, playeras y otros productos de anime) y `home` (frazadas). Las bolsas
+y mochilas van a `anime` o `kawaii` según su diseño. Una línea solo se vuelve tienda nueva cuando
+tiene otro comprador. Las tiendas son datos (`create_store`) y las categorías también (ADR-0024).
 **Criterio de salida:** una venta en TikTok Shop aparece como pedido y descuenta stock.
 
 ### Fase 9 — Plataforma de agentes y publicación en Instagram
