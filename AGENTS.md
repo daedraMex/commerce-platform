@@ -93,6 +93,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - ./web/console/scripts/check.sh            # generate client, lint, typecheck, unit, level-1 tests
 - pnpm generate:client                      # regenerate packages/api-client from openapi.json
 - cd backend && uv run python manage.py dump_openapi   # refresh packages/api-client/openapi.json
+- cd backend && uv run python manage.py flushexpiredtokens   # purge expired JWT blacklist rows
 
 ## Testing
 - Write the failing test first.

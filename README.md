@@ -87,6 +87,16 @@ so it is safe to run again. To change how renditions are encoded, bump
 `MEDIA_RENDITION_VERSION` so they get new keys instead of overwriting cached
 objects.
 
+Refresh tokens rotate and every used or signed-out one is blacklisted
+(ADR-0027), so the blacklist tables grow with each refresh. Purge the rows of
+tokens that have already expired:
+
+```bash
+uv run python manage.py flushexpiredtokens
+```
+
+It is safe to run at any time. Phase 6 schedules it with Celery Beat.
+
 ## Layout
 
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv
