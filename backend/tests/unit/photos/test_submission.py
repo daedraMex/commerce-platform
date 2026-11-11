@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import UTC, datetime
 
 import pytest
@@ -10,6 +11,7 @@ from apps.photos.domain.errors import (
     CannotMarkReady,
     CannotRedo,
     CannotStartProcessing,
+    ConcurrentModification,
     IdempotencyConflict,
     InvalidSubmissionTarget,
 )
@@ -89,6 +91,18 @@ def test_start_processing_refuses_after_max_attempts():
     assert submission.attempts == MAX_ATTEMPTS
 
 
+@pytest.mark.parametrize("terminal", ["applied_at", "discarded_at"])
+def test_start_processing_refuses_a_terminal_submission(terminal):
+    submission = make_submission(status=SubmissionStatus.UPLOADED, **{terminal: NOW})
+
+    with pytest.raises(CannotStartProcessing) as error:
+        submission.start_processing()
+
+    assert error.value.code == "submission_cannot_start_processing"
+    assert submission.status is SubmissionStatus.UPLOADED
+    assert submission.attempts == 0
+
+
 def test_mark_ready_records_the_result_and_pipeline_version():
     submission = make_submission(status=SubmissionStatus.PROCESSING, attempts=1)
 
@@ -113,6 +127,27 @@ def test_mark_ready_refuses_other_states(status):
     assert submission.status is status
 
 
+def test_mark_ready_refuses_an_applied_submission():
+    submission = make_submission(status=SubmissionStatus.PROCESSING, applied_at=NOW)
+
+    with pytest.raises(CannotMarkReady) as error:
+        submission.mark_ready(result_media_id=42, pipeline_version="v1")
+
+    assert error.value.code == "submission_cannot_mark_ready"
+    assert submission.status is SubmissionStatus.PROCESSING
+    assert submission.result_media_id is None
+
+
+def test_mark_ready_records_the_result_of_a_discarded_submission():
+    submission = make_submission(status=SubmissionStatus.PROCESSING, discarded_at=NOW)
+
+    submission.mark_ready(result_media_id=42, pipeline_version="v1")
+
+    assert submission.status is SubmissionStatus.READY
+    assert submission.result_media_id == 42
+    assert submission.pipeline_version == "v1"
+
+
 def test_mark_failed_records_the_failure():
     submission = make_submission(status=SubmissionStatus.PROCESSING)
 
@@ -135,6 +170,27 @@ def test_mark_failed_refuses_other_states(status):
 
     assert error.value.code == "submission_cannot_mark_failed"
     assert submission.status is status
+
+
+def test_mark_failed_refuses_an_applied_submission():
+    submission = make_submission(status=SubmissionStatus.PROCESSING, applied_at=NOW)
+
+    with pytest.raises(CannotMarkFailed) as error:
+        submission.mark_failed("decode_error", "Could not read the photo.")
+
+    assert error.value.code == "submission_cannot_mark_failed"
+    assert submission.status is SubmissionStatus.PROCESSING
+    assert submission.failure_code == ""
+
+
+def test_mark_failed_records_the_failure_of_a_discarded_submission():
+    submission = make_submission(status=SubmissionStatus.PROCESSING, discarded_at=NOW)
+
+    submission.mark_failed("decode_error", "Could not read the photo.")
+
+    assert submission.status is SubmissionStatus.FAILED
+    assert submission.failure_code == "decode_error"
+    assert submission.failure_message == "Could not read the photo."
 
 
 def test_redo_returns_the_previous_result_and_moves_to_processing():
@@ -165,6 +221,22 @@ def test_redo_refuses_non_ready_submissions(status):
 
     assert error.value.code == "submission_cannot_redo"
     assert submission.status is status
+    assert submission.result_media_id == 99
+
+
+@pytest.mark.parametrize("terminal", ["applied_at", "discarded_at"])
+def test_redo_refuses_a_terminal_submission(terminal):
+    submission = make_submission(
+        status=SubmissionStatus.READY,
+        result_media_id=99,
+        **{terminal: NOW},
+    )
+
+    with pytest.raises(CannotRedo) as error:
+        submission.redo(corners=CORNERS, crop=CROP)
+
+    assert error.value.code == "submission_cannot_redo"
+    assert submission.status is SubmissionStatus.READY
     assert submission.result_media_id == 99
 
 
@@ -296,6 +368,17 @@ def test_group_photos_refuse_a_target_product():
     assert error.value.code == "submission_invalid_target"
 
 
+def test_group_photos_refuse_a_photographed_variant():
+    with pytest.raises(InvalidSubmissionTarget) as error:
+        make_submission(
+            kind=SubmissionKind.GROUP,
+            target_product_id=None,
+            photographed_variant_id=10,
+        )
+
+    assert error.value.code == "submission_invalid_target"
+
+
 class FakePhotoSubmissionRepository:
     def __init__(self):
         self._rows = {}
@@ -319,12 +402,23 @@ class FakePhotoSubmissionRepository:
 
     def add(self, submission):
         submission.id = self._next_id
+        submission.version = 0
         self._next_id += 1
         self._rows[submission.id] = submission
         return submission
 
     def save(self, submission):
-        self._rows[submission.id] = submission
+        stored = self._rows.get(submission.id)
+        if (
+            stored is None
+            or stored.store_id != submission.store_id
+            or stored.version != submission.version
+        ):
+            raise ConcurrentModification(
+                "This submission was changed by another request; reload it and try again."
+            )
+        stored.version += 1
+        submission.version = stored.version
         return submission
 
 
@@ -338,3 +432,23 @@ def test_the_fake_repository_round_trips_and_scopes_to_the_store():
     assert repository.get(anime, submission.id) is None
     assert repository.get_by_idempotency_key(home, 2, "key-1") is submission
     assert repository.get_by_idempotency_key(anime, 2, "key-1") is None
+
+
+def test_the_fake_repository_rejects_a_stale_copy():
+    repository = FakePhotoSubmissionRepository()
+    submission = repository.add(make_submission())
+    first_reader = deepcopy(submission)
+    stale_reader = deepcopy(submission)
+
+    first_reader.start_processing()
+    saved = repository.save(first_reader)
+
+    assert saved.version == 1
+    assert repository.get(StoreReference(id=1, slug="home"), submission.id).version == 1
+
+    stale_reader.start_processing()
+    with pytest.raises(ConcurrentModification) as error:
+        repository.save(stale_reader)
+
+    assert error.value.code == "submission_concurrent_modification"
+    assert stale_reader.version == 0

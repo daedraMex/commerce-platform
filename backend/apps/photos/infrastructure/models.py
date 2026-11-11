@@ -49,6 +49,7 @@ class PhotoSubmission(models.Model):
     failure_code = models.CharField(max_length=100, blank=True)
     failure_message = models.TextField(blank=True)
     attempts = models.PositiveSmallIntegerField(default=0)
+    version = models.PositiveIntegerField(default=0)
     result_media = models.ForeignKey(
         "catalog.Media",
         on_delete=models.PROTECT,
@@ -83,7 +84,11 @@ class PhotoSubmission(models.Model):
             ),
             models.CheckConstraint(
                 condition=(
-                    models.Q(kind="group", target_product__isnull=True)
+                    models.Q(
+                        kind="group",
+                        target_product__isnull=True,
+                        photographed_variant__isnull=True,
+                    )
                     | models.Q(
                         kind__in=["rectangle", "contour"],
                         target_product__isnull=False,

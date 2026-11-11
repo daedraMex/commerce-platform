@@ -40,12 +40,18 @@ class SubmissionKind(StrEnum):
 INDIVIDUAL_KINDS = (SubmissionKind.RECTANGLE, SubmissionKind.CONTOUR)
 
 
-def validate_kind_target(kind: SubmissionKind, target_product_id: int | None) -> None:
-    """An individual photo targets a product; a group photo targets none (ADR-0028)."""
+def validate_kind_target(
+    kind: SubmissionKind,
+    target_product_id: int | None,
+    photographed_variant_id: int | None,
+) -> None:
+    """An individual photo targets a product; a group photo targets no product or variant."""
     if kind in INDIVIDUAL_KINDS and target_product_id is None:
         raise InvalidSubmissionTarget("A rectangle or contour photo needs a target product.")
     if kind is SubmissionKind.GROUP and target_product_id is not None:
         raise InvalidSubmissionTarget("A group photo has no target product.")
+    if kind is SubmissionKind.GROUP and photographed_variant_id is not None:
+        raise InvalidSubmissionTarget("A group photo has no photographed variant.")
 
 
 @dataclass(slots=True)
@@ -56,6 +62,7 @@ class PhotoSubmission:
     idempotency_key: str
     request_fingerprint: str
     id: int | None = None
+    version: int = 0
     target_product_id: int | None = None
     photographed_variant_id: int | None = None
     original_key: str = ""
@@ -78,10 +85,18 @@ class PhotoSubmission:
     def __post_init__(self) -> None:
         self.kind = SubmissionKind(self.kind)
         self.status = SubmissionStatus(self.status)
-        validate_kind_target(self.kind, self.target_product_id)
+        validate_kind_target(
+            self.kind,
+            self.target_product_id,
+            self.photographed_variant_id,
+        )
 
     def start_processing(self) -> None:
         """Start an attempt from uploaded or failed, up to MAX_ATTEMPTS."""
+        if self.applied_at is not None:
+            raise CannotStartProcessing("An applied submission cannot start processing.")
+        if self.discarded_at is not None:
+            raise CannotStartProcessing("A discarded submission cannot start processing.")
         if self.status not in (SubmissionStatus.UPLOADED, SubmissionStatus.FAILED):
             raise CannotStartProcessing(
                 "Only an uploaded or failed submission can start processing."
@@ -96,8 +111,13 @@ class PhotoSubmission:
         self.failure_message = ""
 
     def mark_ready(self, result_media_id: int, pipeline_version: str) -> None:
-        """Record the Media a processing attempt produced."""
-        if self.status is not SubmissionStatus.PROCESSING:
+        """Record the Media a processing attempt produced.
+
+        A task that finishes after the submission was discarded still records its result.
+        """
+        if self.applied_at is not None:
+            raise CannotMarkReady("An applied submission cannot become ready.")
+        if self.discarded_at is None and self.status is not SubmissionStatus.PROCESSING:
             raise CannotMarkReady("Only a processing submission can become ready.")
         self.status = SubmissionStatus.READY
         self.result_media_id = result_media_id
@@ -106,8 +126,13 @@ class PhotoSubmission:
         self.failure_message = ""
 
     def mark_failed(self, code: str, message: str) -> None:
-        """Record why a processing attempt failed."""
-        if self.status is not SubmissionStatus.PROCESSING:
+        """Record why a processing attempt failed.
+
+        A task that finishes after the submission was discarded still records its failure.
+        """
+        if self.applied_at is not None:
+            raise CannotMarkFailed("An applied submission cannot fail.")
+        if self.discarded_at is None and self.status is not SubmissionStatus.PROCESSING:
             raise CannotMarkFailed("Only a processing submission can fail.")
         self.status = SubmissionStatus.FAILED
         self.failure_code = code
@@ -118,6 +143,10 @@ class PhotoSubmission:
 
         Returns the previous result Media id; the Media itself is kept, never deleted.
         """
+        if self.applied_at is not None:
+            raise CannotRedo("An applied submission cannot be redone.")
+        if self.discarded_at is not None:
+            raise CannotRedo("A discarded submission cannot be redone.")
         if self.status is not SubmissionStatus.READY:
             raise CannotRedo("Only a ready submission can be redone.")
         previous_result_media_id = self.result_media_id

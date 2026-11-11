@@ -9,6 +9,7 @@ from django.db import IntegrityError, transaction
 from django.urls import reverse
 
 from apps.catalog.models import Category, Design, Media, Product, ProductVariant, Supplier
+from apps.photos.domain.errors import ConcurrentModification, DuplicateIdempotencyKey
 from apps.photos.domain.submission import PhotoSubmission as PhotoSubmissionEntity
 from apps.photos.domain.submission import SubmissionKind, SubmissionStatus
 from apps.photos.infrastructure.repository import DjangoPhotoSubmissionRepository
@@ -151,6 +152,21 @@ def test_the_database_rejects_a_group_photo_with_a_target_product():
         )
 
 
+def test_the_database_rejects_a_group_photo_with_a_photographed_variant():
+    store = make_store("home")
+    user = make_user()
+    product = make_product(store)
+    variant = make_variant(product)
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        make_submission(
+            store,
+            user,
+            kind=PhotoSubmission.Kind.GROUP,
+            photographed_variant=variant,
+        )
+
+
 @pytest.mark.parametrize(
     "kind",
     [PhotoSubmission.Kind.RECTANGLE, PhotoSubmission.Kind.CONTOUR],
@@ -221,6 +237,80 @@ def test_the_repository_round_trips_a_submission():
     assert saved.pipeline_version == "v1"
     assert repository.get(reference, saved.id) == saved
     assert repository.get_by_idempotency_key(reference, user.id, "key-1") == saved
+
+
+def test_two_loaded_copies_cannot_both_be_saved():
+    store = make_store("home")
+    user = make_user()
+    repository = DjangoPhotoSubmissionRepository()
+    reference = StoreReference(id=store.id, slug=store.slug)
+    added = repository.add(
+        PhotoSubmissionEntity(
+            store_id=store.id,
+            created_by_id=user.id,
+            kind=SubmissionKind.GROUP,
+            idempotency_key="key-1",
+            request_fingerprint="fingerprint-1",
+        )
+    )
+    first = repository.get(reference, added.id)
+    stale = repository.get(reference, added.id)
+
+    first.start_processing()
+    saved = repository.save(first)
+
+    assert saved.version == 1
+
+    stale.start_processing()
+    with pytest.raises(ConcurrentModification) as error:
+        repository.save(stale)
+
+    assert error.value.code == "submission_concurrent_modification"
+    assert stale.version == 0
+    reloaded = repository.get(reference, added.id)
+    assert reloaded.version == 1
+    assert reloaded.attempts == 1
+
+
+def test_add_raises_a_domain_error_for_a_duplicate_idempotency_key():
+    store = make_store("home")
+    user = make_user()
+    repository = DjangoPhotoSubmissionRepository()
+    reference = StoreReference(id=store.id, slug=store.slug)
+    repository.add(
+        PhotoSubmissionEntity(
+            store_id=store.id,
+            created_by_id=user.id,
+            kind=SubmissionKind.GROUP,
+            idempotency_key="key-1",
+            request_fingerprint="first-payload",
+        )
+    )
+
+    with pytest.raises(DuplicateIdempotencyKey) as error:
+        repository.add(
+            PhotoSubmissionEntity(
+                store_id=store.id,
+                created_by_id=user.id,
+                kind=SubmissionKind.GROUP,
+                idempotency_key="key-1",
+                request_fingerprint="second-payload",
+            )
+        )
+
+    assert error.value.code == "submission_duplicate_idempotency_key"
+    existing = repository.get_by_idempotency_key(reference, user.id, "key-1")
+    assert existing.request_fingerprint == "first-payload"
+    repository.add(
+        PhotoSubmissionEntity(
+            store_id=store.id,
+            created_by_id=user.id,
+            kind=SubmissionKind.GROUP,
+            idempotency_key="key-2",
+            request_fingerprint="another-payload",
+        )
+    )
+    assert PhotoSubmission.objects.filter(store=store).count() == 2
 
 
 def test_a_submission_is_never_found_through_another_store():

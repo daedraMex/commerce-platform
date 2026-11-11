@@ -41,3 +41,11 @@ class CannotApply(PhotoSubmissionError):
 
 class CannotDiscard(PhotoSubmissionError):
     code = "submission_cannot_discard"
+
+
+class ConcurrentModification(PhotoSubmissionError):
+    code = "submission_concurrent_modification"
+
+
+class DuplicateIdempotencyKey(PhotoSubmissionError):
+    code = "submission_duplicate_idempotency_key"
