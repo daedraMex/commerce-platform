@@ -16,10 +16,10 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.107.1",
-    "axios": "^1.21.1",
-    "msw": "^3.0.5"
+    "axios": "^1.21.1"
   },
   "devDependencies": {
+    "msw": "^3.0.5",
     "orval": "^8.47.0",
     "prettier": "^3.10.0",
     "typescript": "^5.9.3"
