@@ -258,6 +258,7 @@ class Factory:
         made = 0
         decisions = ""
         feedback = ""
+        failed_areas = ()
         for _step in range(1, self.settings.attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -278,6 +279,7 @@ class Factory:
                 command_template=command_template,
                 overlay=self.overlay,
                 feedback=feedback,
+                failed_areas=failed_areas,
             )
             result = self.runner.run(
                 worktree=worktree,
@@ -312,8 +314,8 @@ class Factory:
                     failing_check="time budget exceeded",
                     attempts=made,
                 )
-            passed, check_output = self.git.check(worktree)
-            if passed:
+            check = self.git.check(worktree)
+            if check.passed:
                 return self._success(
                     ticket,
                     model=model,
@@ -323,7 +325,8 @@ class Factory:
                     log_path=log_path,
                     attempts=made,
                 )
-            feedback = check_output
+            feedback = check.output
+            failed_areas = check.failed_areas
         return self._stuck(
             ticket,
             model=model,
@@ -357,6 +360,7 @@ class Factory:
         made = 0
         decisions = ""
         feedback = ""
+        failed_areas = ()
         for _step in range(1, self.settings.attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -379,6 +383,7 @@ class Factory:
                 review_body=fix.review_body,
                 comments=fix.comments,
                 feedback=feedback,
+                failed_areas=failed_areas,
             )
             result = self.runner.run(
                 worktree=worktree,
@@ -413,8 +418,8 @@ class Factory:
                     failing_check="time budget exceeded",
                     attempts=made,
                 )
-            passed, check_output = self.git.check(worktree)
-            if passed:
+            check = self.git.check(worktree)
+            if check.passed:
                 return self._review_success(
                     fix,
                     model=model,
@@ -424,7 +429,8 @@ class Factory:
                     base_sha=base_sha,
                     attempts=made,
                 )
-            feedback = check_output
+            feedback = check.output
+            failed_areas = check.failed_areas
         return self._stuck(
             ticket,
             model=model,

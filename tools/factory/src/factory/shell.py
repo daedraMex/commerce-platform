@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -46,15 +47,29 @@ def run_command(
         merged_env = {key: value for key, value in (env or {}).items() if value is not None}
     else:
         merged_env = merge_env(env)
+    # Start the command in its own session so a timeout can kill the whole
+    # process group. Killing only sudo would orphan next/playwright children.
+    proc = subprocess.Popen(
+        argv,
+        cwd=cwd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=merged_env,
+        start_new_session=True,
+    )
     try:
-        proc = subprocess.run(
-            argv,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=merged_env,
-        )
+        stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        _kill_process_group(proc)
+        proc.communicate()
         raise CommandTimeout(f"command timed out after {timeout}s: {' '.join(argv)}") from exc
-    return CommandResult(exit_code=proc.returncode, stdout=proc.stdout, stderr=proc.stderr)
+    return CommandResult(exit_code=proc.returncode, stdout=stdout, stderr=stderr)
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the child and every process it started, without leaking them."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        proc.kill()

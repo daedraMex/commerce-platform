@@ -13,6 +13,15 @@ def test_runbook_smoke_test_checks_git_and_the_check_runner():
     assert "sudo: a password is required" in text
 
 
+def test_runbook_documents_the_console_toolchain_setup():
+    text = RUNBOOK.read_text()
+
+    assert "Install the console toolchain (admin user)" in text
+    assert "corepack enable" in text
+    assert "playwright@1.65.0 install-deps chromium" in text
+    assert "/srv/factory/worktrees/*/web/console/scripts/check.sh" in text
+
+
 def test_runbook_documents_the_sudoers_migration():
     text = RUNBOOK.read_text()
 
@@ -117,6 +126,7 @@ def test_runbook_documents_the_final_sudoers_file_exactly():
         "factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, "
         "/usr/bin/cat, /usr/bin/test, "
         "/srv/factory/worktrees/*/backend/scripts/check.sh, "
+        "/srv/factory/worktrees/*/web/console/scripts/check.sh, "
         "/usr/bin/rm -rf /srv/factory/worktrees/*",
     )
     sudoers = "\n".join(f"    {line}" for line in lines)

@@ -2,7 +2,9 @@ from pathlib import Path
 
 import pytest
 
+from factory.areas import AREAS
 from factory.config import Settings
+from factory.git import CheckResult
 from factory.preflight import MAX_ERROR_CHARS, Preflight, PreflightError
 from factory.tickets import Ticket
 
@@ -46,9 +48,9 @@ class FakeGit:
         self.calls.append(("create_worktree", worktree, branch))
         return worktree
 
-    def check(self, worktree):
-        self.calls.append(("check", worktree))
-        return (self.check_passed, self.check_output)
+    def check(self, worktree, *, areas=None):
+        self.calls.append(("check", worktree, areas))
+        return CheckResult(self.check_passed, self.check_output)
 
     def create_agent_cleanup_probe(self, worktree):
         self.calls.append(("create_agent_cleanup_probe", worktree))
@@ -175,6 +177,15 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
     )
     assert events[3] == ("verify_commit_identity", tmp_path / "repo")
     assert events[1][1]["repo_dir"] == tmp_path / "repo"
+
+
+def test_preflight_runs_every_present_area_on_fresh_main(tmp_path):
+    events = []
+
+    build_preflight(tmp_path, git=FakeGit(events=events), events=events).run()
+
+    check = next(event for event in events if event[0] == "check")
+    assert check[2] == AREAS
 
 
 def test_preflight_failure_notifies_cleans_up_and_stops(tmp_path):

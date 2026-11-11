@@ -10,6 +10,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from .areas import Area
 from .shell import CommandTimeout, RunCommand, run_command
 
 OPENCODE_CONFIG_PATH = "tools/factory/opencode.factory.json"
@@ -80,19 +81,33 @@ def build_agent_env(
     return env
 
 
+PLAYWRIGHT_BROWSERS_SUBPATH = Path(".cache") / "ms-playwright"
+CONSOLE_ENV_NAMES = ("PATH", "HOME", "LANG")
+
+
 def build_check_env(
     base_env: dict[str, str],
     *,
     agent_user: str | None,
     agent_home: str | None,
+    area: Area | None = None,
 ) -> dict[str, str]:
     """Build the explicit environment the check runner receives.
 
     The check runner executes agent-written code, so it gets only the base
-    allowlist plus the fixed test settings: never the model provider key, the
-    GitHub token or any other secret.
+    allowlist plus the settings its area needs: never the model provider key,
+    the GitHub token or any other secret. The console area needs Node, pnpm and
+    Playwright only, plus ``CI=true`` so Playwright never reuses a server on
+    port 3000 from another worktree.
     """
     env = _allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home)
+    if area is not None and area.name == "console":
+        env = {name: env[name] for name in CONSOLE_ENV_NAMES if name in env}
+        env["CI"] = "true"
+        home = env.get("HOME")
+        if home:
+            env["PLAYWRIGHT_BROWSERS_PATH"] = str(Path(home) / PLAYWRIGHT_BROWSERS_SUBPATH)
+        return env
     env.update(TEST_SETTINGS)
     return env
 
