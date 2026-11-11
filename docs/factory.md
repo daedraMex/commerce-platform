@@ -319,7 +319,7 @@ Run these once, as the admin user unless a step says `factory`.
     systemctl --user daemon-reload && systemctl --user restart factory.timer
     ```
 
-11. **Protect `main`.** Commit `.github/CODEOWNERS` with `* @daedraMex`. On
+11. **Protect `main`.** `.github/CODEOWNERS` contains `* @daedraMex`. On
     GitHub: require a pull request before merging, require 1 approval, turn on
     **Require review from Code Owners**, require the "Backend" and "Ticket
     link" checks, and disallow bypassing them. The owner's GitHub approval is
