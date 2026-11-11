@@ -78,6 +78,20 @@ def test_is_open_reads_recorded_state():
     assert run.calls[-1][0] == ["gh", "issue", "view", "21", "--repo", REPO, "--json", "state"]
 
 
+def test_is_open_fails_closed_when_gh_exits_nonzero():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=1, stdout="", stderr="network down")
+
+    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+
+
+def test_is_open_fails_closed_on_invalid_json():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=0, stdout="not json", stderr="")
+
+    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+
+
 def test_create_draft_pr_reads_the_number_from_recorded_output():
     run = FakeGh()
 
@@ -123,3 +137,28 @@ def test_count_open_factory_prs_raises_on_invalid_json():
 
     with pytest.raises(GitHubError, match="invalid JSON"):
         GitHub(REPO, run=run).count_open_factory_prs(author="xolo-bot")
+
+
+def test_open_pr_ticket_numbers_requests_a_high_limit():
+    run = FakeGh()
+
+    GitHub(REPO, run=run)._open_pr_ticket_numbers("TOKEN")
+
+    argv = run.calls[-1][0]
+    assert argv[argv.index("--limit") + 1] == "1000"
+
+
+def test_open_pr_ticket_numbers_raises_on_gh_error():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=1, stdout="", stderr="network down")
+
+    with pytest.raises(GitHubError, match="network down"):
+        GitHub(REPO, run=run)._open_pr_ticket_numbers("TOKEN")
+
+
+def test_open_pr_ticket_numbers_raises_on_invalid_json():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=0, stdout="not json", stderr="")
+
+    with pytest.raises(GitHubError, match="invalid JSON"):
+        GitHub(REPO, run=run)._open_pr_ticket_numbers("TOKEN")

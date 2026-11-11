@@ -100,8 +100,7 @@ class Factory:
         self.pause_state = pause_state or PauseState(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
-        token = self.token_provider.mint(self.settings.repo)
-        paused_for = self._pause_reason(token)
+        token, paused_for = self._pause_reason()
         if paused_for is not None:
             if self.pause_state.enter(paused_for):
                 self.notifier.send_paused(PausedInfo(reason=paused_for))
@@ -138,21 +137,22 @@ class Factory:
                 break
         return results
 
-    def _pause_reason(self, token: str) -> str | None:
+    def _pause_reason(self) -> tuple[str | None, str | None]:
         try:
+            token = self.token_provider.mint(self.settings.repo)
             open_prs = self.github.count_open_factory_prs(
                 author=FACTORY_BOT_LOGIN,
                 branch_prefix=FACTORY_BRANCH_PREFIX,
                 token=token,
             )
         except Exception:
-            return "GitHub unreachable"
+            return None, "GitHub unreachable"
         if open_prs >= self.settings.max_open_prs:
             noun = "PR" if open_prs == 1 else "PRs"
-            return f"{open_prs} {noun} waiting for review"
+            return token, f"{open_prs} {noun} waiting for review"
         if self.ledger.count_today() >= self.settings.max_tickets_per_day:
-            return "daily limit reached"
-        return None
+            return token, "daily limit reached"
+        return token, None
 
     def run_preflight(self, token: str | None = None) -> list[Ticket]:
         """Run the real-tool preflight and return the tickets it listed."""
