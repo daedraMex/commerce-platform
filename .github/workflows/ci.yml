@@ -77,3 +77,40 @@ jobs:
 
       - name: Check
         run: ./scripts/check.sh
+
+  console:
+    name: Console
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115  # v6.1.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright chromium
+        working-directory: web/console
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Check
+        working-directory: web/console
+        run: ./scripts/check.sh
+
+      - name: Upload Playwright report and screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: console-playwright-report
+          path: |
+            web/console/playwright-report/
+            web/console/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
