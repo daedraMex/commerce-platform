@@ -189,7 +189,10 @@ pública del producto devuelve su URL; el storefront lo muestra en la fase 7.
 **Objetivo:** vender sin vender de más.
 **Entregables:** módulos `inventory` y `orders` con clean architecture; `ReserveStock`, `PlaceOrder`,
 `CancelOrder`; historial de movimientos; copia de datos en cada `OrderItem`; skill propia
-`new-domain-module`.
+`new-domain-module`. Los squishies se venden en caja cerrada y en pieza suelta, como variantes
+distintas con su propio SKU y su propio stock; un movimiento de "abrir caja" convierte una caja
+cerrada en N piezas sueltas (salida de 1 caja y entrada de N piezas en una sola operación
+registrada con su motivo), para que el stock nunca se descuadre.
 **Criterio de salida:** un pedido descuenta stock en una sola transacción y pedir de más de una variante
 que se vende desde stock devuelve 409 (vender sin stock una variante sobre pedido se decide en el
 /grill-with-docs de la fase 5).
@@ -233,6 +236,10 @@ completo por tienda se decide en su /grill-with-docs.
 **Objetivo:** vender en todos los canales sin descuadrar el stock.
 **Entregables:** `anime` en el mismo storefront (su dominio y su tema, sin app nueva); sincronización de pedidos y stock con TikTok Shop; feeds de catálogo
 para Meta y TikTok; eventos de conversión desde el servidor; UTM guardados en el pedido.
+**Líneas de producto:** las líneas nuevas (stickers, libretas, marcadores, squishies, bolsas y
+mochilas) son categorías de `anime` cuando comparten su público anime/kawaii; una línea es tienda
+nueva solo cuando tiene otro comprador (por ejemplo, juguetes genéricos que compran los papás).
+`home` sigue aparte. Las tiendas son datos (`create_store`) y las categorías también (ADR-0024).
 **Criterio de salida:** una venta en TikTok Shop aparece como pedido y descuenta stock.
 
 ### Fase 9 — Plataforma de agentes y publicación en Instagram
@@ -245,7 +252,10 @@ para Meta y TikTok; eventos de conversión desde el servidor; UTM guardados en e
 - Los agentes también recomiendan paquetes de productos y escriben guiones de grabación
   (tomas, duración, gancho, texto en pantalla) al estilo de los videos de referencia; el
   staff graba los videos y los sube por Quetzal (fase 4d). Nada de video generado por IA.
-  La lógica de paquetes se comparte con la fase 12 y se diseña una sola vez.
+  La lógica de paquetes se comparte con la fase 12 y se diseña una sola vez: un set es un paquete
+  armado por recomendación (x piezas de x modelos, según lo que se vende) que el staff aprueba;
+  no tiene stock propio, su disponibilidad se calcula con el stock en pieza suelta de sus
+  componentes y venderlo descuenta los componentes.
 - Menciones desde Ghosty Teams: agentes webhook que llegan a `/api/v1/ops/agents/invoke/`,
   con verificación de origen, permisos del usuario y tope de relevos entre agentes.
 - `evals/` con dataset y graders por agente, corriendo en el CI cuando cambian los prompts.
@@ -277,7 +287,10 @@ responde, la conversación pasa a ventas.
 **Entregables:** análisis de canasta sobre `OrderItem` (pares frecuentes, margen, stock);
 agente `@paquetes` que nombra y describe; `Bundle` y `BundleItem` como borrador con aprobación;
 venta de paquetes en las tiendas web. La recomendación de paquetes se comparte con la fase 9
-(guiones de video) y se diseña una sola vez.
+(guiones de video) y se diseña una sola vez. Un set es un paquete armado por recomendación
+(x piezas de x modelos, según lo que se vende) que el staff aprueba; no tiene stock propio, su
+disponibilidad se calcula con el stock en pieza suelta de sus componentes y venderlo descuenta
+los componentes.
 **Criterio de salida:** la sugerencia semanal genera un paquete, lo apruebas y se puede comprar.
 **Requisito:** al menos unos meses de historial de ventas.
 
