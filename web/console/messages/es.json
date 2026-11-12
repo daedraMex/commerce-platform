@@ -3,8 +3,29 @@
     "title": "Quetzal",
     "description": "Consola de personal"
   },
-  "Placeholder": {
-    "title": "Quetzal"
+  "Home": {
+    "subtitle": "Elige una sección para empezar."
+  },
+  "Navigation": {
+    "label": "Menú",
+    "home": "Inicio",
+    "photos": "Fotos",
+    "inventory": "Inventario",
+    "orders": "Pedidos",
+    "refunds": "Devoluciones",
+    "social": "Publicaciones"
+  },
+  "StoreSwitcher": {
+    "label": "Tienda"
+  },
+  "Theme": {
+    "label": "Tema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Sistema"
+  },
+  "Sections": {
+    "comingSoon": "Esta sección estará disponible pronto."
   },
   "SignIn": {
     "title": "Iniciar sesión",
