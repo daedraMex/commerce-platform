@@ -49,6 +49,16 @@ def compose_prompt(
     return prompt + "\n"
 
 
+GIT_RULE = (
+    "## You cannot run git\n\n"
+    "The runner already merged origin/main into this branch and will commit and push "
+    "your changes. You cannot run git (merge, rebase, fetch, commit or push). Never "
+    "imitate a git operation by editing files, for example by copying code from main "
+    "into this branch. If the review asks for a git operation, write it as the first "
+    "line of DECISIONS.md, starting with `OPEN QUESTION:`, and stop."
+)
+
+
 def compose_review_prompt(
     ticket: Ticket,
     *,
@@ -70,6 +80,7 @@ def compose_review_prompt(
         overlay=overlay,
     ).rstrip()
     prompt += "\n\n" + _review_section(review_body, comments)
+    prompt += "\n\n" + GIT_RULE
     if feedback:
         prompt += _feedback_section(feedback, failed_areas)
     return prompt + "\n"

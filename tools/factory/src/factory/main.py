@@ -55,6 +55,7 @@ LOG_TAIL_LINES = 30
 FACTORY_BOT_LOGIN = "xolo-bot"
 FACTORY_BRANCH_PREFIX = "nf/"
 OWNER_LOGIN = "daedraMex"
+MERGE_CONFLICT_CHECK = "branch conflicts with main; a human must merge main"
 
 
 @dataclass(frozen=True)
@@ -358,10 +359,27 @@ class Factory:
         worktree = self.git.create_worktree_from(
             self.settings.repo_dir, worktree, branch, f"origin/{branch}"
         )
+        log_path = self._log_path(ticket)
+        # The agent cannot run git, so the runner brings main in before the agent
+        # starts. A conflict goes to a human instead of letting the agent imitate
+        # a merge by editing files (PR #119).
+        self.git.fetch_main(self.settings.repo_dir)
+        if not self.git.merge_main(worktree):
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions="",
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check=MERGE_CONFLICT_CHECK,
+                attempts=0,
+            )
+        # Measured after the merge, so files that main brought in are not
+        # counted as the agent's changes by the protected-path check.
         base_sha = self.git.head_sha(worktree)
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
-        log_path = self._log_path(ticket)
         deadline = time.monotonic() + self.settings.time_limit_seconds
         made = 0
         decisions = ""

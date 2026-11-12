@@ -226,6 +226,34 @@ class Git:
             raise RuntimeError(f"could not create worktree for {branch}: {result.stderr.strip()}")
         return worktree
 
+    def merge_main(self, worktree: Path) -> bool:
+        """Merge origin/main into the worktree's branch with a merge commit.
+
+        Return False after aborting when the merge conflicts, so the branch is
+        left exactly as it was. Hooks are disabled like in ``commit_all``.
+        """
+        identity = commit_identity_args(self._bot_user_id)
+        result = self._run(
+            [
+                "git",
+                *identity,
+                "-c",
+                "core.hooksPath=/dev/null",
+                "merge",
+                "--no-edit",
+                "--no-ff",
+                "origin/main",
+            ],
+            str(worktree),
+            timeout=300,
+        )
+        if result.exit_code == 0:
+            return True
+        aborted = self._run(["git", "merge", "--abort"], str(worktree), timeout=120)
+        if aborted.exit_code != 0:
+            raise RuntimeError(f"git merge --abort failed: {aborted.stderr.strip()}")
+        return False
+
     def verify_commit_identity(self, repo_dir: Path) -> None:
         """Dry-check that git can build the explicit bot identity.
 

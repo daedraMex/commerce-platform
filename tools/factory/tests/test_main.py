@@ -40,6 +40,7 @@ class FakeGit:
         command_body=COMMAND_BODY,
         fetch_error=None,
         preflight_check_passed=True,
+        merge_conflict=False,
     ):
         self.check_result = check_passed
         self.check_output = check_output
@@ -49,6 +50,8 @@ class FakeGit:
         self.command_body = command_body
         self.fetch_error = fetch_error
         self.preflight_check_passed = preflight_check_passed
+        self.merge_conflict = merge_conflict
+        self.merged = []
         self.committed = []
         self.pushed = []
         self.worktrees = []
@@ -67,6 +70,11 @@ class FakeGit:
         self.events.append("fetch_main")
         if self.fetch_error is not None:
             raise self.fetch_error
+
+    def merge_main(self, worktree):
+        self.events.append("merge_main")
+        self.merged.append(str(worktree))
+        return not self.merge_conflict
 
     def fetch_branch(self, repo_dir, branch):
         self.events.append("fetch_branch")
@@ -1414,3 +1422,77 @@ def test_a_newer_review_on_the_same_pr_is_picked_up_again(tmp_path):
     assert len(runner.calls) == 10
     assert github.attempted_review_ids == {"5866656710"}
     assert review_attempts.attempted_ids() == {"5866656710", "5866656711"}
+
+
+def test_review_fix_merges_main_before_the_agent_runs(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=RecordingNotifier(),
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert len(git.merged) == 1 and git.merged[0].endswith("nf-7-ticket-7")
+    events = git.events
+    merge_at = events.index("merge_main")
+    before = events[:merge_at]
+    # The review worktree exists and main was fetched right before the merge,
+    # and the agent's check runs only after it.
+    assert before[-2:] == ["create_worktree", "fetch_main"]
+    assert "check" in events[merge_at:]
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+
+
+def test_review_fix_measures_protected_paths_after_the_merge(tmp_path):
+    # Changes that main brings in (for example to tools/factory) must not count
+    # as the agent's changes: the base is taken after the merge.
+    class MergingGit(FakeGit):
+        def merge_main(self, worktree):
+            self.head_sha_value = "m" * 40
+            return super().merge_main(worktree)
+
+    git = MergingGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=RecordingNotifier(),
+    )
+
+    factory.run()
+
+    assert [base for _worktree, base in git.diff_since] == ["m" * 40]
+
+
+def test_review_fix_on_a_branch_that_conflicts_with_main_goes_stuck_without_the_agent(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, merge_conflict=True)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    runner = FakeRunner()
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=notifier,
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert runner.calls == []
+    assert git.committed == []
+    assert git.pushed == []
+    assert notifier.stuck[0].failing_check == (
+        "branch conflicts with main; a human must merge main"
+    )
+    assert github.issue_labels == [(7, "needs-decision", "TOKEN")]

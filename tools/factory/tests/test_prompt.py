@@ -181,3 +181,19 @@ def test_compose_review_prompt_appends_check_feedback_after_the_review():
 
     assert prompt.index("Review feedback") < prompt.index("check.sh is still failing")
     assert "1 failed" in prompt
+
+
+def test_compose_review_prompt_says_the_agent_cannot_run_git():
+    prompt = compose_review_prompt(
+        Ticket(number=3, title="Add thing", body="Body."),
+        model="m",
+        branch="nf/3-add-thing",
+        command_template=COMMAND,
+        overlay=OVERLAY,
+        review_body="Please merge origin/main into this branch.",
+        comments=(),
+    )
+
+    assert "cannot run git" in prompt
+    assert "Never imitate a git operation by editing files" in prompt
+    assert "`OPEN QUESTION:`" in prompt
