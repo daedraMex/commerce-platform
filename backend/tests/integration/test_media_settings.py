@@ -38,9 +38,13 @@ def set_env(monkeypatch, **values):
 
 
 def test_r2_bucket_requires_a_media_base_url(settings_module, monkeypatch):
-    set_env(monkeypatch, R2_BUCKET_NAME="bucket")
+    set_env(
+        monkeypatch,
+        R2_BUCKET_NAME="bucket",
+        R2_PRIVATE_BUCKET_NAME="private",
+    )
 
-    with pytest.raises(ImproperlyConfigured):
+    with pytest.raises(ImproperlyConfigured, match="MEDIA_BASE_URL"):
         importlib.reload(settings_module)
 
 

@@ -138,6 +138,21 @@ S3_STORAGE_OPTIONS = {
     "querystring_auth": False,
 }
 
+if R2_PRIVATE_BUCKET_NAME:
+    private_storage = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            **S3_STORAGE_OPTIONS,
+            "bucket_name": R2_PRIVATE_BUCKET_NAME,
+            "object_parameters": {},
+        },
+    }
+else:
+    private_storage = {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": PRIVATE_MEDIA_ROOT},
+    }
+
 if R2_BUCKET_NAME:
     MEDIA_BASE_URL = env("MEDIA_BASE_URL", default="")
     if not MEDIA_BASE_URL:
@@ -153,34 +168,13 @@ if R2_BUCKET_NAME:
                 },
             },
         },
-        "private": {
-            "BACKEND": "storages.backends.s3.S3Storage",
-            "OPTIONS": {
-                **S3_STORAGE_OPTIONS,
-                "bucket_name": R2_PRIVATE_BUCKET_NAME,
-                "object_parameters": {},
-            },
-        },
+        "private": private_storage,
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
     }
 else:
     MEDIA_BASE_URL = env("MEDIA_BASE_URL", default=f"http://localhost:8000{MEDIA_URL}")
-    if R2_PRIVATE_BUCKET_NAME:
-        private_storage = {
-            "BACKEND": "storages.backends.s3.S3Storage",
-            "OPTIONS": {
-                **S3_STORAGE_OPTIONS,
-                "bucket_name": R2_PRIVATE_BUCKET_NAME,
-                "object_parameters": {},
-            },
-        }
-    else:
-        private_storage = {
-            "BACKEND": "django.core.files.storage.FileSystemStorage",
-            "OPTIONS": {"location": PRIVATE_MEDIA_ROOT},
-        }
     STORAGES = {
         "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",

@@ -31,6 +31,14 @@ def test_compose_has_no_beat_process():
     assert all("beat" not in str(service.get("command", "")) for service in services.values())
 
 
+def test_compose_worker_uses_the_minio_buckets():
+    worker = load_services()["worker"]
+
+    assert "catalog-media" in worker["environment"]["R2_BUCKET_NAME"]
+    assert "catalog-private" in worker["environment"]["R2_PRIVATE_BUCKET_NAME"]
+    assert "minio" in worker["environment"]["R2_ENDPOINT_URL"]
+
+
 def test_compose_runs_minio_with_pinned_release_images():
     services = load_services()
 
