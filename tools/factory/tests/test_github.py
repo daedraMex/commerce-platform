@@ -22,12 +22,14 @@ class FakeGh:
         *,
         prs=None,
         pr_details=None,
+        reviews=None,
         review_comments=None,
         issue=None,
     ):
         self.calls = []
         self.prs = prs
         self.pr_details = pr_details or {}
+        self.reviews = reviews
         self.review_comments = review_comments or []
         self.issue = issue
 
@@ -53,9 +55,21 @@ class FakeGh:
                 stdout = read_fixture("gh_pr_list.json")
         elif argv[:3] == ["gh", "pr", "view"]:
             number = int(argv[3])
-            stdout = json.dumps(self.pr_details.get(number, {}))
+            detail = self.pr_details.get(number, {})
+            stdout = json.dumps({"commits": detail.get("commits", [])})
         elif argv[:2] == ["gh", "api"]:
-            stdout = "\n".join(json.dumps(comment) for comment in self.review_comments)
+            endpoint = next((arg for arg in argv if arg.startswith("repos/")), "")
+            if endpoint.endswith("/reviews"):
+                if self.reviews is not None:
+                    stdout = json.dumps(self.reviews)
+                else:
+                    number = int(endpoint.split("/pulls/")[1].split("/")[0])
+                    reviews = self.pr_details.get(number, {}).get("reviews", [])
+                    stdout = json.dumps(reviews)
+            elif endpoint.endswith("/comments"):
+                stdout = "\n".join(json.dumps(comment) for comment in self.review_comments)
+            else:
+                stdout = ""
         elif argv[:3] == ["gh", "pr", "create"]:
             stdout = read_fixture("gh_pr_create.txt")
         elif argv[:3] in (["gh", "pr", "ready"], ["gh", "pr", "merge"]):
@@ -243,13 +257,14 @@ def test_open_pr_ticket_numbers_raises_on_invalid_json():
         GitHub(REPO, run=run)._open_pr_ticket_numbers("TOKEN")
 
 
-def _review(login, state, submitted_at, *, body="", review_id="R1"):
+def _review(login, state, submitted_at, *, body="", review_id=5866656710):
     return {
         "id": review_id,
-        "author": {"login": login},
+        "node_id": f"PRR_{review_id}",
+        "user": {"login": login, "type": "User"},
         "state": state,
         "body": body,
-        "submittedAt": submitted_at,
+        "submitted_at": submitted_at,
     }
 
 
@@ -327,8 +342,63 @@ def test_list_review_fixes_picks_only_owner_changes_requested():
         ("backend/apps/x/views.py", 42, "Rename this."),
         ("backend/apps/x/models.py", 9, "This line moved."),
     ]
-    assert "/reviews/R1/comments" in run.calls[-1][0][3]
+    assert "/reviews/5866656710/comments" in run.calls[-1][0][3]
     assert run.calls[-1][2] == {"GH_TOKEN": "TOKEN"}
+
+
+def test_review_comments_use_the_numeric_id_from_the_recorded_rest_fixture():
+    reviews = json.loads(read_fixture("gh_api_pr_reviews.json"))
+    numeric_id = str(reviews[0]["id"])
+    node_id = reviews[0]["node_id"]
+    run = FakeGh(
+        prs=[_pr(101)],
+        reviews=reviews,
+        pr_details={101: {"commits": []}},
+        review_comments=[
+            {
+                "path": "backend/apps/x/views.py",
+                "line": 42,
+                "original_line": 42,
+                "body": "Rename this.",
+            }
+        ],
+        issue=_issue(7),
+    )
+
+    fixes = GitHub(REPO, run=run).list_review_fixes(
+        author="xolo-bot", owner="daedraMex", token="TOKEN"
+    )
+
+    assert len(fixes) == 1
+    assert fixes[0].review_id == numeric_id
+    api_calls = [argv for argv, _cwd, _env in run.calls if argv[:2] == ["gh", "api"]]
+    assert any(f"/reviews/{numeric_id}/comments" in arg for argv in api_calls for arg in argv)
+    assert not any(node_id in arg for argv in api_calls for arg in argv)
+    assert any(argv[3].endswith("/reviews") for argv in api_calls if len(argv) > 3)
+    assert all(
+        "--json" in argv and argv[argv.index("--json") + 1] == "commits"
+        for argv, _cwd, _env in run.calls
+        if argv[:3] == ["gh", "pr", "view"]
+    )
+
+
+def test_a_ledger_entry_with_a_node_id_does_not_block_the_numeric_review_id():
+    run = FakeGh(
+        prs=[_pr(101)],
+        reviews=json.loads(read_fixture("gh_api_pr_reviews.json")),
+        pr_details={101: {"commits": []}},
+        review_comments=[],
+        issue=_issue(7),
+    )
+
+    fixes = GitHub(REPO, run=run).list_review_fixes(
+        author="xolo-bot",
+        owner="daedraMex",
+        attempted_review_ids=frozenset({"PRR_kwDOVUbRpc8AAAABXa4Txg"}),
+    )
+
+    assert len(fixes) == 1
+    assert fixes[0].review_id == "5866656710"
 
 
 def test_list_review_fixes_skips_an_approved_owner_review():
@@ -447,7 +517,7 @@ def test_list_review_fixes_skips_an_already_attempted_review_id():
     fixes = GitHub(REPO, run=run).list_review_fixes(
         author="xolo-bot",
         owner="daedraMex",
-        attempted_review_ids=frozenset({"R1"}),
+        attempted_review_ids=frozenset({"5866656710"}),
     )
 
     assert fixes == []
@@ -511,3 +581,27 @@ def test_list_review_fixes_raises_when_the_review_view_fails():
 
     with pytest.raises(GitHubError, match="review lookup failed"):
         GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")
+
+
+@pytest.mark.parametrize("separator", ["", "\n"])
+def test_json_pages_flattens_concatenated_paginate_pages_in_order(separator):
+    text = '[{"id": 1}, {"id": 2}]' + separator + '[{"id": 3}]\n'
+
+    pages = GitHub(REPO)._json_pages(text, "gh api reviews")
+
+    assert pages == [{"id": 1}, {"id": 2}, {"id": 3}]
+
+
+def test_json_pages_returns_an_empty_list_for_empty_output():
+    assert GitHub(REPO)._json_pages("", "gh api reviews") == []
+    assert GitHub(REPO)._json_pages("  \n", "gh api reviews") == []
+
+
+def test_json_pages_raises_on_invalid_json():
+    with pytest.raises(GitHubError, match="gh api reviews returned invalid JSON"):
+        GitHub(REPO)._json_pages('[{"id": 1}][not json', "gh api reviews")
+
+
+def test_json_pages_raises_when_a_page_is_not_a_list():
+    with pytest.raises(GitHubError, match="gh api reviews returned an unexpected JSON shape"):
+        GitHub(REPO)._json_pages('[{"id": 1}]{"message": "Not Found"}', "gh api reviews")

@@ -14,7 +14,7 @@ from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .diff import touches_protected_paths
 from .git import Git, verify_git_version
-from .github import GitHub
+from .github import GitHub, GitHubError
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
 from .models import select_model
@@ -24,6 +24,7 @@ from .notify import (
     PausedInfo,
     PrReadyInfo,
     ReviewAddressedInfo,
+    ReviewSkippedInfo,
     RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
@@ -205,6 +206,11 @@ class Factory:
                 attempted_review_ids=frozenset(attempted),
                 token=token,
             )
+        except GitHubError as exc:
+            reason = short_error(exc)
+            print(f"skipping review fixes: {reason}", file=sys.stderr)
+            self._notify(self.notifier.send_review_skipped, ReviewSkippedInfo(reason=reason))
+            return None
         except Exception as exc:
             print(f"skipping review fixes: {short_error(exc)}", file=sys.stderr)
             return None

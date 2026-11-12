@@ -6,6 +6,7 @@ from factory.notify import (
     PausedInfo,
     PrReadyInfo,
     ReviewAddressedInfo,
+    ReviewSkippedInfo,
     RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
@@ -15,6 +16,7 @@ from factory.notify import (
     build_pr_ready_message,
     build_review_addressed_keyboard,
     build_review_addressed_message,
+    build_review_skipped_message,
     build_run_failed_message,
     build_stuck_message,
     escape_html,
@@ -129,6 +131,14 @@ def test_paused_message_names_the_reason_and_escapes_html():
     msg = build_paused_message(PausedInfo(reason="2 PRs waiting for review <x>"))
     assert "Night factory paused" in msg
     assert "2 PRs waiting for review &lt;x&gt;" in msg
+
+
+def test_review_skipped_message_names_the_reason_and_escapes_html():
+    msg = build_review_skipped_message(
+        ReviewSkippedInfo(reason="gh api reviews failed: HTTP 404 <not found>")
+    )
+    assert "Review fixes skipped" in msg
+    assert "gh api reviews failed: HTTP 404 &lt;not found&gt;" in msg
 
 
 def test_build_handoff_command_with_and_without_host():

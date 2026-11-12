@@ -262,6 +262,33 @@ class GitHub:
         return self._to_ticket(obj)
 
     def _reviews_and_commits(self, number: int, token: str | None) -> dict:
+        return {
+            "reviews": self._reviews(number, token),
+            "commits": self._commits(number, token),
+        }
+
+    def _reviews(self, number: int, token: str | None) -> list[dict]:
+        """Read reviews from REST, whose ``id`` is the database id comments need.
+
+        The GraphQL ``id`` is a node id (``PRR_...``), which the REST comments
+        route rejects with a 404, so reviews must come from the REST API.
+        """
+        result = self._run(
+            [
+                "gh",
+                "api",
+                "--paginate",
+                f"repos/{self.repo}/pulls/{number}/reviews",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            raise GitHubError(f"gh api reviews failed: {result.stderr.strip() or result.exit_code}")
+        return self._json_pages(result.stdout, "gh api reviews")
+
+    def _commits(self, number: int, token: str | None) -> list[dict]:
         result = self._run(
             [
                 "gh",
@@ -271,7 +298,7 @@ class GitHub:
                 "--repo",
                 self.repo,
                 "--json",
-                "reviews,commits",
+                "commits",
             ],
             cwd="/",
             timeout=120,
@@ -285,7 +312,10 @@ class GitHub:
             raise GitHubError("gh pr view returned invalid JSON") from exc
         if not isinstance(detail, dict):
             raise GitHubError("gh pr view returned an unexpected JSON shape")
-        return detail
+        commits = detail.get("commits") or []
+        if not isinstance(commits, list):
+            raise GitHubError("gh pr view returned an unexpected commits shape")
+        return commits
 
     def _review_comments(
         self,
@@ -340,6 +370,26 @@ class GitHub:
         if not isinstance(value, list):
             raise GitHubError(f"{source} returned an unexpected JSON shape")
         return value
+
+    def _json_pages(self, text: str, source: str) -> list[dict]:
+        """Flatten a ``gh api --paginate`` stream of JSON arrays."""
+        decoder = json.JSONDecoder()
+        values: list[dict] = []
+        index = 0
+        length = len(text)
+        while index < length:
+            while index < length and text[index].isspace():
+                index += 1
+            if index >= length:
+                break
+            try:
+                value, index = decoder.raw_decode(text, index)
+            except json.JSONDecodeError as exc:
+                raise GitHubError(f"{source} returned invalid JSON") from exc
+            if not isinstance(value, list):
+                raise GitHubError(f"{source} returned an unexpected JSON shape")
+            values.extend(value)
+        return values
 
     def add_issue_label(self, number: int, label: str, token: str) -> None:
         self._run(
@@ -473,10 +523,10 @@ def _latest_owner_review(reviews: list[dict], owner: str) -> tuple[dict | None, 
     """Return the owner's most recent review and when it was submitted."""
     latest: tuple[datetime, dict] | None = None
     for review in reviews:
-        login = (review.get("author") or {}).get("login", "")
+        login = (review.get("user") or {}).get("login", "")
         if not _same_login(login, owner):
             continue
-        submitted_at = _parse_timestamp(review.get("submittedAt", ""))
+        submitted_at = _parse_timestamp(review.get("submitted_at", ""))
         if submitted_at is None:
             continue
         if latest is None or submitted_at > latest[0]:
