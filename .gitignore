@@ -26,13 +26,18 @@ node_modules/
 out/
 dist/
 build/
-.expo/
 .turbo/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+
+# Mobile (Kotlin Multiplatform, Gradle)
+mobile/**/.gradle/
+mobile/**/build/
+mobile/**/.kotlin/
+mobile/**/local.properties
 
 # Generated API client (built from packages/api-client/openapi.json)
 packages/api-client/src/generated/
