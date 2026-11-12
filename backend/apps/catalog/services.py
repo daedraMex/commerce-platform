@@ -213,6 +213,10 @@ class CatalogService:
         """Return a variant of the store, or None when another store owns it."""
         return self._repository.get_variant(store.id, variant_id)
 
+    def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
+        """Return a media of the store, or None when another store owns it."""
+        return self._repository.media_by_id(store.id, media_id)
+
     def create_product_image(
         self,
         store: StoreReference,
