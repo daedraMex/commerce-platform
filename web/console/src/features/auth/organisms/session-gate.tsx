@@ -1,0 +1,124 @@
+"use client";
+
+import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
+import * as React from "react";
+
+import { useApiV1MeRetrieve } from "@commerce-platform/api-client";
+
+import { Button } from "@/components/atoms/button";
+import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@/lib/auth/constants";
+
+type SessionGateProps = {
+  store: string;
+  children: React.ReactNode;
+};
+
+type RequestError = {
+  response?: { status?: number };
+};
+
+function statusOf(error: unknown): number | undefined {
+  return (error as RequestError | null)?.response?.status;
+}
+
+export function SessionGate({ store, children }: SessionGateProps) {
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const t = useTranslations("Session");
+  const [signingOut, setSigningOut] = React.useState(false);
+  const signingOutRef = React.useRef(false);
+
+  const { data, error, isPending } = useApiV1MeRetrieve({
+    query: { retry: false },
+  });
+
+  const memberships = React.useMemo(() => data?.memberships ?? [], [data]);
+  const membership = memberships.find((item) => item.store.slug === store);
+  const unauthorized = statusOf(error) === 401 || statusOf(error) === 403;
+  const unknownStore = data !== undefined && memberships.length > 0 && !membership;
+
+  React.useEffect(() => {
+    if (unauthorized && !signingOutRef.current) {
+      router.replace(`/sign-in?next=${encodeURIComponent(`/${store}`)}`);
+    }
+  }, [router, store, unauthorized]);
+
+  React.useEffect(() => {
+    if (unknownStore && memberships[0]) {
+      router.replace(`/${memberships[0].store.slug}`);
+    }
+  }, [memberships, router, unknownStore]);
+
+  const signOut = async () => {
+    signingOutRef.current = true;
+    setSigningOut(true);
+    try {
+      await fetch("/api/auth/sign-out", {
+        method: "POST",
+        headers: { [CSRF_HEADER]: CSRF_HEADER_VALUE },
+      });
+      queryClient.clear();
+      router.replace("/sign-in");
+      router.refresh();
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
+  if (unauthorized || unknownStore) {
+    return null;
+  }
+
+  if (isPending) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md items-center justify-center p-6 text-sm">
+        {t("loading")}
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
+        <p className="text-sm">{t("error")}</p>
+        <Button variant="outline" onClick={() => router.refresh()}>
+          {t("retry")}
+        </Button>
+      </main>
+    );
+  }
+
+  if (data && !membership) {
+    return (
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-4 p-6 text-center">
+        <h1 className="text-2xl font-semibold">{t("noStoresTitle")}</h1>
+        <p className="text-sm">{t("noStoresBody")}</p>
+        <Button variant="outline" onClick={signOut} disabled={signingOut}>
+          {t("signOut")}
+        </Button>
+      </main>
+    );
+  }
+
+  return (
+    <div className="min-h-dvh">
+      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+        <div>
+          <p className="text-sm font-medium">{membership?.store.name}</p>
+          <p className="text-xs text-foreground/60">{data?.user.email}</p>
+        </div>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={signOut}
+          disabled={signingOut}
+        >
+          {t("signOut")}
+        </Button>
+      </header>
+      {children}
+    </div>
+  );
+}
