@@ -218,40 +218,43 @@ def _example_codes(operation, status):
     return {example["value"]["code"] for example in media["examples"].values()}
 
 
-def test_schema_documents_staff_me_with_an_example_per_status(schema):
-    operation = schema["paths"]["/api/v1/staff/me/"]["get"]
+def test_schema_documents_me_with_an_example_per_status(schema):
+    operation = schema["paths"]["/api/v1/me/"]["get"]
 
     success = operation["responses"]["200"]["content"]["application/json"]
     assert any(
         example["value"]
         == {
-            "store": {"slug": "home", "name": "Home"},
-            "role": "store_admin",
-            "permissions": [
-                "catalog.manage",
-                "inventory.adjust",
-                "orders.place_manual",
-                "social.approve_post",
+            "user": {"id": 1, "email": "ana@example.com"},
+            "memberships": [
+                {
+                    "store": {
+                        "slug": "home",
+                        "name": "Home",
+                        "accent_color": "#4f46e5",
+                    },
+                    "role": "store_admin",
+                    "permissions": [
+                        "catalog.manage",
+                        "inventory.adjust",
+                        "orders.place_manual",
+                        "social.approve_post",
+                    ],
+                }
             ],
         }
         for example in success["examples"].values()
     )
-    assert _example_codes(operation, "400") == {
-        "store_header_missing",
-        "store_header_invalid",
-        "store_not_found",
-    }
     assert _example_codes(operation, "401") == {"not_authenticated", "token_invalid"}
-    assert _example_codes(operation, "403") == {"permission_denied"}
 
 
-def test_schema_documents_staff_me_requires_the_store_header(schema):
-    parameters = schema["paths"]["/api/v1/staff/me/"]["get"]["parameters"]
+def test_schema_documents_me_as_a_global_endpoint_without_the_store_header(schema):
+    operation = schema["paths"]["/api/v1/me/"]["get"]
 
-    assert any(
-        parameter["name"] == "X-Store" and parameter["in"] == "header" and parameter["required"]
-        for parameter in parameters
-    )
+    assert ("X-Store", "header") not in {
+        (item["name"], item["in"]) for item in operation.get("parameters", [])
+    }
+    assert "/api/v1/staff/me/" not in schema["paths"]
 
 
 def test_schema_documents_the_staff_product_list(schema):

@@ -1,6 +1,5 @@
 from drf_spectacular.utils import (
     OpenApiExample,
-    OpenApiParameter,
     OpenApiResponse,
     extend_schema,
     extend_schema_view,
@@ -11,20 +10,18 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-from apps.accounts.permissions import IsStoreStaff
 from apps.accounts.serializers import (
     EmailTokenObtainPairSerializer,
     LogoutRequestSerializer,
+    MeSerializer,
     RefreshTokenInvalid,
     RotatingTokenRefreshSerializer,
-    StaffMeSerializer,
     TokenObtainRequestSerializer,
     TokenPairResponseSerializer,
     TokenRefreshRequestSerializer,
     TokenRefreshResponseSerializer,
 )
-from apps.accounts.services import blacklist_refresh_token
-from apps.shared.interfaces.views import StoreScopedMixin
+from apps.accounts.services import blacklist_refresh_token, get_active_memberships
 from config.schema import problem_response
 
 TOKEN_PAIR_EXAMPLE = OpenApiExample(
@@ -154,66 +151,68 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-STAFF_ME_EXAMPLE = OpenApiExample(
+ME_EXAMPLE = OpenApiExample(
     "Store admin",
     value={
-        "store": {"slug": "home", "name": "Home"},
-        "role": "store_admin",
-        "permissions": [
-            "catalog.manage",
-            "inventory.adjust",
-            "orders.place_manual",
-            "social.approve_post",
+        "user": {"id": 1, "email": "ana@example.com"},
+        "memberships": [
+            {
+                "store": {
+                    "slug": "home",
+                    "name": "Home",
+                    "accent_color": "#4f46e5",
+                },
+                "role": "store_admin",
+                "permissions": [
+                    "catalog.manage",
+                    "inventory.adjust",
+                    "orders.place_manual",
+                    "social.approve_post",
+                ],
+            }
         ],
     },
     response_only=True,
 )
 
-STORE_HEADER_PARAMETER = OpenApiParameter(
-    "X-Store",
-    location=OpenApiParameter.HEADER,
-    required=True,
-    description="Slug of the store the request is scoped to, such as home.",
+
+@extend_schema(
+    summary="Your account and store memberships",
+    description=(
+        "The signed-in user and every store where they have an active membership, so the "
+        "console can choose a store. This is a global endpoint: it needs no X-Store header. "
+        "It replaces the removed store-scoped GET /api/v1/staff/me/ endpoint."
+    ),
+    responses={
+        200: OpenApiResponse(
+            response=MeSerializer,
+            description="Your account and every store where you are active staff.",
+            examples=[ME_EXAMPLE],
+        ),
+        **problem_response(
+            401,
+            ("not_authenticated", "Authentication credentials were not provided."),
+            ("token_invalid", "Given token not valid for any token type"),
+        ),
+    },
 )
-
-
-@extend_schema_view(
-    get=extend_schema(
-        parameters=[STORE_HEADER_PARAMETER],
-        responses={
-            200: OpenApiResponse(
-                response=StaffMeSerializer,
-                description="Your role and permissions in the store.",
-                examples=[STAFF_ME_EXAMPLE],
-            ),
-            **problem_response(
-                400,
-                ("store_header_missing", "The X-Store header is required."),
-                ("store_header_invalid", "The X-Store header is not a valid store slug."),
-                ("store_not_found", "No active store matches the X-Store header."),
-            ),
-            **problem_response(
-                401,
-                ("not_authenticated", "Authentication credentials were not provided."),
-                ("token_invalid", "Given token not valid for any token type"),
-            ),
-            **problem_response(
-                403,
-                ("permission_denied", IsStoreStaff.message),
-            ),
-        },
-    )
-)
-class StaffMeView(StoreScopedMixin, APIView):
-    store_permission_classes = [IsStoreStaff]
-
+class MeView(APIView):
     def get(self, request, *args, **kwargs):
-        membership = request.store_membership
         data = {
-            "store": {"slug": membership.store.slug, "name": membership.store.name},
-            "role": membership.role.name,
-            "permissions": sorted(
-                permission.code for permission in membership.role.permissions.all()
-            ),
+            "user": {"id": request.user.id, "email": request.user.email},
+            "memberships": [
+                {
+                    "store": {
+                        "slug": membership.store.slug,
+                        "name": membership.store.name,
+                        "accent_color": membership.store.accent_color,
+                    },
+                    "role": membership.role.name,
+                    "permissions": sorted(
+                        permission.code for permission in membership.role.permissions.all()
+                    ),
+                }
+                for membership in get_active_memberships(user=request.user)
+            ],
         }
-        return Response(StaffMeSerializer(data).data)
+        return Response(MeSerializer(data).data)

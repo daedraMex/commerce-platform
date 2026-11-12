@@ -140,6 +140,85 @@
         ],
         "type": "object"
       },
+      "Me": {
+        "properties": {
+          "memberships": {
+            "description": "Every store where the user has an active membership.",
+            "items": {
+              "$ref": "#/components/schemas/MeMembership"
+            },
+            "type": "array"
+          },
+          "user": {
+            "$ref": "#/components/schemas/MeUser"
+          }
+        },
+        "required": [
+          "memberships",
+          "user"
+        ],
+        "type": "object"
+      },
+      "MeMembership": {
+        "properties": {
+          "permissions": {
+            "description": "Permission codes the role allows in this store, sorted alphabetically.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "role": {
+            "description": "The role the user holds in this store.",
+            "type": "string"
+          },
+          "store": {
+            "$ref": "#/components/schemas/MeStore"
+          }
+        },
+        "required": [
+          "permissions",
+          "role",
+          "store"
+        ],
+        "type": "object"
+      },
+      "MeStore": {
+        "properties": {
+          "accent_color": {
+            "description": "Six-digit hex color the console uses for this store.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "accent_color",
+          "name",
+          "slug"
+        ],
+        "type": "object"
+      },
+      "MeUser": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "type": "string"
+          },
+          "id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "email",
+          "id"
+        ],
+        "type": "object"
+      },
       "Option": {
         "properties": {
           "code": {
@@ -508,30 +587,6 @@
         ],
         "type": "object"
       },
-      "StaffMe": {
-        "properties": {
-          "permissions": {
-            "description": "Permission codes the role allows in this store, sorted alphabetically.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "role": {
-            "description": "The role the user holds in this store.",
-            "type": "string"
-          },
-          "store": {
-            "$ref": "#/components/schemas/StaffStore"
-          }
-        },
-        "required": [
-          "permissions",
-          "role",
-          "store"
-        ],
-        "type": "object"
-      },
       "StaffProduct": {
         "properties": {
           "category": {
@@ -565,21 +620,6 @@
           "main_image",
           "name",
           "needs_main_image",
-          "slug"
-        ],
-        "type": "object"
-      },
-      "StaffStore": {
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
           "slug"
         ],
         "type": "object"
@@ -1875,21 +1915,10 @@
         ]
       }
     },
-    "/api/v1/staff/me/": {
+    "/api/v1/me/": {
       "get": {
-        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
-        "operationId": "api_v1_staff_me_retrieve",
-        "parameters": [
-          {
-            "description": "Slug of the store the request is scoped to, such as home.",
-            "in": "header",
-            "name": "X-Store",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
+        "description": "The signed-in user and every store where they have an active membership, so the console can choose a store. This is a global endpoint: it needs no X-Store header. It replaces the removed store-scoped GET /api/v1/staff/me/ endpoint.",
+        "operationId": "api_v1_me_retrieve",
         "responses": {
           "200": {
             "content": {
@@ -1898,68 +1927,35 @@
                   "StoreAdmin": {
                     "summary": "Store admin",
                     "value": {
-                      "permissions": [
-                        "catalog.manage",
-                        "inventory.adjust",
-                        "orders.place_manual",
-                        "social.approve_post"
+                      "memberships": [
+                        {
+                          "permissions": [
+                            "catalog.manage",
+                            "inventory.adjust",
+                            "orders.place_manual",
+                            "social.approve_post"
+                          ],
+                          "role": "store_admin",
+                          "store": {
+                            "accent_color": "#4f46e5",
+                            "name": "Home",
+                            "slug": "home"
+                          }
+                        }
                       ],
-                      "role": "store_admin",
-                      "store": {
-                        "name": "Home",
-                        "slug": "home"
+                      "user": {
+                        "email": "ana@example.com",
+                        "id": 1
                       }
                     }
                   }
                 },
                 "schema": {
-                  "$ref": "#/components/schemas/StaffMe"
+                  "$ref": "#/components/schemas/Me"
                 }
               }
             },
-            "description": "Your role and permissions in the store."
-          },
-          "400": {
-            "content": {
-              "application/problem+json": {
-                "examples": {
-                  "StoreHeaderInvalid": {
-                    "summary": "store_header_invalid",
-                    "value": {
-                      "code": "store_header_invalid",
-                      "detail": "The X-Store header is not a valid store slug.",
-                      "status": 400,
-                      "title": "Bad Request",
-                      "type": "about:blank"
-                    }
-                  },
-                  "StoreHeaderMissing": {
-                    "summary": "store_header_missing",
-                    "value": {
-                      "code": "store_header_missing",
-                      "detail": "The X-Store header is required.",
-                      "status": 400,
-                      "title": "Bad Request",
-                      "type": "about:blank"
-                    }
-                  },
-                  "StoreNotFound": {
-                    "summary": "store_not_found",
-                    "value": {
-                      "code": "store_not_found",
-                      "detail": "No active store matches the X-Store header.",
-                      "status": 400,
-                      "title": "Bad Request",
-                      "type": "about:blank"
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+            "description": "Your account and every store where you are active staff."
           },
           "401": {
             "content": {
@@ -1992,28 +1988,6 @@
               }
             },
             "description": "Authentication credentials were not provided. Given token not valid for any token type"
-          },
-          "403": {
-            "content": {
-              "application/problem+json": {
-                "examples": {
-                  "PermissionDenied": {
-                    "summary": "permission_denied",
-                    "value": {
-                      "code": "permission_denied",
-                      "detail": "You are not staff of this store.",
-                      "status": 403,
-                      "title": "Forbidden",
-                      "type": "about:blank"
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            },
-            "description": "You are not staff of this store."
           }
         },
         "security": [
@@ -2021,6 +1995,7 @@
             "jwtAuth": []
           }
         ],
+        "summary": "Your account and store memberships",
         "tags": [
           "api"
         ]
