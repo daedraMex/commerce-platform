@@ -12,7 +12,9 @@ for one store must call the global `GET /api/v1/me/` instead, which needs no
 - `user`: the signed-in user's `id` and `email`.
 - `memberships`: every store where the user has an active membership, each with
   the store's `slug`, `name` and `accent_color`, the `role`, and the role's
-  `permissions` sorted alphabetically.
+  `permissions` sorted alphabetically. Memberships themselves are ordered by
+  store name and then slug, so the console's store switcher is stable and
+  readable.
 
 Inactive memberships, inactive users and inactive stores are excluded. A platform
 operator without a membership gets an empty `memberships` list. This is the

@@ -4,19 +4,24 @@ from drf_spectacular.utils import (
     extend_schema,
     extend_schema_view,
 )
+from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
 from apps.accounts.serializers import (
     EmailTokenObtainPairSerializer,
+    LogoutRequestSerializer,
     MeSerializer,
+    RefreshTokenInvalid,
+    RotatingTokenRefreshSerializer,
     TokenObtainRequestSerializer,
     TokenPairResponseSerializer,
     TokenRefreshRequestSerializer,
     TokenRefreshResponseSerializer,
 )
-from apps.accounts.services import get_active_memberships
+from apps.accounts.services import blacklist_refresh_token, get_active_memberships
 from config.schema import problem_response
 
 TOKEN_PAIR_EXAMPLE = OpenApiExample(
@@ -28,10 +33,10 @@ TOKEN_PAIR_EXAMPLE = OpenApiExample(
     response_only=True,
 )
 
-ACCESS_TOKEN_EXAMPLE = OpenApiExample(
-    "Access token",
-    value={"access": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access"},
-    response_only=True,
+REFRESH_TOKEN_EXAMPLE = OpenApiExample(
+    "Refresh token",
+    value={"refresh": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh"},
+    request_only=True,
 )
 
 
@@ -79,8 +84,11 @@ class EmailTokenObtainPairView(TokenObtainPairView):
         responses={
             200: OpenApiResponse(
                 response=TokenRefreshResponseSerializer,
-                description="A new access token.",
-                examples=[ACCESS_TOKEN_EXAMPLE],
+                description=(
+                    "A new access and refresh token pair. The refresh token sent is "
+                    "blacklisted and can no longer be used."
+                ),
+                examples=[TOKEN_PAIR_EXAMPLE],
             ),
             **problem_response(
                 400,
@@ -98,7 +106,49 @@ class EmailTokenObtainPairView(TokenObtainPairView):
     )
 )
 class EmailTokenRefreshView(TokenRefreshView):
-    pass
+    serializer_class = RotatingTokenRefreshSerializer
+
+
+@extend_schema_view(
+    post=extend_schema(
+        request=LogoutRequestSerializer,
+        examples=[REFRESH_TOKEN_EXAMPLE],
+        responses={
+            204: OpenApiResponse(
+                description=(
+                    "The refresh token is blacklisted. Signing out again with the same "
+                    "token also returns 204."
+                ),
+            ),
+            **problem_response(
+                400,
+                (
+                    "validation_error",
+                    "Validation failed.",
+                    _missing_field_errors("refresh"),
+                ),
+            ),
+            **problem_response(
+                401,
+                ("not_authenticated", "Authentication credentials were not provided."),
+                ("token_invalid", RefreshTokenInvalid.default_detail),
+            ),
+        },
+    )
+)
+class LogoutView(APIView):
+    """Sign out by blacklisting one of your own refresh tokens."""
+
+    def post(self, request, *args, **kwargs):
+        serializer = LogoutRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            blacklist_refresh_token(
+                raw_token=serializer.validated_data["refresh"], user=request.user
+            )
+        except TokenError as exc:
+            raise RefreshTokenInvalid() from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 ME_EXAMPLE = OpenApiExample(

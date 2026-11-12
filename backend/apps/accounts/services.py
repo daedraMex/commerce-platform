@@ -1,4 +1,27 @@
+from rest_framework_simplejwt.settings import api_settings as jwt_settings
+from rest_framework_simplejwt.tokens import RefreshToken, TokenError
+
 from apps.accounts.models import Role, StoreMembership
+
+
+class _RefreshTokenAllowingBlacklisted(RefreshToken):
+    """Verifies signature, expiry and type, but accepts an already blacklisted token."""
+
+    def check_blacklist(self):
+        pass
+
+
+def blacklist_refresh_token(*, raw_token, user):
+    """Blacklist ``raw_token`` so it can never be refreshed again (ADR-0027).
+
+    Blacklisting a token twice is a no-op. Raises ``TokenError`` when the token is
+    malformed, expired, not a refresh token, or belongs to another user.
+    """
+    token = _RefreshTokenAllowingBlacklisted(raw_token)
+    owner_id = token.payload.get(jwt_settings.USER_ID_CLAIM)
+    if owner_id != str(getattr(user, jwt_settings.USER_ID_FIELD)):
+        raise TokenError("Token belongs to another user.")
+    token.blacklist()
 
 
 def grant_membership(*, user, store, role_name):
@@ -36,7 +59,8 @@ def get_active_memberships(*, user):
     """Return every active membership of ``user``, with store, role and permissions loaded.
 
     Inactive memberships, inactive users and inactive stores grant nothing, so none of
-    them appear here either.
+    them appear here either. Memberships are ordered by store name and then slug so the
+    console's store switcher is stable and readable.
     """
     if not user.is_authenticated:
         return StoreMembership.objects.none()
@@ -44,6 +68,7 @@ def get_active_memberships(*, user):
         _active_memberships(user_id=user.id)
         .select_related("store", "role")
         .prefetch_related("role__permissions")
+        .order_by("store__name", "store__slug")
     )
 
 

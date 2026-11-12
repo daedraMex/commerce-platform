@@ -78,6 +78,10 @@ def test_user_with_one_store_gets_its_store_role_and_sorted_permissions(client, 
 
 
 def test_user_with_two_stores_gets_both_memberships(client, home, anime, user):
+    home.name = "Alpha Store"
+    home.save()
+    anime.name = "Zulu Store"
+    anime.save()
     grant_membership(user=user, store=home, role_name="owner")
     grant_membership(user=user, store=anime, role_name="support")
 
@@ -85,15 +89,32 @@ def test_user_with_two_stores_gets_both_memberships(client, home, anime, user):
 
     assert response.status_code == 200
     memberships = response.json()["memberships"]
-    assert [membership["store"]["slug"] for membership in memberships] == ["anime", "home"]
-    assert memberships[0]["role"] == "support"
-    assert memberships[0]["permissions"] == ["orders.place_manual"]
-    assert memberships[1]["role"] == "owner"
-    assert memberships[1]["store"] == {
+    assert [membership["store"]["slug"] for membership in memberships] == ["home", "anime"]
+    assert memberships[0]["role"] == "owner"
+    assert memberships[0]["store"] == {
         "slug": "home",
-        "name": "Home",
+        "name": "Alpha Store",
         "accent_color": "#4f46e5",
     }
+    assert memberships[1]["role"] == "support"
+    assert memberships[1]["permissions"] == ["orders.place_manual"]
+
+
+def test_memberships_with_the_same_name_are_ordered_by_slug(client, home, anime, user):
+    home.name = "Same Store"
+    home.save()
+    anime.name = "Same Store"
+    anime.save()
+    grant_membership(user=user, store=home, role_name="owner")
+    grant_membership(user=user, store=anime, role_name="support")
+
+    response = get_me(client, user)
+
+    assert response.status_code == 200
+    assert [membership["store"]["slug"] for membership in response.json()["memberships"]] == [
+        "anime",
+        "home",
+    ]
 
 
 def test_store_accent_color_is_returned(client, home, user):
