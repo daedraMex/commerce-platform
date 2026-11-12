@@ -733,3 +733,58 @@ def test_diff_stats_since_uses_the_given_base():
         "--diff-filter=A",
         "--name-only",
     ]
+
+
+def test_merge_main_merges_origin_main_with_the_bot_identity_and_no_hooks():
+    run = RecordingRun()
+    worktree = Path("/srv/factory/worktrees/nf-7-ticket-7")
+
+    merged = Git(run=run, bot_user_id="353808367").merge_main(worktree)
+
+    assert merged is True
+    assert run.calls == [
+        (
+            [
+                "git",
+                *commit_identity_args("353808367"),
+                "-c",
+                "core.hooksPath=/dev/null",
+                "merge",
+                "--no-edit",
+                "--no-ff",
+                "origin/main",
+            ],
+            str(worktree),
+            None,
+            False,
+        ),
+    ]
+
+
+def test_merge_main_aborts_and_reports_a_conflict():
+    run = SequenceRun(
+        [
+            CommandResult(exit_code=1, stdout="CONFLICT (content): Merge conflict", stderr=""),
+            CommandResult(exit_code=0, stdout="", stderr=""),
+        ]
+    )
+    worktree = Path("/srv/factory/worktrees/nf-7-ticket-7")
+
+    merged = Git(run=run, bot_user_id="353808367").merge_main(worktree)
+
+    assert merged is False
+    assert run.calls[1] == (["git", "merge", "--abort"], str(worktree), None, False)
+
+
+def test_merge_main_raises_when_the_abort_fails():
+    run = SequenceRun(
+        [
+            CommandResult(exit_code=1, stdout="CONFLICT (content): Merge conflict", stderr=""),
+            CommandResult(exit_code=128, stdout="", stderr="no merge to abort"),
+        ]
+    )
+
+    with pytest.raises(RuntimeError, match="git merge --abort failed: no merge to abort"):
+        Git(run=run, bot_user_id="353808367").merge_main(
+            Path("/srv/factory/worktrees/nf-7-ticket-7")
+        )

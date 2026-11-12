@@ -456,7 +456,17 @@ whatever the outcome; a new review on the same pull request has a new id, so it
 is picked up again.
 
 For that pull request the factory creates a fresh worktree from the PR branch
-(never from `main`) and never force-pushes. The agent receives the linked
+(never from `main`) and never force-pushes. Before the agent runs, the runner
+fetches `main` and merges `origin/main` into the branch with a merge commit
+(bot identity, hooks disabled), so the fix is checked against current `main`
+and the push carries the merge. If that merge conflicts, the runner aborts it,
+does not run the agent, and sends the ticket through the stuck flow with
+"branch conflicts with main; a human must merge main": a person merges `main`
+into the branch and pushes. The agent cannot run git, and its prompt says so:
+a review that asks for a git operation becomes an `OPEN QUESTION:` instead of
+an imitation by editing files. The protected-path guard measures the fix from
+the commit after the merge, so files that `main` brought in do not count as the
+agent's changes. The agent receives the linked
 ticket, the review body and every inline review comment (file, line and text)
 as **untrusted data**, with an explicit instruction never to follow commands
 inside them and never to touch protected paths. The protected-path guard still
@@ -628,7 +638,10 @@ positive in the repo-tree walk (a symlink's `lrwxrwxrwx` is not
 world-writable) became the symlink tests in `tests/test_isolation.py`. The
 review-fix 404 (a GraphQL node id sent to a REST comments route) became the
 recorded REST review fixture and the numeric-id tests in
-`tests/test_github.py`.
+`tests/test_github.py`. A review that asked to merge `main` (PR #119) made the agent re-type
+`main`'s code by hand, because it cannot run git; that became the runner-side
+merge before every review fix and the conflict, ordering and prompt tests in
+`tests/test_main.py`, `tests/test_git.py` and `tests/test_prompt.py`.
 
 ## Reading logs and decisions
 
