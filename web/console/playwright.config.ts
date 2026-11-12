@@ -29,7 +29,11 @@ export default defineConfig({
   ],
   webServer: {
     command: "pnpm dev",
-    url: `${baseURL}/anime`,
+    url: `${baseURL}/sign-in`,
+    env: {
+      NEXT_PUBLIC_API_MOCKING: "enabled",
+      API_BASE_URL: "http://backend.test",
+    },
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

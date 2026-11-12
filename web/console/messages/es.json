@@ -5,5 +5,25 @@
   },
   "Placeholder": {
     "title": "Quetzal"
+  },
+  "SignIn": {
+    "title": "Iniciar sesión",
+    "subtitle": "Entra con tu cuenta de personal.",
+    "email": "Correo electrónico",
+    "password": "Contraseña",
+    "submit": "Entrar",
+    "submitting": "Entrando…",
+    "invalidCredentials": "El correo o la contraseña no son correctos.",
+    "noMembership": "Tu cuenta no tiene ninguna tienda activa.",
+    "networkError": "No pudimos conectar con el servidor.",
+    "error": "No pudimos iniciar sesión."
+  },
+  "Session": {
+    "loading": "Cargando…",
+    "error": "No pudimos cargar tu sesión.",
+    "retry": "Reintentar",
+    "signOut": "Salir",
+    "noStoresTitle": "Sin tiendas",
+    "noStoresBody": "Tu cuenta no tiene ninguna tienda activa."
   }
 }

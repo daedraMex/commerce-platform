@@ -8,5 +8,6 @@ The stack is seeded with the `e2e_seed` management command. The job starts the
 API and the console itself, so there is no `webServer` entry in
 `playwright.level2.config.ts`.
 
-C1 (#97) adds the sign-in flow and C6 (#102) the photo flow here. Until then,
-these are the smoke tests that prove the console and the API are reachable.
+C1 (#97) adds the sign-in flow and C6 (#102) the photo flow here. The flow uses
+`E2E_STAFF_EMAIL` and `E2E_STAFF_PASSWORD`, the same credentials the job passes
+to `e2e_seed`.
