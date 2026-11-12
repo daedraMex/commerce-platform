@@ -9,6 +9,7 @@ import {
   CSRF_HEADER_VALUE,
 } from "@/lib/auth/constants";
 import {
+  currentMockState,
   REFRESH_EMAIL,
   resetMockState,
   VALID_EMAIL,
@@ -157,31 +158,50 @@ describe("GET /api/backend/[...path]", () => {
     expect(cookies).toContain("Max-Age=0");
   });
 
-  it("does not refresh a failed sign-in through the proxy", async () => {
-    let refreshCalled = false;
+  it("refreshes once for concurrent requests and reuses the new pair", async () => {
+    const session = await signInAs(REFRESH_EMAIL);
+    const cookie = cookieHeader(session);
+
+    const [first, second] = await Promise.all([
+      proxyGet(proxyRequest(undefined, { cookie })),
+      proxyGet(proxyRequest(undefined, { cookie })),
+    ]);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(currentMockState().refreshCalls).toBe(1);
+
+    for (const response of [first, second]) {
+      expect(response.cookies.get("quetzal_access")?.value).toBe("access-2");
+      expect(response.cookies.get("quetzal_refresh")?.value).toBe("refresh-2");
+    }
+
+    const third = await proxyGet(proxyRequest(undefined, { cookie }));
+
+    expect(third.status).toBe(200);
+    expect(currentMockState().refreshCalls).toBe(1);
+    expect(third.cookies.get("quetzal_access")?.value).toBe("access-2");
+  });
+
+  it.each([
+    "/api/backend/api/v1/auth/token/",
+    "/api/backend/api/v1/auth/token/refresh/",
+    "/api/backend/api/v1/auth/logout/",
+  ])("answers %s with a 404 without calling the backend", async (path) => {
+    let backendCalls = 0;
     server.use(
-      http.get("*/api/v1/auth/token/", () =>
-        HttpResponse.json(
-          { code: "invalid_credentials" },
-          { status: 401 },
-        ),
-      ),
-      http.post("*/api/v1/auth/token/refresh/", () => {
-        refreshCalled = true;
-        return HttpResponse.json(
-          { access: "access-2", refresh: "refresh-2" },
-          { status: 200 },
-        );
+      http.all("*/api/v1/auth/*", () => {
+        backendCalls += 1;
+        return HttpResponse.json({ access: "leaked", refresh: "leaked" });
       }),
     );
 
-    const response = await proxyGet(
-      proxyRequest("/api/backend/api/v1/auth/token/", {
-        cookie: "quetzal_refresh=refresh-1",
-      }),
-    );
+    const response = await proxyGet(proxyRequest(path));
 
-    expect(response.status).toBe(401);
-    expect(refreshCalled).toBe(false);
+    expect(response.status).toBe(404);
+    const body = await response.json();
+    expect(body).toMatchObject({ code: "not_found" });
+    expect(body).not.toMatchObject({ access: "leaked", refresh: "leaked" });
+    expect(backendCalls).toBe(0);
   });
 });

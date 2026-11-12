@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import type { TokenPairResponse } from "@commerce-platform/api-client";
 
-import { apiBaseUrl, requestRefresh } from "@/lib/auth/backend";
+import { apiBaseUrl } from "@/lib/auth/backend";
 import {
   clearSessionCookies,
   readAccessToken,
@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth/cookies";
 import { CSRF_HEADER } from "@/lib/auth/constants";
 import { problemResponse } from "@/lib/auth/problem";
+import { refreshTokenPair } from "@/lib/auth/refresh";
 
 export const dynamic = "force-dynamic";
 
@@ -41,12 +42,6 @@ const SKIPPED_RESPONSE_HEADERS = new Set([
   "trailer",
   "transfer-encoding",
   "upgrade",
-]);
-
-const AUTH_PATHS = new Set([
-  "/api/v1/auth/logout/",
-  "/api/v1/auth/token/",
-  "/api/v1/auth/token/refresh/",
 ]);
 
 function backendPath(request: NextRequest): string {
@@ -113,9 +108,17 @@ async function proxy(request: NextRequest): Promise<NextResponse> {
     );
   }
 
+  const path = backendPath(request);
+  if (path.startsWith("/api/v1/auth/")) {
+    return problemResponse(
+      404,
+      "not_found",
+      "Auth endpoints are handled by the console server.",
+    );
+  }
+
   const accessToken = readAccessToken(request);
   const refreshToken = readRefreshToken(request);
-  const path = backendPath(request);
   const method = request.method.toUpperCase();
   const requestBody =
     method === "GET" || method === "HEAD"
@@ -125,19 +128,14 @@ async function proxy(request: NextRequest): Promise<NextResponse> {
   let upstream = await callBackend(request, requestBody, accessToken);
   let rotated: TokenPairResponse | undefined;
 
-  if (
-    upstream.status === 401 &&
-    refreshToken &&
-    !AUTH_PATHS.has(path)
-  ) {
-    const refreshed = await requestRefresh(refreshToken);
-    if (!refreshed.ok) {
+  if (upstream.status === 401 && refreshToken) {
+    rotated = (await refreshTokenPair(refreshToken)) ?? undefined;
+    if (!rotated) {
       const response = await toNextResponse(upstream);
       clearSessionCookies(response);
       return response;
     }
 
-    rotated = (await refreshed.json()) as TokenPairResponse;
     upstream = await callBackend(request, requestBody, rotated.access);
 
     if (upstream.status === 401) {

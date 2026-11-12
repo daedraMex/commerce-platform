@@ -29,6 +29,7 @@ type MockState = {
   refreshVersion: number;
   expireAfterValidation: boolean;
   memberships: Me["memberships"];
+  refreshCalls: number;
 };
 
 function initialState(): MockState {
@@ -41,6 +42,7 @@ function initialState(): MockState {
     refreshVersion: 1,
     expireAfterValidation: false,
     memberships: MEMBERSHIPS,
+    refreshCalls: 0,
   };
 }
 
@@ -120,6 +122,7 @@ export const handlers = [
 
   http.post("*/api/v1/auth/token/refresh/", async ({ request }) => {
     const body = (await request.json()) as { refresh?: string };
+    state.refreshCalls += 1;
 
     if (body.refresh !== state.refreshToken) {
       return problem(401, "token_invalid", "Token is invalid");

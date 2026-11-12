@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { POST as signIn } from "@/app/api/auth/sign-in/route";
 import { POST as signOut } from "@/app/api/auth/sign-out/route";
 import {
+  CSRF_HEADER,
+  CSRF_HEADER_VALUE,
+} from "@/lib/auth/constants";
+import {
   resetMockState,
   VALID_EMAIL,
   VALID_PASSWORD,
@@ -27,10 +31,20 @@ async function signedInSession(): Promise<NextResponse> {
   );
 }
 
-function signOutRequest(cookie?: string): NextRequest {
+function signOutRequest(
+  cookie?: string,
+  options: { csrf?: boolean } = {},
+): NextRequest {
+  const headers: Record<string, string> = {};
+  if (options.csrf !== false) {
+    headers[CSRF_HEADER] = CSRF_HEADER_VALUE;
+  }
+  if (cookie) {
+    headers.cookie = cookie;
+  }
   return new NextRequest("http://localhost/api/auth/sign-out", {
     method: "POST",
-    headers: cookie ? { cookie } : undefined,
+    headers,
   });
 }
 
@@ -39,6 +53,17 @@ beforeEach(() => {
 });
 
 describe("POST /api/auth/sign-out", () => {
+  it("refuses requests without the custom CSRF header", async () => {
+    const response = await signOut(
+      signOutRequest(undefined, { csrf: false }),
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({
+      code: "csrf_header_missing",
+    });
+  });
+
   it("blacklists the refresh token and clears both cookies", async () => {
     const session = await signedInSession();
     let sentRefresh: string | undefined;
