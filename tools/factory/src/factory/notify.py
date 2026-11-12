@@ -35,6 +35,13 @@ class Notifier(Protocol):
 
     def send_review_addressed(self, info: ReviewAddressedInfo) -> None: ...
 
+    def send_review_skipped(self, info: ReviewSkippedInfo) -> None: ...
+
+
+@dataclass(frozen=True)
+class ReviewSkippedInfo:
+    reason: str
+
 
 @dataclass(frozen=True)
 class ReviewAddressedInfo:
@@ -276,6 +283,17 @@ def build_paused_message(info: PausedInfo) -> str:
     )
 
 
+def build_review_skipped_message(info: ReviewSkippedInfo) -> str:
+    return _bound_message(
+        "\n".join(
+            [
+                "<b>Review fixes skipped</b>",
+                escape_html(info.reason),
+            ]
+        )
+    )
+
+
 def build_review_addressed_message(info: ReviewAddressedInfo) -> str:
     return _bound_message(
         "\n".join(
@@ -375,6 +393,9 @@ class NullNotifier:
     def send_review_addressed(self, info: ReviewAddressedInfo) -> None:
         return None
 
+    def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
+        return None
+
 
 class TelegramNotifier:
     """Send messages to one fixed chat id via the Bot API."""
@@ -401,6 +422,9 @@ class TelegramNotifier:
             build_review_addressed_message(info),
             build_review_addressed_keyboard(info),
         )
+
+    def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
+        self._send(build_review_skipped_message(info), [])
 
     def _send(self, text: str, keyboard: list[list[dict[str, str]]]) -> None:
         url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"

@@ -443,6 +443,13 @@ or anyone else). Only reviews by the owner count; reviews by bots or other
 agents are ignored. It takes at most one such pull request per run, oldest
 review first.
 
+Reviews are read from the REST reviews endpoint, not from `gh pr view --json
+reviews`. The REST `id` is the numeric database id that the review-comments
+route needs; the GraphQL `id` is a node id such as `PRR_kwDOVUbRpc8AAAABXa4Txg`,
+which the REST comments route rejects with a 404. The numeric id, as a string,
+is the review id used everywhere: the comments call, `ReviewFix.review_id` and
+`review-attempts.log`.
+
 Every attempted review id is written to `review-attempts.log` (append-only,
 mode `600`) before the agent runs. A review is never retried automatically,
 whatever the outcome; a new review on the same pull request has a new id, so it
@@ -462,7 +469,8 @@ the usual stuck flow (issue comment, `needs-decision` label and Telegram).
 A review fix consumes one attempt from the daily ledger, exactly like a new
 ticket, but it does not count against the open-PR cap. If listing reviews
 fails, review fixes are skipped for that run and the normal ticket flow
-continues; if GitHub itself is unreachable, the run still pauses with "GitHub
+continues; a `GitHubError` also sends one short Telegram notice for that run.
+If GitHub itself is unreachable, the run still pauses with "GitHub
 unreachable" as before.
 
 ## Hardening
@@ -599,7 +607,10 @@ preflight step in the same fix, so that class of error cannot recur silently.
 A fix that only changes the code, without adding the failing test or preflight
 step that would have caught it, is not finished. For example, the symlink false
 positive in the repo-tree walk (a symlink's `lrwxrwxrwx` is not
-world-writable) became the symlink tests in `tests/test_isolation.py`.
+world-writable) became the symlink tests in `tests/test_isolation.py`. The
+review-fix 404 (a GraphQL node id sent to a REST comments route) became the
+recorded REST review fixture and the numeric-id tests in
+`tests/test_github.py`.
 
 ## Reading logs and decisions
 
