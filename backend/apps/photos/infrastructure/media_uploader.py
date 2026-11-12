@@ -124,8 +124,12 @@ class StorageMediaUploader:
         storage = get_private_storage()
         original_key = f"stores/{store.id}/photos/originals/{uuid4().hex}.jpg"
         preview_key = f"stores/{store.id}/photos/previews/{uuid4().hex}.jpg"
-        storage.save(original_key, ContentFile(original, name=original_key.rsplit("/", 1)[-1]))
-        storage.save(preview_key, ContentFile(preview, name=preview_key.rsplit("/", 1)[-1]))
+        original_key = storage.save(
+            original_key, ContentFile(original, name=original_key.rsplit("/", 1)[-1])
+        )
+        preview_key = storage.save(
+            preview_key, ContentFile(preview, name=preview_key.rsplit("/", 1)[-1])
+        )
         return UploadedPhoto(
             original_key=original_key,
             preview_key=preview_key,

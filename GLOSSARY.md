@@ -111,6 +111,10 @@ _Avoid_: Image, asset, attachment
 The normalized original and preview of a photo submission, kept in the private bucket and reachable only through an authorized endpoint, never a public product URL.
 _Avoid_: Raw upload, draft image, temp file
 
+**Local object storage**:
+The RustFS server that provides the public and private buckets in local development and level 2. Staging and production use R2 instead.
+_Avoid_: Dev bucket, local R2
+
 **Product image**:
 The link that gives a product, and optionally one of its variants, a Media with a role and a position; a retired link is kept but no longer shown.
 _Avoid_: Photo (when meaning the link)

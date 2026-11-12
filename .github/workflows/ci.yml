@@ -182,50 +182,85 @@ jobs:
             echo "no level-2 relevant changes"
           fi
 
-      - name: Start MinIO for the level-2 stack
+      - name: Start RustFS for the level-2 stack
         if: steps.changes.outputs.relevant == 'true'
         run: |
           set -euo pipefail
-          password="$(openssl rand -base64 24)"
-          echo "::add-mask::$password"
-          echo "MINIO_ROOT_USER=ci-minio" >> "$GITHUB_ENV"
-          echo "MINIO_ROOT_PASSWORD=$password" >> "$GITHUB_ENV"
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=ci-minio \
-            -e MINIO_ROOT_PASSWORD="$password" \
-            minio/minio:RELEASE.2025-10-15T17-29-55Z server /data
+          access_key="ci$(openssl rand -hex 6)"
+          secret_key="$(openssl rand -base64 24)"
+          echo "::add-mask::$access_key"
+          echo "::add-mask::$secret_key"
+          echo "RUSTFS_ACCESS_KEY=$access_key" >> "$GITHUB_ENV"
+          echo "RUSTFS_SECRET_KEY=$secret_key" >> "$GITHUB_ENV"
+          data_dir="$RUNNER_TEMP/rustfs-data"
+          mkdir -p "$data_dir"
+          sudo chown -R 10001:10001 "$data_dir"
+          docker run -d --name rustfs -p 9000:9000 -p 9001:9001 \
+            -e RUSTFS_ACCESS_KEY="$access_key" \
+            -e RUSTFS_SECRET_KEY="$secret_key" \
+            -e RUSTFS_VOLUMES=/data \
+            -v "$data_dir:/data" \
+            rustfs/rustfs:1.0.5
           for attempt in $(seq 1 60); do
             if curl --fail --silent --show-error \
-              http://127.0.0.1:9000/minio/health/live > /dev/null; then
-              echo "MinIO is ready."
+              http://127.0.0.1:9000/health > /dev/null; then
+              echo "RustFS is ready."
               exit 0
             fi
             sleep 2
           done
-          echo "MinIO did not become ready." >&2
-          docker logs minio >&2
+          echo "RustFS did not become ready." >&2
+          docker logs rustfs >&2
           exit 1
 
-      - name: Create the public and private MinIO buckets
+      - name: Create and verify the public and private buckets
         if: steps.changes.outputs.relevant == 'true'
         run: |
           set -euo pipefail
           docker run --rm --network host \
-            -e MINIO_ROOT_USER -e MINIO_ROOT_PASSWORD \
+            -e AWS_ACCESS_KEY_ID="$RUSTFS_ACCESS_KEY" \
+            -e AWS_SECRET_ACCESS_KEY="$RUSTFS_SECRET_KEY" \
+            -e AWS_DEFAULT_REGION=us-east-1 \
+            -e AWS_EC2_METADATA_DISABLED=true \
+            -e PUBLIC_BUCKET=ci-public \
+            -e PRIVATE_BUCKET=ci-private \
             --entrypoint /bin/sh \
-            minio/mc:RELEASE.2025-08-13T08-35-41Z -c '
+            amazon/aws-cli:2.40.1 -c '
               set -eu
-              mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"
-              mc mb --ignore-existing local/ci-public
-              mc mb --ignore-existing local/ci-private
-              mc anonymous set download local/ci-public
-              mc anonymous set none local/ci-private
+              endpoint=http://127.0.0.1:9000
+              create_bucket() {
+                aws --endpoint-url "$endpoint" s3api head-bucket --bucket "$1" 2>/dev/null \
+                  || aws --endpoint-url "$endpoint" s3api create-bucket --bucket "$1"
+              }
+              create_bucket "$PUBLIC_BUCKET"
+              create_bucket "$PRIVATE_BUCKET"
+              policy="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::$PUBLIC_BUCKET/*\"]}]}"
+              aws --endpoint-url "$endpoint" s3api put-bucket-policy \
+                --bucket "$PUBLIC_BUCKET" --policy "$policy"
+              printf public >/tmp/public.txt
+              printf private >/tmp/private.txt
+              aws --endpoint-url "$endpoint" s3 cp /tmp/public.txt "s3://$PUBLIC_BUCKET/probe.txt"
+              aws --endpoint-url "$endpoint" s3 cp /tmp/private.txt "s3://$PRIVATE_BUCKET/probe.txt"
             '
+          public_status="$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:9000/ci-public/probe.txt)"
+          private_response="$(curl --silent --write-out '\n%{http_code}' \
+            http://127.0.0.1:9000/ci-private/probe.txt)"
+          private_status="${private_response##*$'\n'}"
+          private_body="${private_response%$'\n'*}"
+          if [[ "$public_status" != "200" ]]; then
+            echo "The public object returned $public_status, expected 200." >&2
+            exit 1
+          fi
+          if [[ "$private_status" != "403" || "$private_body" != *"AccessDenied"* ]]; then
+            echo "The private object returned $private_status: $private_body" >&2
+            exit 1
+          fi
           {
             echo "R2_BUCKET_NAME=ci-public"
             echo "R2_PRIVATE_BUCKET_NAME=ci-private"
-            echo "R2_ACCESS_KEY_ID=$MINIO_ROOT_USER"
-            echo "R2_SECRET_ACCESS_KEY=$MINIO_ROOT_PASSWORD"
+            echo "R2_ACCESS_KEY_ID=$RUSTFS_ACCESS_KEY"
+            echo "R2_SECRET_ACCESS_KEY=$RUSTFS_SECRET_KEY"
             echo "R2_ENDPOINT_URL=http://127.0.0.1:9000"
             echo "MEDIA_BASE_URL=http://127.0.0.1:9000/ci-public"
           } >> "$GITHUB_ENV"

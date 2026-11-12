@@ -16,7 +16,7 @@ a themed Next.js storefront, a mobile app and a platform of AI agents.
 ## Getting started
 
 ```bash
-# 1. Start PostgreSQL, Redis, MinIO (public and private buckets) and the Celery worker
+# 1. Start PostgreSQL, Redis, RustFS (public and private buckets) and the Celery worker
 docker compose up -d
 
 # 2. Install backend dependencies (from uv.lock)
@@ -43,18 +43,18 @@ If ports 5432 or 6379 are already taken on your machine, override them:
 After changing backend code, rebuild the worker so it picks up the changes:
 `docker compose up -d --build worker`.
 
-### Local media (MinIO)
+### Local media (RustFS)
 
-`docker compose up -d` starts MinIO and a one-shot `minio-init` service that
-creates the public and private buckets. The public bucket allows anonymous
-reads; the private bucket allows none. To point the backend at it, use the
-MinIO values shown in `backend/.env.example`:
+`docker compose up -d` starts RustFS and a one-shot `storage-init` service that
+creates the public and private buckets with the AWS CLI. The public bucket gets
+an anonymous `s3:GetObject` bucket policy; the private bucket gets none. To
+point the backend at it, use the RustFS values shown in `backend/.env.example`:
 
 ```bash
-docker compose up -d minio minio-init
+docker compose up -d rustfs storage-init
 cd backend
 R2_BUCKET_NAME=catalog-media R2_PRIVATE_BUCKET_NAME=catalog-private \
-  R2_ACCESS_KEY_ID=minioadmin R2_SECRET_ACCESS_KEY=minioadmin \
+  R2_ACCESS_KEY_ID=rustfsadmin R2_SECRET_ACCESS_KEY=rustfsadmin \
   R2_ENDPOINT_URL=http://localhost:9000 \
   MEDIA_BASE_URL=http://localhost:9000/catalog-media \
   uv run python manage.py runserver
@@ -129,4 +129,4 @@ It is safe to run at any time. Phase 6 schedules it with Celery Beat.
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv
 - `web/console/`: Quetzal, the staff console (Next.js App Router)
 - `packages/api-client/`: the generated API client used by the console
-- `docker-compose.yml`: PostgreSQL 16, Redis 7 and the Celery worker for local development
+- `docker-compose.yml`: PostgreSQL 16, Redis 7, RustFS, the bucket initializer and the Celery worker for local development

@@ -2,10 +2,11 @@ import re
 from io import BytesIO
 
 import pytest
-from django.core.files.storage import storages
+from django.core.files.storage import FileSystemStorage, storages
 from PIL import Image
 
 from apps.photos.domain.errors import ImageTooLarge, InvalidImage, TooManyPixels
+from apps.photos.infrastructure import media_uploader
 from apps.photos.infrastructure.media_uploader import StorageMediaUploader
 from apps.shared.domain.store import StoreReference
 from tests.images import (
@@ -55,6 +56,25 @@ def test_the_uploader_writes_a_store_scoped_original_and_preview(private_storage
     assert result.original_key != result.preview_key
     assert storages["private"].exists(result.original_key)
     assert storages["private"].exists(result.preview_key)
+
+
+class RenamingFileSystemStorage(FileSystemStorage):
+    """A storage that changes the name it was asked to save under."""
+
+    def save(self, name, content, max_length=None):
+        return super().save(f"renamed/{name}", content, max_length=max_length)
+
+
+def test_upload_returns_the_names_the_storage_actually_saved(tmp_path, monkeypatch, uploader):
+    storage = RenamingFileSystemStorage(location=tmp_path)
+    monkeypatch.setattr(media_uploader, "get_private_storage", lambda: storage)
+
+    result = uploader.upload(STORE, image_bytes())
+
+    assert result.original_key.startswith("renamed/stores/1/photos/originals/")
+    assert result.preview_key.startswith("renamed/stores/1/photos/previews/")
+    assert storage.exists(result.original_key)
+    assert storage.exists(result.preview_key)
 
 
 def test_the_original_is_a_metadata_free_jpeg(private_storage, uploader):

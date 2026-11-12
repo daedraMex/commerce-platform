@@ -248,7 +248,7 @@ Goal: staff turn one or more phone photos of products into catalog images.
 - New clean-architecture module apps/photos: Photo submission state machine, idempotency,
   quad and crop validation, Authorizer calls. It never writes catalog models; it creates
   Media and product images through the catalog service seam.
-- Private original storage (R2 in staging and production, MinIO in local and level 2) and
+- Private original storage (R2 in staging and production, RustFS in local and level 2) and
   a MediaUploader port. API multipart now; presigned direct-to-R2 uploads are deferred to
   the video phase.
 - Upload normalizes the file: HEIC decoded with pillow-heif, EXIF orientation applied,

@@ -24,7 +24,7 @@ Sessions follow ADR-0027: the JWT lives in an httpOnly cookie behind the console
 
 - Vitest and Testing Library for components and hooks; MSW with orval-generated mocks for the API.
 - Level 1: Playwright flows per feature in a phone viewport against the mocked API, on every pull request and in the night factory, with screenshots attached to the pull request.
-- Level 2: a few critical Playwright flows in `web/console/e2e-level2/` end to end against the real stack (Django, Celery, PostgreSQL and Redis; MinIO in place of R2 arrives with B8, #91), seeded with the `e2e_seed` command. They run only in GitHub Actions as the "Level 2 E2E" required check when a pull request changes `backend/`, `web/console/`, `packages/` or `.github/workflows/`; the job always reports a status and reports success without starting the stack when nothing relevant changed. The night factory never runs it, because it would need Docker for the agent user. To run it locally, use the commands in `docs/factory.md` ("Level 2 E2E").
+- Level 2: a few critical Playwright flows in `web/console/e2e-level2/` end to end against the real stack (Django, Celery, PostgreSQL and Redis; RustFS in place of R2 arrives with B8, #91), seeded with the `e2e_seed` command. They run only in GitHub Actions as the "Level 2 E2E" required check when a pull request changes `backend/`, `web/console/`, `packages/` or `.github/workflows/`; the job always reports a status and reports success without starting the stack when nothing relevant changed. The night factory never runs it, because it would need Docker for the agent user. To run it locally, use the commands in `docs/factory.md` ("Level 2 E2E").
 
 ## Deployment
 

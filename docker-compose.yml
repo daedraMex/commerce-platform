@@ -25,43 +25,63 @@ services:
       timeout: 5s
       retries: 10
 
-  minio:
-    image: minio/minio:RELEASE.2025-10-15T17-29-55Z
-    command: server /data --console-address ":9001"
-    environment:
-      MINIO_ROOT_USER: "${R2_ACCESS_KEY_ID:-minioadmin}"
-      MINIO_ROOT_PASSWORD: "${R2_SECRET_ACCESS_KEY:-minioadmin}"
-    ports:
-      - "${MINIO_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+  rustfs-permissions:
+    image: alpine:3.24.2
     volumes:
-      - minio_data:/data
+      - rustfs_data:/data
+    command: chown -R 10001:10001 /data
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:1.0.5
+    environment:
+      RUSTFS_ACCESS_KEY: "${R2_ACCESS_KEY_ID:-rustfsadmin}"
+      RUSTFS_SECRET_KEY: "${R2_SECRET_ACCESS_KEY:-rustfsadmin}"
+      RUSTFS_VOLUMES: "/data"
+      RUSTFS_ADDRESS: "0.0.0.0:9000"
+      RUSTFS_CONSOLE_ADDRESS: "0.0.0.0:9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "${RUSTFS_PORT:-9000}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs_data:/data
+    depends_on:
+      rustfs-permissions:
+        condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
       interval: 5s
       timeout: 5s
       retries: 10
 
-  minio-init:
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
+  storage-init:
+    image: amazon/aws-cli:2.40.1
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: "${R2_ACCESS_KEY_ID:-minioadmin}"
-      MINIO_ROOT_PASSWORD: "${R2_SECRET_ACCESS_KEY:-minioadmin}"
+      AWS_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-rustfsadmin}"
+      AWS_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-rustfsadmin}"
+      AWS_DEFAULT_REGION: "${R2_REGION_NAME:-us-east-1}"
+      AWS_EC2_METADATA_DISABLED: "true"
       R2_BUCKET_NAME: "${R2_BUCKET_NAME:-catalog-media}"
       R2_PRIVATE_BUCKET_NAME: "${R2_PRIVATE_BUCKET_NAME:-catalog-private}"
+      RUSTFS_ENDPOINT_URL: "http://rustfs:9000"
     entrypoint: /bin/sh
     command:
       - -c
       - |
         set -eu
-        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
-        mc mb --ignore-existing "local/$$R2_BUCKET_NAME"
-        mc mb --ignore-existing "local/$$R2_PRIVATE_BUCKET_NAME"
-        mc anonymous set download "local/$$R2_BUCKET_NAME"
-        mc anonymous set none "local/$$R2_PRIVATE_BUCKET_NAME"
+        create_bucket() {
+          aws --endpoint-url "$$RUSTFS_ENDPOINT_URL" s3api head-bucket --bucket "$$1" 2>/dev/null \
+            || aws --endpoint-url "$$RUSTFS_ENDPOINT_URL" s3api create-bucket --bucket "$$1"
+        }
+        create_bucket "$$R2_BUCKET_NAME"
+        create_bucket "$$R2_PRIVATE_BUCKET_NAME"
+        policy="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::$$R2_BUCKET_NAME/*\"]}]}"
+        aws --endpoint-url "$$RUSTFS_ENDPOINT_URL" s3api put-bucket-policy \
+          --bucket "$$R2_BUCKET_NAME" --policy "$$policy"
 
   worker:
     build:
@@ -75,18 +95,18 @@ services:
       REDIS_URL: redis://redis:6379/0
       R2_BUCKET_NAME: "${R2_BUCKET_NAME:-catalog-media}"
       R2_PRIVATE_BUCKET_NAME: "${R2_PRIVATE_BUCKET_NAME:-catalog-private}"
-      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-minioadmin}"
-      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-minioadmin}"
-      R2_ENDPOINT_URL: "${R2_ENDPOINT_URL:-http://minio:9000}"
+      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-rustfsadmin}"
+      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-rustfsadmin}"
+      R2_ENDPOINT_URL: "${R2_ENDPOINT_URL:-http://rustfs:9000}"
       MEDIA_BASE_URL: "${MEDIA_BASE_URL:-http://localhost:9000/catalog-media}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      minio-init:
+      storage-init:
         condition: service_completed_successfully
 
 volumes:
   postgres_data:
-  minio_data:
+  rustfs_data:

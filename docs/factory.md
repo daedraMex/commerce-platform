@@ -568,28 +568,30 @@ unreachable" as before.
 ## Level 2 E2E
 
 The "Level 2 E2E" GitHub Actions check runs a few critical Playwright flows in
-`web/console/e2e-level2/` against Django, Celery, PostgreSQL, Redis and MinIO.
+`web/console/e2e-level2/` against Django, Celery, PostgreSQL, Redis and RustFS.
 It is a required check when a pull request changes `backend/`,
 `web/console/`, `packages/` or `.github/workflows/`; otherwise the job reports
 success without starting the stack. The night factory never runs it, because it
 would need Docker for the agent user (ADR-0026).
 
-MinIO runs without the `services:` block because its command is `server /data`,
-which `services:` cannot pass. The job starts the pinned `minio/minio` image with
-`docker run -d`, generates its password with `openssl rand`, masks it with
-`::add-mask::`, and creates both buckets with the pinned `minio/mc` image. The
-public bucket allows anonymous reads; the private one allows none. It then
-exports the `R2_*` variables so the backend and worker use those buckets.
+RustFS runs outside the `services:` block because it needs a writable data
+mount. The job starts the pinned `rustfs/rustfs` image with `docker run -d`,
+generates and masks its access key and secret, and creates both buckets with
+the pinned `amazon/aws-cli` image. The public bucket gets an anonymous
+`s3:GetObject` bucket policy; the private bucket gets none. The job then proves
+it anonymously with `curl`: a public probe object returns 200 and a private one
+returns 403 with `AccessDenied`. Finally it exports the `R2_*` variables so the
+backend and worker use those buckets.
 
 Run it locally from the repository root. These are the same commands as the
 job, with a fixed password:
 
 ```bash
-docker compose up -d postgres redis minio minio-init
+docker compose up -d postgres redis rustfs storage-init
 export R2_BUCKET_NAME=catalog-media
 export R2_PRIVATE_BUCKET_NAME=catalog-private
-export R2_ACCESS_KEY_ID=minioadmin
-export R2_SECRET_ACCESS_KEY=minioadmin
+export R2_ACCESS_KEY_ID=rustfsadmin
+export R2_SECRET_ACCESS_KEY=rustfsadmin
 export R2_ENDPOINT_URL=http://127.0.0.1:9000
 export MEDIA_BASE_URL=http://127.0.0.1:9000/catalog-media
 cd backend
@@ -608,9 +610,9 @@ E2E_BASE_URL=http://127.0.0.1:3100 E2E_API_URL=http://127.0.0.1:8000 \
   pnpm exec playwright test --config playwright.level2.config.ts
 ```
 
-`docker compose up -d postgres redis minio minio-init` starts only the
+`docker compose up -d postgres redis rustfs storage-init` starts only the
 dependencies; the API, the worker and the console run on the host exactly as
-they do in the job. The `minio-init` service creates the public and private
+they do in the job. The `storage-init` service creates the public and private
 buckets; without the exported `R2_*` variables the backend would fall back to
 local files. The job generates a random staff password with `openssl rand`,
 masks it with `::add-mask::` and passes it through `E2E_STAFF_PASSWORD`; no

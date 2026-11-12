@@ -22,7 +22,18 @@ A Photo submission is the unit: `uploaded`, `processing`, `ready` or `failed`, w
 ## Consequences
 
 - Human-reviewed migrations: `Store.accent_color`, the `ProductMedia` changes, the token blacklist app, and the photos models.
-- A second, private R2 bucket (MinIO in the level-2 end-to-end stack) with new environment variables. These are platform infrastructure, not per-store integration credentials, so ADR-0020 does not apply.
+- A second, private R2 bucket (RustFS in the level-2 end-to-end stack) with new environment variables. These are platform infrastructure, not per-store integration credentials, so ADR-0020 does not apply.
 - A Celery worker joins `docker-compose.yml` for development and the level-2 stack, with eager execution in tests and no beat.
 - The console fetches the private preview as a blob through its axios instance, because a plain `<img src>` cannot send the `X-Store` or CSRF headers of the ADR-0027 proxy.
 - `ROADMAP.md` Phase 4b and `phase-prompts.md` still describe background removal and must be rewritten at `/to-spec` to match this decision.
+
+## Amendment (2026-11-12)
+
+MinIO withdrew the `minio/minio` and `minio/mc` images from Docker Hub on
+2026-09-11 and closed anonymous pulls on quay.io on 2026-09-24, so MinIO could
+no longer run local development or the level-2 end-to-end stack. Local
+development and CI now run RustFS (`rustfs/rustfs`) and create the buckets with
+the AWS CLI (`amazon/aws-cli`): the public bucket gets an anonymous
+`s3:GetObject` bucket policy and the private bucket gets none. Staging and
+production are unchanged and still use R2. The private bucket remains platform
+infrastructure, not a per-store credential, so ADR-0020 still does not apply.
