@@ -114,3 +114,211 @@ jobs:
             web/console/test-results/
           if-no-files-found: ignore
           retention-days: 7
+
+  level2:
+    name: Level 2 E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: level2-e2e-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: shop
+          POSTGRES_USER: shop
+          POSTGRES_PASSWORD: shop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shop -d shop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SECRET_KEY: ci-not-a-secret-change-me-0123456789
+      DEBUG: "True"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: postgres://shop:shop@localhost:5432/shop
+      REDIS_URL: redis://localhost:6379/0
+      E2E_STAFF_EMAIL: e2e@example.com
+      API_BASE_URL: http://127.0.0.1:8000
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Detect level-2 relevant changes
+        id: changes
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="HEAD^"
+            head="HEAD"
+          fi
+          changed="$(git diff --name-only "$base...$head")"
+          if printf '%s\n' "$changed" | grep -Eq '^(backend/|web/console/|packages/|\.github/workflows/)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            echo "Level-2 relevant changes:"
+            printf '%s\n' "$changed"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no level-2 relevant changes"
+          fi
+
+      - name: Generate the E2E staff password
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          password="$(openssl rand -base64 24)"
+          echo "::add-mask::$password"
+          echo "E2E_STAFF_PASSWORD=$password" >> "$GITHUB_ENV"
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install backend dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: backend
+        run: uv sync --locked
+
+      - name: Migrate
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: backend
+        run: uv run python manage.py migrate
+
+      - name: Seed the level-2 stack
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: backend
+        env:
+          E2E_SEED_ALLOWED: "1"
+        run: uv run python manage.py e2e_seed
+
+      - name: Start the API and a Celery worker
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: backend
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/e2e-logs"
+          nohup uv run python manage.py runserver 127.0.0.1:8000 --noreload \
+            > "$RUNNER_TEMP/e2e-logs/api.log" 2>&1 &
+          nohup uv run celery -A config worker --loglevel=info \
+            > "$RUNNER_TEMP/e2e-logs/worker.log" 2>&1 &
+
+      - name: Wait for the API
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:8000/api/v1/health/live/ > /dev/null; then
+              echo "API is ready."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "API did not become ready." >&2
+          cat "$RUNNER_TEMP/e2e-logs/api.log" >&2
+          exit 1
+
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115  # v6.1.1
+        if: steps.changes.outputs.relevant == 'true'
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install console dependencies
+        if: steps.changes.outputs.relevant == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright chromium
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: web/console
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Generate the API client
+        if: steps.changes.outputs.relevant == 'true'
+        run: pnpm generate:client
+
+      - name: Build the console
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: web/console
+        run: pnpm build
+
+      - name: Start the console
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: web/console
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/e2e-logs"
+          nohup pnpm exec next start -p 3100 \
+            > "$RUNNER_TEMP/e2e-logs/console.log" 2>&1 &
+
+      - name: Wait for the console
+        if: steps.changes.outputs.relevant == 'true'
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent --show-error http://127.0.0.1:3100/home > /dev/null; then
+              echo "Console is ready."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Console did not become ready." >&2
+          cat "$RUNNER_TEMP/e2e-logs/console.log" >&2
+          exit 1
+
+      - name: Run level-2 Playwright
+        if: steps.changes.outputs.relevant == 'true'
+        working-directory: web/console
+        env:
+          E2E_BASE_URL: http://127.0.0.1:3100
+          E2E_API_URL: http://127.0.0.1:8000
+        run: pnpm exec playwright test --config playwright.level2.config.ts
+
+      - name: Upload level-2 Playwright report
+        if: always() && steps.changes.outputs.relevant == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: level2-playwright-report
+          path: |
+            web/console/playwright-report/
+            web/console/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload level-2 logs
+        if: failure() && steps.changes.outputs.relevant == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: level2-logs
+          path: |
+            ${{ runner.temp }}/e2e-logs/api.log
+            ${{ runner.temp }}/e2e-logs/worker.log
+            ${{ runner.temp }}/e2e-logs/console.log
+          if-no-files-found: ignore
+          retention-days: 7

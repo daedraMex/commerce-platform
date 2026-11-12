@@ -25,3 +25,8 @@ data.
   exercised.
 - `gh_pr_create.txt` — the URL printed by `gh pr create` when PR #63 was opened;
   captured from the pull request it points at.
+- `gh_api_pr_reviews.json` — recorded on 2026-11-12, unedited, with:
+  `gh api --paginate repos/daedraMex/commerce-platform/pulls/119/reviews`
+  (only re-indented). It holds the owner's real `CHANGES_REQUESTED` review on
+  PR #119, with the numeric REST `id` that the comments route needs and the
+  `node_id` (`PRR_...`) that must never be sent to a REST route.

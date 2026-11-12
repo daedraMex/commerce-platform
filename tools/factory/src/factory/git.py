@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import os
 import re
+import socket
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
+from .areas import Area, select_areas
 from .diff import DiffStats, build_diff_stats
-from .runner import build_check_env, sudo_argv, truncate_check_output
-from .shell import RunCommand, run_command
+from .runner import build_check_env, kill_agent_processes, sudo_argv, truncate_check_output
+from .shell import CommandTimeout, RunCommand, run_command
 
 MIN_GIT_VERSION = (2, 46)
 _GIT_VERSION_RE = re.compile(r"git version (\d+)\.(\d+)(?:\.(\d+))?")
@@ -21,6 +25,7 @@ class GitVersionError(RuntimeError):
 BOT_COMMIT_NAME = "xolo-bot[bot]"
 BOT_COMMIT_EMAIL_DOMAIN = "users.noreply.github.com"
 RM_BIN = "/usr/bin/rm"
+CHECK_TIMEOUT_SECONDS = 1800
 CHECK_SCRIPT_RELATIVE = Path("backend") / "scripts" / "check.sh"
 CLEANUP_PROBE_RELATIVE = Path("backend") / ".cleanup-probe"
 CLEANUP_PROBE_SCRIPT = """#!/usr/bin/env bash
@@ -44,6 +49,28 @@ class GitIdentityError(RuntimeError):
 
 class WorktreeCleanupError(RuntimeError):
     """Raised when a worktree or branch cannot be cleaned up."""
+
+
+@dataclass(frozen=True)
+class CheckResult:
+    """The result of running one or more areas' check scripts."""
+
+    passed: bool
+    output: str
+    failed_areas: tuple[Area, ...] = ()
+
+
+def port_in_use(port: int) -> bool:
+    """Return True when something is already listening on ``port``."""
+    for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.2)
+                if sock.connect_ex((host, port)) == 0:
+                    return True
+        except OSError:
+            continue
+    return False
 
 
 def worktree_cleanup_path(worktrees_dir: Path, worktree: Path) -> Path:
@@ -126,12 +153,14 @@ class Git:
         agent_home: str | None = None,
         bot_user_id: str | None = None,
         base_env: dict[str, str] | None = None,
+        port_in_use: Callable[[int], bool] = port_in_use,
     ):
         self._run = run
         self._agent_user = agent_user
         self._agent_home = agent_home
         self._bot_user_id = bot_user_id
         self._base_env = dict(base_env if base_env is not None else os.environ)
+        self._port_in_use = port_in_use
 
     def fetch_main(self, repo_dir: Path) -> None:
         result = self._run(["git", "fetch", "origin", "main"], str(repo_dir), timeout=300)
@@ -250,27 +279,96 @@ class Git:
         if result.exit_code != 0:
             raise RuntimeError(f"git push failed: {result.stderr.strip()}")
 
-    def check(self, worktree: Path) -> tuple[bool, str]:
-        """Run the check script as the agent user; return (passed, truncated output).
+    def changed_files(self, worktree: Path) -> list[str]:
+        """Return every file this ticket changed, committed or not.
 
-        The agent wrote this code, so the script must run as the unprivileged
-        agent user with only the base environment allowlist — never as the
-        factory user and never with secrets.
+        The diff against the merge base covers the branch's commits, the
+        working-tree diff covers what the agent has edited but not committed,
+        and ``git ls-files`` covers new files the agent has not added.
         """
-        backend = worktree / "backend"
-        env = build_check_env(
-            self._base_env,
-            agent_user=self._agent_user,
-            agent_home=self._agent_home,
+        committed = self._run(
+            ["git", "diff", "origin/main...HEAD", "--name-only"], str(worktree), timeout=120
+        ).stdout
+        working = self._run(
+            ["git", "diff", "HEAD", "--name-only"], str(worktree), timeout=120
+        ).stdout
+        untracked = self._run(
+            ["git", "ls-files", "--others", "--exclude-standard"], str(worktree), timeout=120
+        ).stdout
+        return sorted(
+            {
+                line.strip()
+                for text in (committed, working, untracked)
+                for line in text.splitlines()
+                if line.strip()
+            }
         )
-        argv = [str(backend / "scripts" / "check.sh")]
-        if self._agent_user:
-            argv = sudo_argv(self._agent_user, argv, env)
-        result = self._run(argv, str(backend), timeout=1800, env=env, replace_env=True)
-        output = result.stdout
-        if result.stderr:
-            output += ("\n" if output else "") + result.stderr
-        return result.exit_code == 0, truncate_check_output(output.strip())
+
+    def _port_still_busy(self, port: int) -> bool:
+        """Check a fixed port, cleaning up leftover agent servers once first."""
+        if not self._port_in_use(port):
+            return False
+        kill_agent_processes(self._run, self._agent_user)
+        return self._port_in_use(port)
+
+    def check(self, worktree: Path, *, areas: tuple[Area, ...] | None = None) -> CheckResult:
+        """Run each selected area's check script as the agent user.
+
+        With no explicit ``areas`` the ticket's changed files decide them; the
+        preflight passes every area because its worktree is fresh main. Each
+        script gets its own timeout and a labelled slice of the output. The
+        agent wrote this code, so the scripts must run as the unprivileged agent
+        user with only the environment allowlist their area needs — never as the
+        factory user and never with secrets. A missing script is skipped, not a
+        failure.
+        """
+        selected = select_areas(self.changed_files(worktree)) if areas is None else areas
+        chunks: list[str] = []
+        failed: list[Area] = []
+        for area in selected:
+            script = worktree / area.script
+            label = f"{area.name} ({area.script.as_posix()})"
+            if not script.is_file():
+                chunks.append(f"=== {label}: skipped (script not found) ===")
+                continue
+            if area.port is not None and self._port_still_busy(area.port):
+                failed.append(area)
+                chunks.append(f"=== {label}: failed: port {area.port} busy after agent cleanup ===")
+                continue
+            env = build_check_env(
+                self._base_env,
+                agent_user=self._agent_user,
+                agent_home=self._agent_home,
+                area=area,
+            )
+            argv = [str(script)]
+            if self._agent_user:
+                argv = sudo_argv(self._agent_user, argv, env)
+            try:
+                result = self._run(
+                    argv,
+                    str(script.parent),
+                    timeout=CHECK_TIMEOUT_SECONDS,
+                    env=env,
+                    replace_env=True,
+                )
+            except CommandTimeout:
+                kill_agent_processes(self._run, self._agent_user)
+                failed.append(area)
+                chunks.append(f"=== {label}: timed out after {CHECK_TIMEOUT_SECONDS}s ===")
+                continue
+            output = result.stdout
+            if result.stderr:
+                output += ("\n" if output else "") + result.stderr
+            body = output.strip()
+            chunks.append(f"=== {label} ===\n{body}" if body else f"=== {label} ===")
+            if result.exit_code != 0:
+                failed.append(area)
+        return CheckResult(
+            passed=not failed,
+            output=truncate_check_output("\n\n".join(chunks).strip()),
+            failed_areas=tuple(failed),
+        )
 
     def head_sha(self, worktree: Path) -> str:
         result = self._run(["git", "rev-parse", "HEAD"], str(worktree), timeout=60)

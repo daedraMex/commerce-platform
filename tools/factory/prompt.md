@@ -20,9 +20,10 @@ fetch it from GitHub.
    first line of `DECISIONS.md`, on a line starting with exactly
    `OPEN QUESTION:`, then stop. Never guess on a safety-relevant decision.
 
-5. Run `./scripts/check.sh` from the `backend/` directory to verify your work.
-   The runner runs it again and, if it still fails, asks you to fix the
-   reported failures.
+5. Run the `scripts/check.sh` for every area you touched
+   (`backend/scripts/check.sh`, `web/console/scripts/check.sh`) to verify your
+   work. The runner runs each selected area again and, if one still fails, asks
+   you to fix the reported failures.
 
 6. Never edit AGENTS.md, CLAUDE.md, opencode.json, any other opencode config,
    `.github/`, `tools/factory/`, or `docs/adr/`.

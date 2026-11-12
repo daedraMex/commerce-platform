@@ -12,6 +12,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
+from .areas import AREAS
 from .config import Settings
 from .credentials import TokenProvider
 from .git import Git, verify_git_version
@@ -105,9 +106,9 @@ class Preflight:
             self.git.create_worktree(self.settings.repo_dir, worktree, branch)
 
             step = "check.sh"
-            passed, output = self.git.check(worktree)
-            if not passed:
-                self._write_check_log(log_path, output)
+            check = self.git.check(worktree, areas=AREAS)
+            if not check.passed:
+                self._write_check_log(log_path, check.output)
                 raise RuntimeError(f"check.sh failed; see {log_path}")
 
             step = "verify worktree cleanup"

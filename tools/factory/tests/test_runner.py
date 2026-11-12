@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from factory.areas import CONSOLE
 from factory.runner import (
     TEST_SETTINGS,
     AgentRunner,
@@ -83,6 +84,41 @@ def test_build_check_env_has_only_the_base_allowlist_and_test_settings():
         "DATABASE_URL": "postgres://db",
         **TEST_SETTINGS,
     }
+
+
+def test_console_check_env_adds_ci_and_the_playwright_browser_path():
+    env = build_check_env(
+        {
+            "PATH": "/usr/local/bin:/usr/bin",
+            "HOME": "/home/factory",
+            "LANG": "C",
+            "DATABASE_URL": "postgres://db",
+            "DEEPSEEK_API_KEY": "dk-123",
+        },
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        area=CONSOLE,
+    )
+
+    assert env == {
+        "PATH": "/usr/local/bin:/usr/bin",
+        "HOME": "/home/factory-agent",
+        "LANG": "C",
+        "CI": "true",
+        "PLAYWRIGHT_BROWSERS_PATH": "/home/factory-agent/.cache/ms-playwright",
+    }
+
+
+def test_backend_check_env_does_not_set_ci_or_the_browser_path():
+    env = build_check_env(
+        {"PATH": "/usr/bin", "HOME": "/home/factory", "LANG": "C"},
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+    )
+
+    assert "CI" not in env
+    assert "PLAYWRIGHT_BROWSERS_PATH" not in env
+    assert env["PYTEST_ADDOPTS"] == "-p no:cacheprovider"
 
 
 def test_check_env_uses_the_values_matching_ci():
@@ -210,3 +246,35 @@ def test_run_marks_timeout(tmp_path):
     runner = AgentRunner(run=timed_out)
     result = runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
     assert result.timed_out is True
+
+
+def test_run_timeout_cleans_up_every_agent_process(tmp_path):
+    from factory.shell import CommandTimeout
+
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append((argv, cwd, env, replace_env))
+        if len(calls) == 1:
+            raise CommandTimeout("slow")
+        return CommandResult(exit_code=0, stdout="", stderr="")
+
+    runner = AgentRunner(run=run, agent_user="factory-agent", base_env={"PATH": "/usr/bin"})
+    result = runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+
+    assert result.timed_out is True
+    assert calls[1] == (
+        [
+            "sudo",
+            "-n",
+            "-u",
+            "factory-agent",
+            "/usr/bin/pkill",
+            "-KILL",
+            "-u",
+            "factory-agent",
+        ],
+        "/",
+        None,
+        False,
+    )

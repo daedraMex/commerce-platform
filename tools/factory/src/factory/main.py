@@ -14,7 +14,7 @@ from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .diff import touches_protected_paths
 from .git import Git, verify_git_version
-from .github import GitHub
+from .github import GitHub, GitHubError
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
 from .models import select_model
@@ -24,6 +24,7 @@ from .notify import (
     PausedInfo,
     PrReadyInfo,
     ReviewAddressedInfo,
+    ReviewSkippedInfo,
     RunFailedInfo,
     StuckInfo,
     TelegramNotifier,
@@ -205,6 +206,11 @@ class Factory:
                 attempted_review_ids=frozenset(attempted),
                 token=token,
             )
+        except GitHubError as exc:
+            reason = short_error(exc)
+            print(f"skipping review fixes: {reason}", file=sys.stderr)
+            self._notify(self.notifier.send_review_skipped, ReviewSkippedInfo(reason=reason))
+            return None
         except Exception as exc:
             print(f"skipping review fixes: {short_error(exc)}", file=sys.stderr)
             return None
@@ -258,6 +264,7 @@ class Factory:
         made = 0
         decisions = ""
         feedback = ""
+        failed_areas = ()
         for _step in range(1, self.settings.attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -278,6 +285,7 @@ class Factory:
                 command_template=command_template,
                 overlay=self.overlay,
                 feedback=feedback,
+                failed_areas=failed_areas,
             )
             result = self.runner.run(
                 worktree=worktree,
@@ -312,8 +320,8 @@ class Factory:
                     failing_check="time budget exceeded",
                     attempts=made,
                 )
-            passed, check_output = self.git.check(worktree)
-            if passed:
+            check = self.git.check(worktree)
+            if check.passed:
                 return self._success(
                     ticket,
                     model=model,
@@ -323,7 +331,8 @@ class Factory:
                     log_path=log_path,
                     attempts=made,
                 )
-            feedback = check_output
+            feedback = check.output
+            failed_areas = check.failed_areas
         return self._stuck(
             ticket,
             model=model,
@@ -357,6 +366,7 @@ class Factory:
         made = 0
         decisions = ""
         feedback = ""
+        failed_areas = ()
         for _step in range(1, self.settings.attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -379,6 +389,7 @@ class Factory:
                 review_body=fix.review_body,
                 comments=fix.comments,
                 feedback=feedback,
+                failed_areas=failed_areas,
             )
             result = self.runner.run(
                 worktree=worktree,
@@ -413,8 +424,8 @@ class Factory:
                     failing_check="time budget exceeded",
                     attempts=made,
                 )
-            passed, check_output = self.git.check(worktree)
-            if passed:
+            check = self.git.check(worktree)
+            if check.passed:
                 return self._review_success(
                     fix,
                     model=model,
@@ -424,7 +435,8 @@ class Factory:
                     base_sha=base_sha,
                     attempts=made,
                 )
-            feedback = check_output
+            feedback = check.output
+            failed_areas = check.failed_areas
         return self._stuck(
             ticket,
             model=model,

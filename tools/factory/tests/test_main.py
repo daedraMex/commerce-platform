@@ -5,8 +5,11 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from factory.areas import CONSOLE
 from factory.config import Settings
 from factory.diff import DiffStats, FileChange
+from factory.git import CheckResult
+from factory.github import GitHubError
 from factory.ledger import AttemptLedger
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
@@ -31,6 +34,7 @@ class FakeGit:
         *,
         check_passed=True,
         check_output="",
+        failed_areas=(),
         decisions="",
         diff=None,
         command_body=COMMAND_BODY,
@@ -39,6 +43,7 @@ class FakeGit:
     ):
         self.check_result = check_passed
         self.check_output = check_output
+        self.failed_areas = failed_areas
         self.decisions = decisions
         self.diff = diff or DiffStats()
         self.command_body = command_body
@@ -120,11 +125,11 @@ class FakeGit:
             return self.command_body
         return ""
 
-    def check(self, worktree):
+    def check(self, worktree, *, areas=None):
         self.events.append("check")
         if "preflight" in str(worktree):
-            return (self.preflight_check_passed, "")
-        return (self.check_result, self.check_output)
+            return CheckResult(self.preflight_check_passed, "")
+        return CheckResult(self.check_result, self.check_output, self.failed_areas)
 
     def commit_all(self, worktree, message):
         self.committed.append(message)
@@ -282,6 +287,7 @@ class RecordingNotifier:
         self.run_failed = []
         self.paused = []
         self.review_addressed = []
+        self.review_skipped = []
 
     def send_pr_ready(self, info):
         self.pr_ready.append(info)
@@ -297,6 +303,9 @@ class RecordingNotifier:
 
     def send_review_addressed(self, info):
         self.review_addressed.append(info)
+
+    def send_review_skipped(self, info):
+        self.review_skipped.append(info)
 
 
 def make_settings(tmp_path):
@@ -328,7 +337,9 @@ def make_ticket(number, *, labels=()):
     )
 
 
-def make_review_fix(*, review_id="R1", pr_number=101, ticket_number=7, branch="nf/7-ticket-7"):
+def make_review_fix(
+    *, review_id="5866656710", pr_number=101, ticket_number=7, branch="nf/7-ticket-7"
+):
     return ReviewFix(
         review_id=review_id,
         pr_number=pr_number,
@@ -982,6 +993,25 @@ def test_fix_loop_feeds_check_output_back_to_agent(tmp_path):
     assert "E   AssertionError" in runner.calls[1]["prompt"]
 
 
+def test_fix_loop_names_the_real_failing_area_and_script(tmp_path):
+    git = FakeGit(
+        check_passed=False,
+        check_output="console failed",
+        failed_areas=(CONSOLE,),
+    )
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    prompt = runner.calls[1]["prompt"]
+    assert "`console`" in prompt
+    assert "`web/console/scripts/check.sh`" in prompt
+
+
 class FakePreflightFactory:
     def __init__(self, *, tickets=None, error=None, run_error=None):
         self.tickets = tickets or []
@@ -1145,7 +1175,7 @@ def test_review_fix_runs_before_a_new_ticket_and_records_one_attempt(tmp_path):
     assert len(notifier.review_addressed) == 1
     assert notifier.review_addressed[0].pr_number == 101
     assert ledger.count_today() == 1
-    assert factory.review_attempts.attempted_ids() == {"R1"}
+    assert factory.review_attempts.attempted_ids() == {"5866656710"}
     lines = ledger.path.read_text().splitlines()
     assert [(line.split("\t")[1], line.split("\t")[2]) for line in lines] == [
         ("#7", "started"),
@@ -1242,6 +1272,49 @@ def test_review_fix_listing_failure_is_skipped_and_a_ticket_still_runs(tmp_path,
     assert "skipping review fixes: reviews unavailable" in capsys.readouterr().err
 
 
+def test_review_fix_github_error_sends_one_notice_and_a_ticket_still_runs(tmp_path, capsys):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        tickets=[make_ticket(8, labels={"ready-for-agent"})],
+        review_fixes_error=GitHubError("gh api reviews failed: HTTP 404"),
+    )
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=notifier,
+    )
+
+    results = factory.run()
+
+    assert [result.ticket.number for result in results] == [8]
+    assert "skipping review fixes: gh api reviews failed: HTTP 404" in capsys.readouterr().err
+    assert len(notifier.review_skipped) == 1
+    assert notifier.review_skipped[0].reason == "gh api reviews failed: HTTP 404"
+
+
+def test_review_fix_listing_failure_that_is_not_a_github_error_sends_no_notice(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        tickets=[make_ticket(8, labels={"ready-for-agent"})],
+        review_fixes_error=RuntimeError("reviews unavailable"),
+    )
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=notifier,
+    )
+
+    factory.run()
+
+    assert notifier.review_skipped == []
+
+
 def test_review_fix_runs_even_when_the_open_pr_cap_is_reached(tmp_path):
     settings = replace(make_settings(tmp_path), max_open_prs=1)
     git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
@@ -1294,7 +1367,7 @@ def test_daily_cap_still_blocks_review_fixes(tmp_path):
 
 
 def test_a_stuck_review_fix_is_not_picked_on_the_next_run(tmp_path):
-    fix = make_review_fix(review_id="R1")
+    fix = make_review_fix(review_id="5866656710")
     git = FakeGit(check_passed=False)
     github = FakeGitHub(review_fixes=[fix])
     runner = FakeRunner()
@@ -1314,13 +1387,13 @@ def test_a_stuck_review_fix_is_not_picked_on_the_next_run(tmp_path):
     assert len(first) == 1 and not first[0].ok
     assert second == []
     assert len(runner.calls) == 5
-    assert review_attempts.attempted_ids() == {"R1"}
-    assert github.attempted_review_ids == {"R1"}
+    assert review_attempts.attempted_ids() == {"5866656710"}
+    assert github.attempted_review_ids == {"5866656710"}
 
 
 def test_a_newer_review_on_the_same_pr_is_picked_up_again(tmp_path):
-    first_fix = make_review_fix(review_id="R1")
-    newer_fix = make_review_fix(review_id="R2")
+    first_fix = make_review_fix(review_id="5866656710")
+    newer_fix = make_review_fix(review_id="5866656711")
     git = FakeGit(check_passed=False)
     github = FakeGitHub(review_fixes=[first_fix])
     runner = FakeRunner()
@@ -1339,5 +1412,5 @@ def test_a_newer_review_on_the_same_pr_is_picked_up_again(tmp_path):
     factory.run()
 
     assert len(runner.calls) == 10
-    assert github.attempted_review_ids == {"R1"}
-    assert review_attempts.attempted_ids() == {"R1", "R2"}
+    assert github.attempted_review_ids == {"5866656710"}
+    assert review_attempts.attempted_ids() == {"5866656710", "5866656711"}
