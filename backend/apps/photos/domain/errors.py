@@ -12,7 +12,7 @@ class InvalidSubmissionTarget(PhotoSubmissionError):
 
 
 class IdempotencyConflict(PhotoSubmissionError):
-    code = "submission_idempotency_conflict"
+    code = "idempotency_conflict"
 
 
 class CannotStartProcessing(PhotoSubmissionError):

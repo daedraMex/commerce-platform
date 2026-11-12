@@ -4,8 +4,9 @@ Pure Python: no Django, DRF or infrastructure imports belong here.
 """
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
+from apps.catalog.services import MediaRecord, ProductRecord, VariantRecord
 from apps.photos.domain.submission import PhotoSubmission
 from apps.shared.domain.store import StoreReference
 
@@ -25,6 +26,30 @@ class MediaUploader(Protocol):
 
     def upload(self, store: StoreReference, content: bytes) -> UploadedPhoto:
         """Return the private original and preview keys for ``content``."""
+        ...
+
+
+class PhotoCatalog(Protocol):
+    """The catalog service operations photo use cases need, scoped to one store."""
+
+    def get_product(self, store: StoreReference, product_id: int) -> ProductRecord | None:
+        """Return the product of ``store``, or None when another store owns it."""
+        ...
+
+    def get_variant(self, store: StoreReference, variant_id: int) -> VariantRecord | None:
+        """Return the variant of ``store``, or None when another store owns it."""
+        ...
+
+    def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
+        """Return the media of ``store``, or None when another store owns it."""
+        ...
+
+
+class PrivateMediaReader(Protocol):
+    """Open a private original or preview for an authorized streaming response."""
+
+    def open(self, store: StoreReference, key: str) -> BinaryIO:
+        """Return a readable file for ``key``, or raise OSError when it is missing."""
         ...
 
 

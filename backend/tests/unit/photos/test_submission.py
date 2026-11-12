@@ -339,7 +339,7 @@ def test_resolve_replay_raises_when_the_fingerprint_differs():
     with pytest.raises(IdempotencyConflict) as error:
         resolve_replay(submission, "different-payload")
 
-    assert error.value.code == "submission_idempotency_conflict"
+    assert error.value.code == "idempotency_conflict"
 
 
 def test_resolve_replay_without_an_existing_submission_returns_none():

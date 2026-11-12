@@ -31,5 +31,6 @@ urlpatterns = [
     path("auth/", include("apps.accounts.urls")),
     path("me/", MeView.as_view(), name="me"),
     path("staff/", include("apps.catalog.staff_urls")),
+    path("staff/", include("apps.photos.interfaces.urls")),
     re_path(r"^.*$", api_not_found),
 ]

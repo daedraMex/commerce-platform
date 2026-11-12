@@ -13,6 +13,14 @@ from apps.catalog.services import (
     StoreMismatch,
     VariantNotFound,
 )
+from apps.photos.domain.errors import (
+    DuplicateIdempotencyKey,
+    IdempotencyConflict,
+    ImageTooLarge,
+    InvalidImage,
+    InvalidSubmissionTarget,
+    TooManyPixels,
+)
 from apps.shared.domain.exceptions import (
     DomainError,
     NotFoundError,
@@ -38,6 +46,12 @@ DOMAIN_ERROR_STATUS = {
     ProductImageNotFound: status.HTTP_404_NOT_FOUND,
     VariantNotFound: status.HTTP_404_NOT_FOUND,
     ProductImageConflict: status.HTTP_409_CONFLICT,
+    IdempotencyConflict: status.HTTP_409_CONFLICT,
+    DuplicateIdempotencyKey: status.HTTP_409_CONFLICT,
+    InvalidSubmissionTarget: status.HTTP_400_BAD_REQUEST,
+    InvalidImage: status.HTTP_400_BAD_REQUEST,
+    ImageTooLarge: status.HTTP_400_BAD_REQUEST,
+    TooManyPixels: status.HTTP_400_BAD_REQUEST,
 }
 
 CODE_BY_STATUS = {

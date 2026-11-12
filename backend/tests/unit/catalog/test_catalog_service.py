@@ -417,18 +417,22 @@ def test_reactivate_rejects_a_missing_link(service):
 def test_lookup_for_another_store_returns_none(service, repository):
     repository.products[10] = make_product(store=ANIME)
     repository.variants[20] = make_variant(store=ANIME)
+    repository.media[30] = make_media(store=ANIME)
 
     assert service.get_product(HOME, product_id=10) is None
     assert service.get_variant(HOME, variant_id=20) is None
+    assert service.get_media(HOME, media_id=30) is None
 
 
 def test_lookup_returns_the_product_with_its_category_schema(service):
     product = service.get_product(HOME, product_id=10)
     variant = service.get_variant(HOME, variant_id=20)
+    media = service.get_media(HOME, media_id=30)
 
     assert product.category.shape == "rectangle"
     assert product.category.option_schema[0]["code"] == "size"
     assert variant.option_values == {"size": "IND"}
+    assert media.content_hash == "hash-1"
 
 
 def test_create_product_image_runs_in_a_transaction_and_locks_the_product(
