@@ -581,3 +581,27 @@ def test_list_review_fixes_raises_when_the_review_view_fails():
 
     with pytest.raises(GitHubError, match="review lookup failed"):
         GitHub(REPO, run=run).list_review_fixes(author="xolo-bot", owner="daedraMex")
+
+
+@pytest.mark.parametrize("separator", ["", "\n"])
+def test_json_pages_flattens_concatenated_paginate_pages_in_order(separator):
+    text = '[{"id": 1}, {"id": 2}]' + separator + '[{"id": 3}]\n'
+
+    pages = GitHub(REPO)._json_pages(text, "gh api reviews")
+
+    assert pages == [{"id": 1}, {"id": 2}, {"id": 3}]
+
+
+def test_json_pages_returns_an_empty_list_for_empty_output():
+    assert GitHub(REPO)._json_pages("", "gh api reviews") == []
+    assert GitHub(REPO)._json_pages("  \n", "gh api reviews") == []
+
+
+def test_json_pages_raises_on_invalid_json():
+    with pytest.raises(GitHubError, match="gh api reviews returned invalid JSON"):
+        GitHub(REPO)._json_pages('[{"id": 1}][not json', "gh api reviews")
+
+
+def test_json_pages_raises_when_a_page_is_not_a_list():
+    with pytest.raises(GitHubError, match="gh api reviews returned an unexpected JSON shape"):
+        GitHub(REPO)._json_pages('[{"id": 1}]{"message": "Not Found"}', "gh api reviews")
