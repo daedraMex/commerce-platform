@@ -34,7 +34,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 ## Stack
 - backend/: Python 3.12 managed with uv, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
 - web/storefront/: one Next.js + TypeScript app; the store and its theme are resolved by domain (later)
-- mobile/: React Native + Expo (later)
+- mobile/: Kotlin Multiplatform + Compose Multiplatform, Material 3 (later, ADR-0029)
 - packages/api-client/: TypeScript client generated from the OpenAPI schema (later)
 - Deploy: backend on a VPS with Dokploy, storefront on Vercel
 - Tickets: GitHub Issues

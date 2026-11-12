@@ -4,7 +4,7 @@ Plataforma de comercio multi-tienda (`anime`: mercancía de anime como gorras, p
 otros productos de anime; `kawaii`: papelería kawaii como portatarjetas de BTS, lomo cards,
 libretas, stickers, plumas y squishies; `llaveros`: llaveros de todo tipo, menudeo y mayoreo
 para revendedores; y `home`: frazadas) con un solo backend en Django + DRF, tiendas web en
-Next.js, app móvil en React Native y una plataforma de agentes (publicación en Instagram,
+Next.js, app móvil en Kotlin Multiplatform y una plataforma de agentes (publicación en Instagram,
 ventas por WhatsApp, seguimiento y paquetes sugeridos).
 
 Este documento define **qué se entrega en cada fase** y **cuándo algo cuenta como terminado**.
@@ -354,8 +354,10 @@ revisión de seguridad; prueba de restauración de respaldos.
 
 ### Fase 14 — App móvil
 **Objetivo:** que el cliente escanee un producto y lo guarde.
-**Entregables:** app en Expo; escaneo de QR con enlaces universales; favoritos sincronizados con
-la web; login con JWT; publicación con EAS Build y actualizaciones con EAS Update.
+**Entregables:** app en Kotlin Multiplatform con Compose Multiplatform y Material 3 (Android e
+iOS, ADR-0029), con el tema de cada tienda generado desde su `accent_color`; cliente Kotlin generado
+desde el esquema OpenAPI; escaneo de QR con enlaces universales; favoritos sincronizados con la web;
+login con JWT; publicación en Google Play y App Store.
 **Criterio de salida:** escaneas la etiqueta de un producto y se abre en la app con su precio actual.
 
 ---
