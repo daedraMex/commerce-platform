@@ -7,7 +7,15 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework_simplejwt.tokens import AccessToken
 
 from apps.accounts.services import grant_membership
-from apps.catalog.models import Category, Design, Media, Product, ProductVariant, Supplier
+from apps.catalog.models import (
+    Category,
+    Design,
+    Media,
+    Product,
+    ProductMedia,
+    ProductVariant,
+    Supplier,
+)
 from apps.photos.models import PhotoSubmission
 from apps.shared.domain.exceptions import PermissionDeniedError
 from apps.stores.models import Store
@@ -19,6 +27,12 @@ pytestmark = pytest.mark.django_db
 UPLOAD_URL = "/api/v1/staff/photos/"
 DETAIL_URL = "/api/v1/staff/photos/{id}/"
 PREVIEW_URL = "/api/v1/staff/photos/{id}/preview/"
+ACTION_URLS = {
+    "apply": "/api/v1/staff/photos/{id}/apply/",
+    "redo": "/api/v1/staff/photos/{id}/redo/",
+    "retry": "/api/v1/staff/photos/{id}/retry/",
+    "discard": "/api/v1/staff/photos/{id}/discard/",
+}
 
 CORNERS = [
     {"x": 0.1, "y": 0.1},
@@ -432,3 +446,321 @@ def test_schema_documents_the_photo_upload_and_status_api(client):
 def _codes(operation, status):
     media = operation["responses"][str(status)]["content"]["application/problem+json"]
     return media["examples"].values()
+
+
+def make_submission(
+    store,
+    user,
+    *,
+    product,
+    status=PhotoSubmission.Status.READY,
+    result_media=None,
+    attempts=1,
+    idempotency_key="action-key",
+    corners=None,
+    crop=None,
+):
+    return PhotoSubmission.objects.create(
+        store=store,
+        created_by=user,
+        kind=PhotoSubmission.Kind.RECTANGLE,
+        target_product=product,
+        idempotency_key=idempotency_key,
+        request_fingerprint="a" * 64,
+        status=status,
+        result_media=result_media,
+        attempts=attempts,
+        original_key=f"stores/{store.id}/photos/originals/{idempotency_key}.jpg",
+        preview_key=f"stores/{store.id}/photos/previews/{idempotency_key}.jpg",
+        corners=corners,
+        crop=crop,
+    )
+
+
+def make_media(store, *, key="stores/1/media/result.jpg", content_hash="result"):
+    return Media.objects.create(
+        store=store,
+        storage_key=key,
+        content_hash=content_hash,
+        mime_type="image/jpeg",
+        width=800,
+        height=1000,
+    )
+
+
+def post_action(client, user, action, submission_id, *, store="home", data=None):
+    return client.post(
+        ACTION_URLS[action].format(id=submission_id),
+        data=json.dumps(data or {}),
+        content_type="application/json",
+        HTTP_AUTHORIZATION=bearer(user),
+        HTTP_X_STORE=store,
+    )
+
+
+def test_apply_makes_the_result_the_active_main_and_deactivates_the_old_one(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    old_media = make_media(home, key="stores/1/media/old.jpg", content_hash="old")
+    old_link = ProductMedia.objects.create(
+        product=product, media=old_media, role=ProductMedia.Role.MAIN
+    )
+    new_media = make_media(home, key="stores/1/media/new.jpg", content_hash="new")
+    submission = make_submission(
+        home, user, product=product, result_media=new_media, idempotency_key="apply-key"
+    )
+
+    response = post_action(client, user, "apply", submission.pk)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    assert body["applied_at"] is not None
+    assert body["discarded_at"] is None
+    assert body["result"]["media_id"] == new_media.id
+
+    submission.refresh_from_db()
+    old_link.refresh_from_db()
+    assert submission.applied_at is not None
+    assert submission.applied_by_id == user.id
+    assert old_link.is_active is False
+    assert ProductMedia.objects.filter(pk=old_link.pk).exists()
+    assert Media.objects.filter(pk=old_media.pk).exists()
+
+    new_link = ProductMedia.objects.get(
+        product=product, media=new_media, role=ProductMedia.Role.MAIN
+    )
+    assert new_link.is_active is True
+    assert (
+        ProductMedia.objects.filter(
+            product=product, role=ProductMedia.Role.MAIN, is_active=True
+        ).count()
+        == 1
+    )
+
+
+def test_apply_requires_a_ready_individual_photo(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=PhotoSubmission.Status.PROCESSING,
+        result_media=None,
+        idempotency_key="processing-key",
+    )
+
+    response = post_action(client, user, "apply", submission.pk)
+
+    assert_problem_details(response, status=409, code="submission_cannot_apply")
+
+
+def test_redo_reuses_the_engine_with_new_corners_and_keeps_the_old_media(
+    client, home, user, override_photo_processing_queue
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    old_media = make_media(home, key="stores/1/media/old.jpg", content_hash="old")
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        result_media=old_media,
+        idempotency_key="redo-key",
+        corners=CORNERS,
+        crop=CROP,
+    )
+    queued = []
+
+    class RecordingQueue:
+        def enqueue(self, store, submission_id):
+            queued.append((store.id, submission_id))
+
+    override_photo_processing_queue(RecordingQueue())
+
+    response = post_action(
+        client,
+        user,
+        "redo",
+        submission.pk,
+        data={
+            "corners": [
+                {"x": 0.2, "y": 0.2},
+                {"x": 0.8, "y": 0.2},
+                {"x": 0.8, "y": 0.8},
+                {"x": 0.2, "y": 0.8},
+            ],
+            "crop": {"x": 2, "y": 2, "width": 6, "height": 8},
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    assert body["result"] is None
+    assert body["corners"][0] == {"x": 0.2, "y": 0.2}
+    assert body["crop"] == {"x": 2, "y": 2, "width": 6, "height": 8}
+    assert queued == [(home.id, submission.pk)]
+
+    submission.refresh_from_db()
+    assert submission.status == PhotoSubmission.Status.PROCESSING
+    assert submission.result_media is None
+    assert Media.objects.filter(pk=old_media.pk).exists()
+
+
+def test_redo_refuses_a_photo_that_is_not_ready(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=PhotoSubmission.Status.FAILED,
+        result_media=None,
+        idempotency_key="redo-failed-key",
+    )
+
+    response = post_action(client, user, "redo", submission.pk, data={"crop": CROP})
+
+    assert_problem_details(response, status=409, code="submission_cannot_redo")
+
+
+def test_retry_enqueues_a_failed_submission_with_another_attempt(
+    client, home, user, override_photo_processing_queue
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=PhotoSubmission.Status.FAILED,
+        result_media=None,
+        attempts=1,
+        idempotency_key="retry-key",
+    )
+    queued = []
+
+    class RecordingQueue:
+        def enqueue(self, store, submission_id):
+            queued.append((store.id, submission_id))
+
+    override_photo_processing_queue(RecordingQueue())
+
+    response = post_action(client, user, "retry", submission.pk)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    assert body["attempts"] == 2
+    assert queued == [(home.id, submission.pk)]
+
+
+def test_retry_refuses_a_submission_that_did_not_fail(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(home, user, product=product, idempotency_key="retry-ready-key")
+
+    response = post_action(client, user, "retry", submission.pk)
+
+    assert_problem_details(response, status=409, code="submission_cannot_start_processing")
+
+
+def test_discard_deletes_only_the_private_original_and_preview(client, home, user, private_storage):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    submission_id = upload(client, user).json()["id"]
+    submission = PhotoSubmission.objects.get(pk=submission_id)
+    original_path = private_storage / submission.original_key
+    preview_path = private_storage / submission.preview_key
+    assert original_path.exists()
+    assert preview_path.exists()
+
+    response = post_action(client, user, "discard", submission_id)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["discarded_at"] is not None
+    assert not original_path.exists()
+    assert not preview_path.exists()
+
+    submission.refresh_from_db()
+    assert submission.discarded_at is not None
+    assert PhotoSubmission.objects.filter(pk=submission.pk).exists()
+
+
+def test_discard_refuses_an_applied_submission(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_submission(
+        home, user, product=product, result_media=media, idempotency_key="applied-key"
+    )
+    post_action(client, user, "apply", submission.pk)
+
+    response = post_action(client, user, "discard", submission.pk)
+
+    assert_problem_details(response, status=409, code="submission_cannot_discard")
+
+
+@pytest.mark.parametrize(
+    ("action", "status"),
+    [
+        ("apply", PhotoSubmission.Status.READY),
+        ("redo", PhotoSubmission.Status.READY),
+        ("retry", PhotoSubmission.Status.FAILED),
+        ("discard", PhotoSubmission.Status.UPLOADED),
+    ],
+)
+def test_actions_never_reach_another_stores_submission(client, home, anime, user, action, status):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    grant_membership(user=user, store=anime, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home) if status == PhotoSubmission.Status.READY else None
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=status,
+        result_media=media,
+        attempts=1 if status == PhotoSubmission.Status.FAILED else 0,
+        idempotency_key=f"isolation-{action}",
+    )
+
+    response = post_action(
+        client,
+        user,
+        action,
+        submission.pk,
+        store="anime",
+        data={"crop": CROP},
+    )
+
+    assert_problem_details(response, status=404, code="not_found")
+    submission.refresh_from_db()
+    assert submission.applied_at is None
+    assert submission.discarded_at is None
+
+
+def test_actions_require_catalog_manage(client, home, user):
+    grant_membership(user=user, store=home, role_name="warehouse")
+    product = make_product(home)
+    submission = make_submission(home, user, product=product, idempotency_key="no-permission-key")
+
+    response = post_action(client, user, "apply", submission.pk)
+
+    assert_problem_details(response, status=403, code="permission_denied")
+
+
+def test_schema_documents_the_photo_actions(client):
+    schema = client.get("/api/v1/schema/", HTTP_ACCEPT="application/json").json()
+
+    for action, url in ACTION_URLS.items():
+        assert url.format(id="{id}") in schema["paths"], action
+        operation = schema["paths"][url.format(id="{id}")]["post"]
+        assert "200" in operation["responses"]
+
+    redo = schema["paths"][ACTION_URLS["redo"].format(id="{id}")]["post"]
+    request_schema = redo["requestBody"]["content"]["application/json"]["schema"]
+    component = schema["components"]["schemas"][request_schema["$ref"].rsplit("/", 1)[-1]]
+    assert {"corners", "crop"} <= set(component["properties"])

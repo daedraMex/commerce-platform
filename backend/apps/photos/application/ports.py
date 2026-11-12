@@ -6,7 +6,12 @@ Pure Python: no Django, DRF or infrastructure imports belong here.
 from dataclasses import dataclass
 from typing import BinaryIO, Protocol
 
-from apps.catalog.services import MediaRecord, ProductRecord, VariantRecord
+from apps.catalog.services import (
+    MediaRecord,
+    ProductImageRecord,
+    ProductRecord,
+    VariantRecord,
+)
 from apps.photos.domain.submission import PhotoSubmission
 from apps.shared.domain.store import StoreReference
 
@@ -28,6 +33,10 @@ class MediaUploader(Protocol):
         """Return the private original and preview keys for ``content``."""
         ...
 
+    def delete(self, store: StoreReference, key: str) -> None:
+        """Remove one private file of ``store``; a missing file is harmless."""
+        ...
+
 
 class PhotoCatalog(Protocol):
     """The catalog service operations photo use cases need, scoped to one store."""
@@ -42,6 +51,26 @@ class PhotoCatalog(Protocol):
 
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         """Return the media of ``store``, or None when another store owns it."""
+        ...
+
+    def set_main_product_image(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        media_id: int,
+        variant_id: int | None = None,
+        position: int | None = None,
+    ) -> ProductImageRecord:
+        """Make the media the product's one active main image."""
+        ...
+
+
+class PhotoProcessingQueue(Protocol):
+    """Enqueue one submission for asynchronous processing, always with its store."""
+
+    def enqueue(self, store: StoreReference, submission_id: int) -> None:
+        """Put the submission on the processing queue; the task receives the store id."""
         ...
 
 

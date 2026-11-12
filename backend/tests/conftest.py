@@ -63,3 +63,14 @@ def override_feature_flags():
 
     yield override
     dependencies.clear_overrides()
+
+
+@pytest.fixture
+def override_photo_processing_queue():
+    """Back get_photo_processing_queue() with a fake queue for one test."""
+
+    def override(queue):
+        dependencies.override(dependencies.get_photo_processing_queue, lambda: queue)
+
+    yield override
+    dependencies.clear_overrides()

@@ -375,6 +375,11 @@
       "PhotoSubmission": {
         "description": "One submission's state, readable failure, private preview and result.",
         "properties": {
+          "applied_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
           "attempts": {
             "type": "integer"
           },
@@ -387,6 +392,11 @@
           },
           "crop": {
             "nullable": true
+          },
+          "discarded_at": {
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
           },
           "failure_code": {
             "type": "string"
@@ -716,6 +726,18 @@
           "checks",
           "status"
         ],
+        "type": "object"
+      },
+      "RedoPhoto": {
+        "description": "The new corners or crop of a redo; an omitted field keeps its stored value.",
+        "properties": {
+          "corners": {
+            "nullable": true
+          },
+          "crop": {
+            "nullable": true
+          }
+        },
         "type": "object"
       },
       "StaffProduct": {
@@ -2219,6 +2241,7 @@
                   "ReadyPhotoSubmission": {
                     "summary": "Ready photo submission",
                     "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
                       "attempts": 1,
                       "corners": [
                         {
@@ -2245,6 +2268,7 @@
                         "x": 120,
                         "y": 180
                       },
+                      "discarded_at": null,
                       "failure_code": "",
                       "failure_message": "",
                       "id": 12,
@@ -2282,6 +2306,7 @@
                   "ReadyPhotoSubmission": {
                     "summary": "Ready photo submission",
                     "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
                       "attempts": 1,
                       "corners": [
                         {
@@ -2308,6 +2333,7 @@
                         "x": 120,
                         "y": 180
                       },
+                      "discarded_at": null,
                       "failure_code": "",
                       "failure_message": "",
                       "id": 12,
@@ -2548,6 +2574,7 @@
                   "ReadyPhotoSubmission": {
                     "summary": "Ready photo submission",
                     "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
                       "attempts": 1,
                       "corners": [
                         {
@@ -2574,6 +2601,7 @@
                         "x": 120,
                         "y": 180
                       },
+                      "discarded_at": null,
                       "failure_code": "",
                       "failure_message": "",
                       "id": 12,
@@ -2721,6 +2749,486 @@
               }
             },
             "description": "No photo submission matches this id in this store."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/photos/{id}/apply/": {
+      "post": {
+        "description": "Link a ready individual photo as the product's active main image.",
+        "operationId": "api_v1_staff_photos_apply_create",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ReadyPhotoSubmission": {
+                    "summary": "Ready photo submission",
+                    "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
+                      "attempts": 1,
+                      "corners": [
+                        {
+                          "x": 0.1,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.9
+                        },
+                        {
+                          "x": 0.1,
+                          "y": 0.9
+                        }
+                      ],
+                      "created_at": "2026-11-12T09:30:00Z",
+                      "crop": {
+                        "height": 1200,
+                        "width": 960,
+                        "x": 120,
+                        "y": 180
+                      },
+                      "discarded_at": null,
+                      "failure_code": "",
+                      "failure_message": "",
+                      "id": 12,
+                      "kind": "rectangle",
+                      "light_correction": true,
+                      "photographed_variant_id": 3,
+                      "pipeline_version": "2026-11-11.2",
+                      "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "result": {
+                        "height": 1500,
+                        "media_id": 44,
+                        "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                        "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                        "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                        "width": 1200
+                      },
+                      "status": "ready",
+                      "target_product_id": 7,
+                      "updated_at": "2026-11-12T09:31:15Z",
+                      "version": 4
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoSubmission"
+                }
+              }
+            },
+            "description": "The applied submission, now the product's active main image."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No photo submission matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No photo submission matches this id in this store."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "SubmissionCannotApply": {
+                    "summary": "submission_cannot_apply",
+                    "value": {
+                      "code": "submission_cannot_apply",
+                      "detail": "Only a ready individual photo can be applied.",
+                      "status": 409,
+                      "title": "Conflict",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Only a ready individual photo can be applied."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/photos/{id}/discard/": {
+      "post": {
+        "description": "Discard an unapplied submission, deleting only its private original and preview.",
+        "operationId": "api_v1_staff_photos_discard_create",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ReadyPhotoSubmission": {
+                    "summary": "Ready photo submission",
+                    "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
+                      "attempts": 1,
+                      "corners": [
+                        {
+                          "x": 0.1,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.9
+                        },
+                        {
+                          "x": 0.1,
+                          "y": 0.9
+                        }
+                      ],
+                      "created_at": "2026-11-12T09:30:00Z",
+                      "crop": {
+                        "height": 1200,
+                        "width": 960,
+                        "x": 120,
+                        "y": 180
+                      },
+                      "discarded_at": null,
+                      "failure_code": "",
+                      "failure_message": "",
+                      "id": 12,
+                      "kind": "rectangle",
+                      "light_correction": true,
+                      "photographed_variant_id": 3,
+                      "pipeline_version": "2026-11-11.2",
+                      "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "result": {
+                        "height": 1500,
+                        "media_id": 44,
+                        "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                        "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                        "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                        "width": 1200
+                      },
+                      "status": "ready",
+                      "target_product_id": 7,
+                      "updated_at": "2026-11-12T09:31:15Z",
+                      "version": 4
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoSubmission"
+                }
+              }
+            },
+            "description": "The discarded submission; only its private files were removed."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No photo submission matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No photo submission matches this id in this store."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "SubmissionCannotDiscard": {
+                    "summary": "submission_cannot_discard",
+                    "value": {
+                      "code": "submission_cannot_discard",
+                      "detail": "An applied or already discarded photo cannot be discarded.",
+                      "status": 409,
+                      "title": "Conflict",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "An applied or already discarded photo cannot be discarded."
           }
         },
         "security": [
@@ -2885,6 +3393,495 @@
               }
             },
             "description": "No photo submission matches this id in this store."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/photos/{id}/redo/": {
+      "post": {
+        "description": "Redo a ready photo with new corners or crop, keeping the previous result Media.",
+        "operationId": "api_v1_staff_photos_redo_create",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedoPhoto"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/RedoPhoto"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/RedoPhoto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ReadyPhotoSubmission": {
+                    "summary": "Ready photo submission",
+                    "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
+                      "attempts": 1,
+                      "corners": [
+                        {
+                          "x": 0.1,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.9
+                        },
+                        {
+                          "x": 0.1,
+                          "y": 0.9
+                        }
+                      ],
+                      "created_at": "2026-11-12T09:30:00Z",
+                      "crop": {
+                        "height": 1200,
+                        "width": 960,
+                        "x": 120,
+                        "y": 180
+                      },
+                      "discarded_at": null,
+                      "failure_code": "",
+                      "failure_message": "",
+                      "id": 12,
+                      "kind": "rectangle",
+                      "light_correction": true,
+                      "photographed_variant_id": 3,
+                      "pipeline_version": "2026-11-11.2",
+                      "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "result": {
+                        "height": 1500,
+                        "media_id": 44,
+                        "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                        "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                        "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                        "width": 1200
+                      },
+                      "status": "ready",
+                      "target_product_id": 7,
+                      "updated_at": "2026-11-12T09:31:15Z",
+                      "version": 4
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoSubmission"
+                }
+              }
+            },
+            "description": "The submission back in processing with a new attempt queued."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "ValidationError": {
+                    "summary": "validation_error",
+                    "value": {
+                      "code": "validation_error",
+                      "detail": "Validation failed.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Validation failed."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No photo submission matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No photo submission matches this id in this store."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "SubmissionCannotRedo": {
+                    "summary": "submission_cannot_redo",
+                    "value": {
+                      "code": "submission_cannot_redo",
+                      "detail": "Only a ready photo can be redone.",
+                      "status": 409,
+                      "title": "Conflict",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Only a ready photo can be redone."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/photos/{id}/retry/": {
+      "post": {
+        "description": "Retry a failed photo submission with another processing attempt.",
+        "operationId": "api_v1_staff_photos_retry_create",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ReadyPhotoSubmission": {
+                    "summary": "Ready photo submission",
+                    "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
+                      "attempts": 1,
+                      "corners": [
+                        {
+                          "x": 0.1,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.9
+                        },
+                        {
+                          "x": 0.1,
+                          "y": 0.9
+                        }
+                      ],
+                      "created_at": "2026-11-12T09:30:00Z",
+                      "crop": {
+                        "height": 1200,
+                        "width": 960,
+                        "x": 120,
+                        "y": 180
+                      },
+                      "discarded_at": null,
+                      "failure_code": "",
+                      "failure_message": "",
+                      "id": 12,
+                      "kind": "rectangle",
+                      "light_correction": true,
+                      "photographed_variant_id": 3,
+                      "pipeline_version": "2026-11-11.2",
+                      "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "result": {
+                        "height": 1500,
+                        "media_id": 44,
+                        "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                        "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                        "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                        "width": 1200
+                      },
+                      "status": "ready",
+                      "target_product_id": 7,
+                      "updated_at": "2026-11-12T09:31:15Z",
+                      "version": 4
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoSubmission"
+                }
+              }
+            },
+            "description": "The failed submission with a new processing attempt queued."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No photo submission matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No photo submission matches this id in this store."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "SubmissionAttemptsExhausted": {
+                    "summary": "submission_attempts_exhausted",
+                    "value": {
+                      "code": "submission_attempts_exhausted",
+                      "detail": "This submission already used its processing attempts.",
+                      "status": 409,
+                      "title": "Conflict",
+                      "type": "about:blank"
+                    }
+                  },
+                  "SubmissionCannotStartProcessing": {
+                    "summary": "submission_cannot_start_processing",
+                    "value": {
+                      "code": "submission_cannot_start_processing",
+                      "detail": "Only a failed photo can be retried.",
+                      "status": 409,
+                      "title": "Conflict",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Only a failed photo can be retried. This submission already used its processing attempts."
           }
         },
         "security": [

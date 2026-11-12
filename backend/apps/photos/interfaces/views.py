@@ -1,4 +1,4 @@
-"""Staff endpoints to upload a photo, read its status and stream its private preview."""
+"""Staff endpoints to upload, read, apply, redo, retry and discard photo submissions."""
 
 from django.http import FileResponse
 from drf_spectacular.types import OpenApiTypes
@@ -8,15 +8,24 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.photos.application.apply_photo import ApplyPhoto
+from apps.photos.application.discard_photo import DiscardPhoto
 from apps.photos.application.get_photo_submission import GetPhotoSubmission, PhotoSubmissionView
+from apps.photos.application.redo_photo import RedoPhoto
+from apps.photos.application.retry_photo import RetryPhoto
 from apps.photos.application.upload_photo import UploadPhoto, UploadPhotoCommand
-from apps.photos.interfaces.serializers import PhotoSubmissionSerializer, UploadPhotoSerializer
+from apps.photos.interfaces.serializers import (
+    PhotoSubmissionSerializer,
+    RedoPhotoSerializer,
+    UploadPhotoSerializer,
+)
 from apps.shared.domain.exceptions import NotFoundError
 from apps.shared.interfaces.views import StoreScopedMixin
 from config.dependencies import (
     get_authorizer,
     get_catalog_service,
     get_media_uploader,
+    get_photo_processing_queue,
     get_photo_submission_repository,
     get_private_media_reader,
 )
@@ -82,6 +91,8 @@ PHOTO_SUBMISSION_EXAMPLE = OpenApiExample(
         "pipeline_version": "2026-11-11.2",
         "attempts": 1,
         "version": 4,
+        "applied_at": "2026-11-12T09:32:00Z",
+        "discarded_at": None,
         "target_product_id": 7,
         "photographed_variant_id": 3,
         "light_correction": True,
@@ -286,3 +297,160 @@ class StaffPhotoPreviewView(StoreScopedMixin, APIView):
         except OSError as error:
             raise NotFoundError("The preview file is not available.") from error
         return FileResponse(preview, content_type="image/jpeg")
+
+
+ACTION_ERRORS = {
+    **STORE_ERRORS,
+    **AUTH_ERRORS,
+    **MANAGE_CATALOG_ERRORS,
+    **problem_response(404, ("not_found", "No photo submission matches this id in this store.")),
+}
+
+
+def _action_body(request, submission):
+    return PhotoSubmissionSerializer(
+        _submission_view(request.store, submission),
+        context={"request": request},
+    ).data
+
+
+@extend_schema(
+    request=None,
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=PhotoSubmissionSerializer,
+            description="The applied submission, now the product's active main image.",
+            examples=[PHOTO_SUBMISSION_EXAMPLE],
+        ),
+        **ACTION_ERRORS,
+        **problem_response(
+            409,
+            (
+                "submission_cannot_apply",
+                "Only a ready individual photo can be applied.",
+            ),
+        ),
+    },
+)
+class StaffPhotoApplyView(StoreScopedMixin, APIView):
+    """Link a ready individual photo as the product's active main image."""
+
+    def post(self, request, pk, *args, **kwargs):
+        submission = ApplyPhoto(
+            repository=get_photo_submission_repository(),
+            catalog=get_catalog_service(),
+            authorizer=get_authorizer(),
+        )(request.store, user_id=request.user.id, submission_id=pk)
+        return Response(_action_body(request, submission))
+
+
+@extend_schema(
+    parameters=[STORE_HEADER_PARAMETER],
+    request=RedoPhotoSerializer,
+    responses={
+        200: OpenApiResponse(
+            response=PhotoSubmissionSerializer,
+            description="The submission back in processing with a new attempt queued.",
+            examples=[PHOTO_SUBMISSION_EXAMPLE],
+        ),
+        **ACTION_ERRORS,
+        **problem_response(
+            400,
+            ("validation_error", "Validation failed."),
+        ),
+        **problem_response(
+            409,
+            (
+                "submission_cannot_redo",
+                "Only a ready photo can be redone.",
+            ),
+        ),
+    },
+)
+class StaffPhotoRedoView(StoreScopedMixin, APIView):
+    """Redo a ready photo with new corners or crop, keeping the previous result Media."""
+
+    def post(self, request, pk, *args, **kwargs):
+        serializer = RedoPhotoSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        submission = RedoPhoto(
+            repository=get_photo_submission_repository(),
+            queue=get_photo_processing_queue(),
+            authorizer=get_authorizer(),
+        )(
+            request.store,
+            user_id=request.user.id,
+            submission_id=pk,
+            corners=data.get("corners"),
+            crop=data.get("crop"),
+        )
+        return Response(_action_body(request, submission))
+
+
+@extend_schema(
+    request=None,
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=PhotoSubmissionSerializer,
+            description="The failed submission with a new processing attempt queued.",
+            examples=[PHOTO_SUBMISSION_EXAMPLE],
+        ),
+        **ACTION_ERRORS,
+        **problem_response(
+            409,
+            (
+                "submission_cannot_start_processing",
+                "Only a failed photo can be retried.",
+            ),
+            (
+                "submission_attempts_exhausted",
+                "This submission already used its processing attempts.",
+            ),
+        ),
+    },
+)
+class StaffPhotoRetryView(StoreScopedMixin, APIView):
+    """Retry a failed photo submission with another processing attempt."""
+
+    def post(self, request, pk, *args, **kwargs):
+        submission = RetryPhoto(
+            repository=get_photo_submission_repository(),
+            queue=get_photo_processing_queue(),
+            authorizer=get_authorizer(),
+        )(request.store, user_id=request.user.id, submission_id=pk)
+        return Response(_action_body(request, submission))
+
+
+@extend_schema(
+    request=None,
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=PhotoSubmissionSerializer,
+            description="The discarded submission; only its private files were removed.",
+            examples=[PHOTO_SUBMISSION_EXAMPLE],
+        ),
+        **ACTION_ERRORS,
+        **problem_response(
+            409,
+            (
+                "submission_cannot_discard",
+                "An applied or already discarded photo cannot be discarded.",
+            ),
+        ),
+    },
+)
+class StaffPhotoDiscardView(StoreScopedMixin, APIView):
+    """Discard an unapplied submission, deleting only its private original and preview."""
+
+    def post(self, request, pk, *args, **kwargs):
+        submission = DiscardPhoto(
+            repository=get_photo_submission_repository(),
+            uploader=get_media_uploader(),
+            authorizer=get_authorizer(),
+        )(request.store, user_id=request.user.id, submission_id=pk)
+        return Response(_action_body(request, submission))

@@ -14,6 +14,14 @@ from apps.catalog.services import (
     VariantNotFound,
 )
 from apps.photos.domain.errors import (
+    AttemptsExhausted,
+    CannotApply,
+    CannotDiscard,
+    CannotMarkFailed,
+    CannotMarkReady,
+    CannotRedo,
+    CannotStartProcessing,
+    ConcurrentModification,
     DuplicateIdempotencyKey,
     IdempotencyConflict,
     ImageTooLarge,
@@ -52,6 +60,14 @@ DOMAIN_ERROR_STATUS = {
     InvalidImage: status.HTTP_400_BAD_REQUEST,
     ImageTooLarge: status.HTTP_400_BAD_REQUEST,
     TooManyPixels: status.HTTP_400_BAD_REQUEST,
+    CannotStartProcessing: status.HTTP_409_CONFLICT,
+    AttemptsExhausted: status.HTTP_409_CONFLICT,
+    CannotMarkReady: status.HTTP_409_CONFLICT,
+    CannotMarkFailed: status.HTTP_409_CONFLICT,
+    CannotRedo: status.HTTP_409_CONFLICT,
+    CannotApply: status.HTTP_409_CONFLICT,
+    CannotDiscard: status.HTTP_409_CONFLICT,
+    ConcurrentModification: status.HTTP_409_CONFLICT,
 }
 
 CODE_BY_STATUS = {

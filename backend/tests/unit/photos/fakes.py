@@ -6,6 +6,8 @@ from datetime import UTC, datetime
 from apps.catalog.services import (
     CategoryReference,
     MediaRecord,
+    ProductImageRecord,
+    ProductImageRole,
     ProductRecord,
     VariantRecord,
 )
@@ -21,10 +23,11 @@ HOME = StoreReference(id=1, slug="home")
 
 @dataclass
 class FakeMediaUploader:
-    """Record uploads and return stable private keys for later use-case tests."""
+    """Record uploads and deletes, returning stable private keys."""
 
     upload_error: Exception | None = None
     calls: list[tuple[StoreReference, bytes]] = field(default_factory=list)
+    deleted: list[tuple[StoreReference, str]] = field(default_factory=list)
 
     def upload(self, store: StoreReference, content: bytes) -> UploadedPhoto:
         self.calls.append((store, content))
@@ -36,6 +39,9 @@ class FakeMediaUploader:
             width=12,
             height=8,
         )
+
+    def delete(self, store: StoreReference, key: str) -> None:
+        self.deleted.append((store, key))
 
 
 @dataclass
@@ -110,10 +116,13 @@ class FakeCatalog:
     variants: dict[int, VariantRecord] = field(default_factory=dict)
     media: dict[int, MediaRecord] = field(default_factory=dict)
 
+    main_calls: list[dict] = field(default_factory=list)
+
     def __init__(self, *, products=(), variants=(), media=()):
         self.products = {product.id: product for product in products}
         self.variants = {variant.id: variant for variant in variants}
         self.media = {item.id: item for item in media}
+        self.main_calls = []
 
     def get_product(self, store: StoreReference, product_id: int) -> ProductRecord | None:
         product = self.products.get(product_id)
@@ -126,6 +135,45 @@ class FakeCatalog:
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         item = self.media.get(media_id)
         return item if item is not None and item.store_id == store.id else None
+
+    def set_main_product_image(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        media_id: int,
+        variant_id: int | None = None,
+        position: int | None = None,
+    ) -> ProductImageRecord:
+        self.main_calls.append(
+            {
+                "store": store,
+                "product_id": product_id,
+                "media_id": media_id,
+                "variant_id": variant_id,
+                "position": position,
+            }
+        )
+        return ProductImageRecord(
+            id=1,
+            store_id=store.id,
+            product_id=product_id,
+            media_id=media_id,
+            variant_id=variant_id,
+            role=ProductImageRole.MAIN,
+            position=position or 1,
+            is_active=True,
+        )
+
+
+@dataclass
+class FakeProcessingQueue:
+    """Record every submission enqueued for processing."""
+
+    calls: list[tuple[StoreReference, int]] = field(default_factory=list)
+
+    def enqueue(self, store: StoreReference, submission_id: int) -> None:
+        self.calls.append((store, submission_id))
 
 
 def make_product(product_id=10, store=HOME):

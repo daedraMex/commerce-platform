@@ -9,6 +9,7 @@ from collections.abc import Callable
 from apps.catalog.services import CatalogService
 from apps.photos.application.ports import (
     MediaUploader,
+    PhotoProcessingQueue,
     PhotoSubmissionRepository,
     PrivateMediaReader,
 )
@@ -69,6 +70,15 @@ def get_media_uploader() -> MediaUploader:
     from apps.photos.infrastructure.media_uploader import StorageMediaUploader
 
     return StorageMediaUploader()
+
+
+def get_photo_processing_queue() -> PhotoProcessingQueue:
+    if get_photo_processing_queue in _overrides:
+        return _overrides[get_photo_processing_queue]()
+
+    from apps.photos.infrastructure.processing_queue import CeleryPhotoProcessingQueue
+
+    return CeleryPhotoProcessingQueue()
 
 
 def get_private_media_reader() -> PrivateMediaReader:
