@@ -39,7 +39,7 @@ test("signs in, keeps the session and signs out", async ({ page }, testInfo) => 
 
   await expect(page).toHaveURL(/\/anime$/);
   await expect(page.getByRole("heading", { name: "Quetzal" })).toBeVisible();
-  await expect(page.getByText("Anime")).toBeVisible();
+  await expect(page.getByLabel("Tienda")).toHaveValue("anime");
 
   const cookies = await page.context().cookies();
   const access = cookies.find((cookie) => cookie.name === "quetzal_access");

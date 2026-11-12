@@ -15,7 +15,7 @@ test("staff signs in to the home store", async ({ page }, testInfo) => {
 
   await expect(page).toHaveURL(/\/home$/);
   await expect(page.getByRole("heading", { name: "Quetzal" })).toBeVisible();
-  await expect(page.getByText("Home")).toBeVisible();
+  await expect(page.getByLabel("Tienda")).toHaveValue("home");
 
   await testInfo.attach("signed-in-level-2.png", {
     body: await page.screenshot({ fullPage: true }),

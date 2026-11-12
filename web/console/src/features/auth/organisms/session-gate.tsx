@@ -8,6 +8,7 @@ import * as React from "react";
 import { useApiV1MeRetrieve } from "@commerce-platform/api-client";
 
 import { Button } from "@/components/atoms/button";
+import { ConsoleShell } from "@/components/templates/console-shell";
 import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@/lib/auth/constants";
 
 type SessionGateProps = {
@@ -102,23 +103,20 @@ export function SessionGate({ store, children }: SessionGateProps) {
     );
   }
 
+  if (!data || !membership) {
+    return null;
+  }
+
   return (
-    <div className="min-h-dvh">
-      <header className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-        <div>
-          <p className="text-sm font-medium">{membership?.store.name}</p>
-          <p className="text-xs text-foreground/60">{data?.user.email}</p>
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={signOut}
-          disabled={signingOut}
-        >
-          {t("signOut")}
-        </Button>
-      </header>
+    <ConsoleShell
+      store={store}
+      membership={membership}
+      memberships={memberships}
+      userEmail={data.user.email}
+      signingOut={signingOut}
+      onSignOut={signOut}
+    >
       {children}
-    </div>
+    </ConsoleShell>
   );
 }
