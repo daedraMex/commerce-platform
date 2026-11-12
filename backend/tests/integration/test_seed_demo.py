@@ -71,6 +71,25 @@ def test_seed_demo_loads_a_demo_catalog_into_an_existing_store(settings):
     assert "Rows created" in output
 
 
+def test_seed_demo_works_without_photos_or_private_media(settings, tmp_path):
+    settings.DEBUG = True
+    settings.STORAGES = {
+        **settings.STORAGES,
+        "private": {
+            "BACKEND": "django.core.files.storage.FileSystemStorage",
+            "OPTIONS": {"location": tmp_path},
+        },
+    }
+    make_store("home", "Home")
+    make_superuser()
+
+    run_seed()
+
+    assert Product.objects.filter(store__slug="home").count() >= 5
+    assert not Media.objects.exists()
+    assert list(tmp_path.rglob("*")) == []
+
+
 def test_seed_demo_is_idempotent(settings):
     settings.DEBUG = True
     home = make_store("home", "Home")

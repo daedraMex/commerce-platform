@@ -107,6 +107,10 @@ _Avoid_: Vendor, provider, manufacturer (as the name of the thing)
 A public product image, stored once per store under a content-addressed key and reusable across that store's products.
 _Avoid_: Image, asset, attachment
 
+**Private media**:
+The normalized original and preview of a photo submission, kept in the private bucket and reachable only through an authorized endpoint, never a public product URL.
+_Avoid_: Raw upload, draft image, temp file
+
 **Product image**:
 The link that gives a product, and optionally one of its variants, a Media with a role and a position; a retired link is kept but no longer shown.
 _Avoid_: Photo (when meaning the link)

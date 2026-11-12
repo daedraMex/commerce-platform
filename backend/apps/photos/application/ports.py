@@ -3,10 +3,29 @@
 Pure Python: no Django, DRF or infrastructure imports belong here.
 """
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from apps.photos.domain.submission import PhotoSubmission
 from apps.shared.domain.store import StoreReference
+
+
+@dataclass(frozen=True, slots=True)
+class UploadedPhoto:
+    """The private keys and dimensions an upload produced."""
+
+    original_key: str
+    preview_key: str
+    width: int
+    height: int
+
+
+class MediaUploader(Protocol):
+    """Normalize an upload and store it privately, scoped to one store."""
+
+    def upload(self, store: StoreReference, content: bytes) -> UploadedPhoto:
+        """Return the private original and preview keys for ``content``."""
+        ...
 
 
 class PhotoSubmissionRepository(Protocol):

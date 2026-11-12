@@ -79,3 +79,12 @@ def png_with_declared_size(width, height):
 def png_of_declared_pixels(pixels):
     side = math.isqrt(pixels) + 1
     return png_with_declared_size(side, side)
+
+
+def heic_bytes(*, size=(12, 8), color=(20, 30, 40)):
+    from pillow_heif import register_heif_opener
+
+    register_heif_opener()
+    buffer = BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="HEIF")
+    return buffer.getvalue()
