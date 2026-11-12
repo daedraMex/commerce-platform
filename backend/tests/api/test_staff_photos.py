@@ -7,6 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework_simplejwt.tokens import AccessToken
 
 from apps.accounts.services import grant_membership
+from apps.catalog.media import rendition_key
 from apps.catalog.models import Category, Design, Media, Product, ProductVariant, Supplier
 from apps.photos.models import PhotoSubmission
 from apps.shared.domain.exceptions import PermissionDeniedError
@@ -60,6 +61,13 @@ def private_storage(tmp_path, settings):
 def media_base_url(settings):
     settings.MEDIA_BASE_URL = "https://media.example.com"
     return settings.MEDIA_BASE_URL
+
+
+@pytest.fixture
+def media_root(settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path / "media"
+    settings.MEDIA_BASE_URL = "https://media.example.com"
+    return settings.MEDIA_ROOT
 
 
 def bearer(user):
@@ -432,3 +440,37 @@ def test_schema_documents_the_photo_upload_and_status_api(client):
 def _codes(operation, status):
     media = operation["responses"][str(status)]["content"]["application/problem+json"]
     return media["examples"].values()
+
+
+def test_upload_enqueues_processing_only_after_the_transaction_commits(
+    client, home, user, private_storage, media_root, django_capture_on_commit_callbacks
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+
+    with django_capture_on_commit_callbacks(execute=True) as callbacks:
+        response = upload(client, user)
+
+    assert response.status_code == 201
+    assert len(callbacks) == 1
+    submission = PhotoSubmission.objects.get(pk=response.json()["id"])
+    assert submission.status == PhotoSubmission.Status.READY
+    assert submission.pipeline_version
+    media = Media.objects.get(store=home)
+    assert submission.result_media_id == media.id
+    assert media.storage_key.startswith(f"stores/{home.id}/media/")
+    assert (media_root / rendition_key(media.storage_key, width=320, version=1)).is_file()
+    assert (media_root / rendition_key(media.storage_key, width=800, version=1)).is_file()
+
+
+def test_without_running_the_on_commit_callback_nothing_is_processed_yet(
+    client, home, user, private_storage, media_root, django_capture_on_commit_callbacks
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+
+    with django_capture_on_commit_callbacks(execute=False) as callbacks:
+        response = upload(client, user)
+
+    assert len(callbacks) == 1
+    submission = PhotoSubmission.objects.get(pk=response.json()["id"])
+    assert submission.status == PhotoSubmission.Status.UPLOADED
+    assert not Media.objects.filter(store=home).exists()

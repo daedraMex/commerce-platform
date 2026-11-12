@@ -11,6 +11,7 @@ from tests.unit.photos.fakes import (
     FakeCatalog,
     FakeMediaUploader,
     FakePhotoSubmissionRepository,
+    FakeProcessingQueue,
     make_product,
     make_variant,
 )
@@ -59,11 +60,17 @@ def authorizer():
 
 
 @pytest.fixture
-def upload_photo(repository, uploader, catalog, authorizer):
+def queue():
+    return FakeProcessingQueue()
+
+
+@pytest.fixture
+def upload_photo(repository, uploader, catalog, queue, authorizer):
     return UploadPhoto(
         repository=repository,
         uploader=uploader,
         catalog=catalog,
+        queue=queue,
         authorizer=authorizer,
     )
 
@@ -74,12 +81,13 @@ def test_upload_authorizes_catalog_manage_in_the_store(upload_photo, authorizer)
     assert authorizer.calls == [(7, HOME, MANAGE_CATALOG)]
 
 
-def test_upload_rejects_a_user_without_catalog_manage(repository, uploader, catalog):
+def test_upload_rejects_a_user_without_catalog_manage(repository, uploader, catalog, queue):
     authorizer = FakeAuthorizer(allowed=False)
     use_case = UploadPhoto(
         repository=repository,
         uploader=uploader,
         catalog=catalog,
+        queue=queue,
         authorizer=authorizer,
     )
 
@@ -184,12 +192,13 @@ def test_an_individual_photo_needs_a_target_product(upload_photo):
         upload_photo(command(kind=SubmissionKind.RECTANGLE))
 
 
-def test_the_target_product_must_belong_to_the_store(repository, uploader, authorizer):
+def test_the_target_product_must_belong_to_the_store(repository, uploader, queue, authorizer):
     catalog = FakeCatalog(products=[make_product(store=ANIME)])
     use_case = UploadPhoto(
         repository=repository,
         uploader=uploader,
         catalog=catalog,
+        queue=queue,
         authorizer=authorizer,
     )
 
@@ -201,7 +210,7 @@ def test_the_target_product_must_belong_to_the_store(repository, uploader, autho
 
 
 def test_the_photographed_variant_must_belong_to_the_target_product(
-    repository, uploader, authorizer
+    repository, uploader, queue, authorizer
 ):
     product = make_product()
     catalog = FakeCatalog(products=[product], variants=[make_variant(product_id=99)])
@@ -209,6 +218,7 @@ def test_the_photographed_variant_must_belong_to_the_target_product(
         repository=repository,
         uploader=uploader,
         catalog=catalog,
+        queue=queue,
         authorizer=authorizer,
     )
 
@@ -222,3 +232,27 @@ def test_the_photographed_variant_must_belong_to_the_target_product(
         )
 
     assert uploader.calls == []
+
+
+def test_upload_enqueues_processing_only_for_a_new_submission(upload_photo, queue):
+    first = upload_photo(command())
+    upload_photo(command())
+
+    assert queue.calls == [(HOME, first.submission.id)]
+
+
+def test_upload_does_not_enqueue_processing_when_authorization_fails(
+    repository, uploader, catalog, queue
+):
+    use_case = UploadPhoto(
+        repository=repository,
+        uploader=uploader,
+        catalog=catalog,
+        queue=queue,
+        authorizer=FakeAuthorizer(allowed=False),
+    )
+
+    with pytest.raises(PermissionDeniedError):
+        use_case(command())
+
+    assert queue.calls == []

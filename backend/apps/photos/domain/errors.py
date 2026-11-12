@@ -83,6 +83,12 @@ class CropSourceMissing(PhotoSubmissionError):
     code = "crop_missing_source"
 
 
+class InvalidCrop(PhotoSubmissionError):
+    """A persisted crop frame must be a rectangle inside the photo."""
+
+    code = "crop_invalid"
+
+
 class InvalidPhotographedSize(PhotoSubmissionError):
     """A photographed size must be a positive (width, height) pair."""
 

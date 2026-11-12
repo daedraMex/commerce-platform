@@ -9,9 +9,12 @@ from collections.abc import Callable
 from apps.catalog.services import CatalogService
 from apps.photos.application.ports import (
     MediaUploader,
+    PhotoProcessingQueue,
+    PhotoRenderer,
     PhotoSubmissionRepository,
     PrivateMediaReader,
 )
+from apps.photos.application.process_photo_submission import ProcessPhotoSubmission
 from apps.shared.domain.ports import Authorizer, FeatureFlags, StoreResolver
 
 _overrides: dict[Callable, Callable] = {}
@@ -78,6 +81,36 @@ def get_private_media_reader() -> PrivateMediaReader:
     from apps.photos.infrastructure.private_media import StoragePrivateMediaReader
 
     return StoragePrivateMediaReader()
+
+
+def get_photo_renderer() -> PhotoRenderer:
+    if get_photo_renderer in _overrides:
+        return _overrides[get_photo_renderer]()
+
+    from apps.photos.infrastructure.renderer import PillowPhotoRenderer
+
+    return PillowPhotoRenderer()
+
+
+def get_photo_processing_queue() -> PhotoProcessingQueue:
+    if get_photo_processing_queue in _overrides:
+        return _overrides[get_photo_processing_queue]()
+
+    from apps.photos.infrastructure.processing_queue import CeleryPhotoProcessingQueue
+
+    return CeleryPhotoProcessingQueue()
+
+
+def get_process_photo_submission() -> ProcessPhotoSubmission:
+    if get_process_photo_submission in _overrides:
+        return _overrides[get_process_photo_submission]()
+
+    return ProcessPhotoSubmission(
+        repository=get_photo_submission_repository(),
+        catalog=get_catalog_service(),
+        reader=get_private_media_reader(),
+        renderer=get_photo_renderer(),
+    )
 
 
 def get_catalog_service() -> CatalogService:

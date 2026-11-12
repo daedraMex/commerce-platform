@@ -6,10 +6,13 @@ from datetime import UTC, datetime
 from apps.catalog.services import (
     CategoryReference,
     MediaRecord,
+    NewMedia,
+    ProductImageRecord,
+    ProductImageRole,
     ProductRecord,
     VariantRecord,
 )
-from apps.photos.application.ports import UploadedPhoto
+from apps.photos.application.ports import RenderedPhoto, UploadedPhoto
 from apps.photos.domain.errors import DuplicateIdempotencyKey
 from apps.photos.domain.submission import PhotoSubmission
 from apps.shared.domain.exceptions import PermissionDeniedError
@@ -109,11 +112,17 @@ class FakeCatalog:
     products: dict[int, ProductRecord] = field(default_factory=dict)
     variants: dict[int, VariantRecord] = field(default_factory=dict)
     media: dict[int, MediaRecord] = field(default_factory=dict)
+    created_media: list[NewMedia] = field(default_factory=list)
+    links: list[tuple[int, int, int | None]] = field(default_factory=list)
+    next_media_id: int = 100
 
     def __init__(self, *, products=(), variants=(), media=()):
         self.products = {product.id: product for product in products}
         self.variants = {variant.id: variant for variant in variants}
         self.media = {item.id: item for item in media}
+        self.created_media = []
+        self.links = []
+        self.next_media_id = max(self.media, default=99) + 1
 
     def get_product(self, store: StoreReference, product_id: int) -> ProductRecord | None:
         product = self.products.get(product_id)
@@ -126,6 +135,53 @@ class FakeCatalog:
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         item = self.media.get(media_id)
         return item if item is not None and item.store_id == store.id else None
+
+    def create_media(self, store: StoreReference, media: NewMedia) -> MediaRecord:
+        existing = next(
+            (
+                item
+                for item in self.media.values()
+                if item.store_id == store.id and item.content_hash == media.content_hash
+            ),
+            None,
+        )
+        if existing is not None:
+            return existing
+        self.created_media.append(media)
+        record = MediaRecord(
+            id=self.next_media_id,
+            store_id=store.id,
+            storage_key=media.storage_key,
+            content_hash=media.content_hash,
+            mime_type=media.mime_type,
+            alt_text=media.alt_text,
+            width=media.width,
+            height=media.height,
+            metadata=media.metadata,
+        )
+        self.media[record.id] = record
+        self.next_media_id += 1
+        return record
+
+    def set_main_product_image(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        media_id: int,
+        variant_id: int | None = None,
+    ) -> ProductImageRecord:
+        self.links.append((product_id, media_id, variant_id))
+        return ProductImageRecord(
+            id=len(self.links),
+            store_id=store.id,
+            product_id=product_id,
+            media_id=media_id,
+            variant_id=variant_id,
+            role=ProductImageRole.MAIN,
+            position=1,
+            is_active=True,
+        )
 
 
 def make_product(product_id=10, store=HOME):
@@ -160,3 +216,50 @@ def make_media(media_id=30, store=HOME, *, content_hash="hash-1"):
         height=1000,
         metadata={"format": "JPEG", "bytes": 10},
     )
+
+
+@dataclass
+class FakeProcessingQueue:
+    """Record the submissions a use case enqueues."""
+
+    calls: list[tuple[StoreReference, int]] = field(default_factory=list)
+
+    def enqueue(self, store: StoreReference, submission_id: int) -> None:
+        self.calls.append((store, submission_id))
+
+
+@dataclass
+class FakePrivateMediaReader:
+    """Return stored bytes for a private key, or raise a configured error."""
+
+    files: dict[tuple[int, str], bytes] = field(default_factory=dict)
+    error: Exception | None = None
+
+    def open(self, store: StoreReference, key: str):
+        if self.error is not None:
+            raise self.error
+        from io import BytesIO
+
+        return BytesIO(self.files[(store.id, key)])
+
+
+@dataclass
+class FakeRenderer:
+    """Return one rendered result, or raise a configured error on every call."""
+
+    rendered: RenderedPhoto | None = None
+    error: Exception | None = None
+    calls: list[tuple[PhotoSubmission, bytes]] = field(default_factory=list)
+
+    def render(self, submission: PhotoSubmission, original: bytes) -> RenderedPhoto:
+        self.calls.append((submission, original))
+        if self.error is not None:
+            raise self.error
+        return self.rendered or RenderedPhoto(
+            content=b"rendered-photo",
+            width=800,
+            height=1000,
+            mime_type="image/jpeg",
+            extension="jpg",
+            metadata={"format": "JPEG", "bytes": 14},
+        )

@@ -17,6 +17,7 @@ from config.dependencies import (
     get_authorizer,
     get_catalog_service,
     get_media_uploader,
+    get_photo_processing_queue,
     get_photo_submission_repository,
     get_private_media_reader,
 )
@@ -215,6 +216,7 @@ class StaffPhotoUploadView(StoreScopedMixin, APIView):
             repository=get_photo_submission_repository(),
             uploader=get_media_uploader(),
             catalog=get_catalog_service(),
+            queue=get_photo_processing_queue(),
             authorizer=get_authorizer(),
         )(command)
 

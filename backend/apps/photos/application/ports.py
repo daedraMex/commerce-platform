@@ -6,7 +6,13 @@ Pure Python: no Django, DRF or infrastructure imports belong here.
 from dataclasses import dataclass
 from typing import BinaryIO, Protocol
 
-from apps.catalog.services import MediaRecord, ProductRecord, VariantRecord
+from apps.catalog.services import (
+    MediaRecord,
+    NewMedia,
+    ProductImageRecord,
+    ProductRecord,
+    VariantRecord,
+)
 from apps.photos.domain.submission import PhotoSubmission
 from apps.shared.domain.store import StoreReference
 
@@ -21,11 +27,31 @@ class UploadedPhoto:
     height: int
 
 
+@dataclass(frozen=True, slots=True)
+class RenderedPhoto:
+    """The public image one processing run produced, before the catalog stores it."""
+
+    content: bytes
+    width: int
+    height: int
+    mime_type: str
+    extension: str
+    metadata: dict
+
+
 class MediaUploader(Protocol):
     """Normalize an upload and store it privately, scoped to one store."""
 
     def upload(self, store: StoreReference, content: bytes) -> UploadedPhoto:
         """Return the private original and preview keys for ``content``."""
+        ...
+
+
+class PhotoRenderer(Protocol):
+    """Apply the submission's crop, straightening and light correction to its original."""
+
+    def render(self, submission: PhotoSubmission, original: bytes) -> RenderedPhoto:
+        """Return the final public image for ``submission``."""
         ...
 
 
@@ -42,6 +68,21 @@ class PhotoCatalog(Protocol):
 
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         """Return the media of ``store``, or None when another store owns it."""
+        ...
+
+    def create_media(self, store: StoreReference, media: NewMedia) -> MediaRecord:
+        """Return the store's Media for the content, creating it once."""
+        ...
+
+    def set_main_product_image(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        media_id: int,
+        variant_id: int | None = None,
+    ) -> ProductImageRecord:
+        """Make the media the product's active main image, without duplicating the link."""
         ...
 
 
@@ -72,4 +113,12 @@ class PhotoSubmissionRepository(Protocol):
 
     def save(self, submission: PhotoSubmission) -> PhotoSubmission:
         """Persist an existing submission's changes and return it refreshed."""
+        ...
+
+
+class PhotoProcessingQueue(Protocol):
+    """Schedule one submission for asynchronous processing, after its transaction commits."""
+
+    def enqueue(self, store: StoreReference, submission_id: int) -> None:
+        """Enqueue the processing task exactly once for a newly created submission."""
         ...
