@@ -80,7 +80,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Inventory is per store and always addressed by Location (StockItem = variant + location).
 
 ## Commands
-- docker compose up -d                      # PostgreSQL and Redis
+- docker compose up -d                      # PostgreSQL, Redis, RustFS buckets and the worker
 - cd backend && uv sync                     # Python dependencies from uv.lock
 - uv run python manage.py runserver
 - cd backend && ./scripts/check.sh           # everything CI runs: ruff, migrations, schema, pytest
@@ -91,7 +91,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - pnpm install                              # Node dependencies (Node from .nvmrc)
 - pnpm dev:console                          # Quetzal at http://localhost:3000/<store>
 - ./web/console/scripts/check.sh            # generate client, lint, typecheck, unit, level-1 tests
-- docker compose up -d postgres redis       # level-2 dependencies; run the host commands from docs/factory.md
+- docker compose up -d postgres redis rustfs storage-init   # level-2 dependencies; run the host commands from docs/factory.md
 - cd backend && DEBUG=True E2E_SEED_ALLOWED=1 E2E_STAFF_EMAIL=e2e@example.com E2E_STAFF_PASSWORD=local-e2e uv run python manage.py e2e_seed
 - pnpm --filter @commerce-platform/console test:e2e:level2   # level-2 Playwright against the running stack
 - pnpm generate:client                      # regenerate packages/api-client from openapi.json

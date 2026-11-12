@@ -93,3 +93,21 @@ class InvalidChannelMeans(PhotoSubmissionError):
     """Light correction needs one non-negative mean per colour channel."""
 
     code = "light_invalid_channel_means"
+
+
+class InvalidImage(PhotoSubmissionError):
+    """An upload is not a decodable image."""
+
+    code = "invalid_image"
+
+
+class ImageTooLarge(PhotoSubmissionError):
+    """An upload is larger than the accepted number of bytes."""
+
+    code = "too_large"
+
+
+class TooManyPixels(PhotoSubmissionError):
+    """An upload declares more pixels than decoders may allocate."""
+
+    code = "too_many_pixels"

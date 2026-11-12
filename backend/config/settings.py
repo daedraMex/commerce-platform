@@ -114,9 +114,44 @@ MEDIA_RENDITION_VERSION = 1
 
 # Public product media. R2 in staging and production; local files in development and tests.
 R2_BUCKET_NAME = env("R2_BUCKET_NAME", default="")
+R2_PRIVATE_BUCKET_NAME = env("R2_PRIVATE_BUCKET_NAME", default="")
 R2_ACCESS_KEY_ID = env("R2_ACCESS_KEY_ID", default="")
 R2_SECRET_ACCESS_KEY = env("R2_SECRET_ACCESS_KEY", default="")
 R2_ENDPOINT_URL = env("R2_ENDPOINT_URL", default="")
+
+# Private originals and previews. Never under MEDIA_ROOT and never in a public URL.
+PRIVATE_MEDIA_ROOT = BASE_DIR / "private-media"
+PHOTO_PREVIEW_LONG_SIDE = env.int("PHOTO_PREVIEW_LONG_SIDE", default=1600)
+
+if R2_BUCKET_NAME and not R2_PRIVATE_BUCKET_NAME:
+    raise ImproperlyConfigured("R2_PRIVATE_BUCKET_NAME is required when R2_BUCKET_NAME is set.")
+if R2_BUCKET_NAME and R2_PRIVATE_BUCKET_NAME == R2_BUCKET_NAME:
+    raise ImproperlyConfigured("The public and private buckets must have different names.")
+
+S3_STORAGE_OPTIONS = {
+    "access_key": R2_ACCESS_KEY_ID,
+    "secret_key": R2_SECRET_ACCESS_KEY,
+    "endpoint_url": R2_ENDPOINT_URL,
+    "region_name": env("R2_REGION_NAME", default="auto"),
+    "signature_version": "s3v4",
+    "default_acl": None,
+    "querystring_auth": False,
+}
+
+if R2_PRIVATE_BUCKET_NAME:
+    private_storage = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            **S3_STORAGE_OPTIONS,
+            "bucket_name": R2_PRIVATE_BUCKET_NAME,
+            "object_parameters": {},
+        },
+    }
+else:
+    private_storage = {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": PRIVATE_MEDIA_ROOT},
+    }
 
 if R2_BUCKET_NAME:
     MEDIA_BASE_URL = env("MEDIA_BASE_URL", default="")
@@ -126,19 +161,14 @@ if R2_BUCKET_NAME:
         "default": {
             "BACKEND": "storages.backends.s3.S3Storage",
             "OPTIONS": {
+                **S3_STORAGE_OPTIONS,
                 "bucket_name": R2_BUCKET_NAME,
-                "access_key": R2_ACCESS_KEY_ID,
-                "secret_key": R2_SECRET_ACCESS_KEY,
-                "endpoint_url": R2_ENDPOINT_URL,
-                "region_name": env("R2_REGION_NAME", default="auto"),
-                "signature_version": "s3v4",
-                "default_acl": None,
-                "querystring_auth": False,
                 "object_parameters": {
                     "CacheControl": "public, max-age=31536000, immutable",
                 },
             },
         },
+        "private": private_storage,
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },
@@ -149,6 +179,7 @@ else:
         "default": {
             "BACKEND": "django.core.files.storage.FileSystemStorage",
         },
+        "private": private_storage,
         "staticfiles": {
             "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
         },

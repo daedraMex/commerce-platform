@@ -44,6 +44,7 @@ def test_env_example_only_documents_the_r2_media_names():
     assert "AWS_" not in content
     for name in (
         "R2_BUCKET_NAME",
+        "R2_PRIVATE_BUCKET_NAME",
         "R2_ACCESS_KEY_ID",
         "R2_SECRET_ACCESS_KEY",
         "R2_ENDPOINT_URL",
@@ -53,10 +54,11 @@ def test_env_example_only_documents_the_r2_media_names():
         assert name in content
 
 
-def test_the_local_media_directory_is_git_ignored():
+def test_the_local_media_directories_are_git_ignored():
     content = ROOT_GITIGNORE.read_text(encoding="utf-8")
 
     assert "backend/media/" in content
+    assert "backend/private-media/" in content
 
 
 @pytest.mark.parametrize(

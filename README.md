@@ -16,7 +16,7 @@ a themed Next.js storefront, a mobile app and a platform of AI agents.
 ## Getting started
 
 ```bash
-# 1. Start PostgreSQL, Redis and the Celery worker
+# 1. Start PostgreSQL, Redis, RustFS (public and private buckets) and the Celery worker
 docker compose up -d
 
 # 2. Install backend dependencies (from uv.lock)
@@ -42,6 +42,27 @@ If ports 5432 or 6379 are already taken on your machine, override them:
 
 After changing backend code, rebuild the worker so it picks up the changes:
 `docker compose up -d --build worker`.
+
+### Local media (RustFS)
+
+`docker compose up -d` starts RustFS and a one-shot `storage-init` service that
+creates the public and private buckets with the AWS CLI. The public bucket gets
+an anonymous `s3:GetObject` bucket policy; the private bucket gets none. To
+point the backend at it, use the RustFS values shown in `backend/.env.example`:
+
+```bash
+docker compose up -d rustfs storage-init
+cd backend
+R2_BUCKET_NAME=catalog-media R2_PRIVATE_BUCKET_NAME=catalog-private \
+  R2_ACCESS_KEY_ID=rustfsadmin R2_SECRET_ACCESS_KEY=rustfsadmin \
+  R2_ENDPOINT_URL=http://localhost:9000 \
+  MEDIA_BASE_URL=http://localhost:9000/catalog-media \
+  uv run python manage.py runserver
+```
+
+Without those variables the backend keeps using local files and stores private
+photos under `backend/private-media/`, which is git-ignored and never served by
+a URL.
 
 ## Console (Quetzal)
 
@@ -75,6 +96,11 @@ are recorded in [docs/api-changes.md](docs/api-changes.md).
 
 ## Deploying
 
+The private photo bucket is platform infrastructure, not a per-store
+credential. Set `R2_PRIVATE_BUCKET_NAME` whenever `R2_BUCKET_NAME` is set; the
+two names must differ. The private bucket needs no public URL or anonymous
+access, and its contents are never served under `MEDIA_BASE_URL`.
+
 After deploying a change that adds rendition sizes or bumps
 `MEDIA_RENDITION_VERSION` (including the first deploy of renditions, when
 existing Media have none yet), create the missing renditions for every store:
@@ -103,4 +129,4 @@ It is safe to run at any time. Phase 6 schedules it with Celery Beat.
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv
 - `web/console/`: Quetzal, the staff console (Next.js App Router)
 - `packages/api-client/`: the generated API client used by the console
-- `docker-compose.yml`: PostgreSQL 16, Redis 7 and the Celery worker for local development
+- `docker-compose.yml`: PostgreSQL 16, Redis 7, RustFS, the bucket initializer and the Celery worker for local development

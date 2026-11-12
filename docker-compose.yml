@@ -25,6 +25,64 @@ services:
       timeout: 5s
       retries: 10
 
+  rustfs-permissions:
+    image: alpine:3.24.2
+    volumes:
+      - rustfs_data:/data
+    command: chown -R 10001:10001 /data
+    restart: "no"
+
+  rustfs:
+    image: rustfs/rustfs:1.0.5
+    environment:
+      RUSTFS_ACCESS_KEY: "${R2_ACCESS_KEY_ID:-rustfsadmin}"
+      RUSTFS_SECRET_KEY: "${R2_SECRET_ACCESS_KEY:-rustfsadmin}"
+      RUSTFS_VOLUMES: "/data"
+      RUSTFS_ADDRESS: "0.0.0.0:9000"
+      RUSTFS_CONSOLE_ADDRESS: "0.0.0.0:9001"
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "${RUSTFS_PORT:-9000}:9000"
+      - "${RUSTFS_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - rustfs_data:/data
+    depends_on:
+      rustfs-permissions:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  storage-init:
+    image: amazon/aws-cli:2.40.1
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-rustfsadmin}"
+      AWS_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-rustfsadmin}"
+      AWS_DEFAULT_REGION: "${R2_REGION_NAME:-us-east-1}"
+      AWS_EC2_METADATA_DISABLED: "true"
+      R2_BUCKET_NAME: "${R2_BUCKET_NAME:-catalog-media}"
+      R2_PRIVATE_BUCKET_NAME: "${R2_PRIVATE_BUCKET_NAME:-catalog-private}"
+      RUSTFS_ENDPOINT_URL: "http://rustfs:9000"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -eu
+        create_bucket() {
+          aws --endpoint-url "$$RUSTFS_ENDPOINT_URL" s3api head-bucket --bucket "$$1" 2>/dev/null \
+            || aws --endpoint-url "$$RUSTFS_ENDPOINT_URL" s3api create-bucket --bucket "$$1"
+        }
+        create_bucket "$$R2_BUCKET_NAME"
+        create_bucket "$$R2_PRIVATE_BUCKET_NAME"
+        policy="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":\"*\",\"Action\":[\"s3:GetObject\"],\"Resource\":[\"arn:aws:s3:::$$R2_BUCKET_NAME/*\"]}]}"
+        aws --endpoint-url "$$RUSTFS_ENDPOINT_URL" s3api put-bucket-policy \
+          --bucket "$$R2_BUCKET_NAME" --policy "$$policy"
+
   worker:
     build:
       context: ./backend
@@ -35,11 +93,20 @@ services:
       ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1}"
       DATABASE_URL: postgres://shop:shop@postgres:5432/shop
       REDIS_URL: redis://redis:6379/0
+      R2_BUCKET_NAME: "${R2_BUCKET_NAME:-catalog-media}"
+      R2_PRIVATE_BUCKET_NAME: "${R2_PRIVATE_BUCKET_NAME:-catalog-private}"
+      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-rustfsadmin}"
+      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-rustfsadmin}"
+      R2_ENDPOINT_URL: "${R2_ENDPOINT_URL:-http://rustfs:9000}"
+      MEDIA_BASE_URL: "${MEDIA_BASE_URL:-http://localhost:9000/catalog-media}"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
+  rustfs_data:
