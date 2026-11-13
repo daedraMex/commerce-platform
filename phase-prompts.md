@@ -276,7 +276,7 @@ Goal: staff turn one or more phone photos of products into catalog images.
   the check of every area a ticket touches, the level-2 E2E job, and the sudoers entry.
 ```
 
-**Done when:** a staff member photographs a blanket on their phone and it becomes that product's main image, and a group photo is linked to several products. Video is Phase 4d.
+**Done when:** a staff member photographs a blanket on their phone, approves it and it joins that product's carousel (the first image is the cover, ADR-0030), and an approved group photo is linked to several products. Video is Phase 4d.
 
 ---
 

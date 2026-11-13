@@ -6,6 +6,7 @@ export const VALID_EMAIL = "ana@example.com";
 export const VALID_PASSWORD = "correct-horse";
 export const REFRESH_EMAIL = "refresh@example.com";
 export const NO_MEMBERSHIP_EMAIL = "nomembership@example.com";
+export const LIMITED_EMAIL = "limited@example.com";
 
 const MEMBERSHIPS: Me["memberships"] = [
   {
@@ -19,6 +20,18 @@ const MEMBERSHIPS: Me["memberships"] = [
     permissions: ["catalog.manage", "inventory.adjust"],
   },
 ];
+
+function membershipsFor(email: string): Me["memberships"] {
+  if (email !== LIMITED_EMAIL) {
+    return MEMBERSHIPS;
+  }
+
+  return MEMBERSHIPS.map((membership) => ({
+    ...membership,
+    role: "store_admin",
+    permissions: ["inventory.adjust"],
+  }));
+}
 
 type MockState = {
   email: string;
@@ -103,7 +116,8 @@ export const handlers = [
     const knownEmail =
       email === VALID_EMAIL ||
       email === REFRESH_EMAIL ||
-      email === NO_MEMBERSHIP_EMAIL;
+      email === NO_MEMBERSHIP_EMAIL ||
+      email === LIMITED_EMAIL;
 
     if (!knownEmail || body.password !== VALID_PASSWORD) {
       return problem(401, "invalid_credentials", "Invalid email or password.");
@@ -114,7 +128,8 @@ export const handlers = [
       email,
       accessValid: true,
       expireAfterValidation: email === REFRESH_EMAIL,
-      memberships: email === NO_MEMBERSHIP_EMAIL ? [] : MEMBERSHIPS,
+      memberships:
+        email === NO_MEMBERSHIP_EMAIL ? [] : membershipsFor(email),
     };
 
     return HttpResponse.json(tokenPair());

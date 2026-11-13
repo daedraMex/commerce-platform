@@ -27,6 +27,12 @@ A Photo submission is the unit: `uploaded`, `processing`, `ready` or `failed`, w
 - The console fetches the private preview as a blob through its axios instance, because a plain `<img src>` cannot send the `X-Store` or CSRF headers of the ADR-0027 proxy.
 - `ROADMAP.md` Phase 4b and `phase-prompts.md` still describe background removal and must be rewritten at `/to-spec` to match this decision.
 
+## Amendment (2026-11-12): carousel
+
+ADR-0030 replaces the rule that an individual photo becomes its main image when
+processed. Processing only makes a submission ready; staff approve a photo to add
+it to the product's carousel, and the first image of the carousel is the cover.
+
 ## Amendment (2026-11-12)
 
 MinIO withdrew the `minio/minio` and `minio/mc` images from Docker Hub on
