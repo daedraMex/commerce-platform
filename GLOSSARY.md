@@ -119,12 +119,24 @@ _Avoid_: Dev bucket, local R2
 The link that gives a product, and optionally one of its variants, a Media with a role and a position; a retired link is kept but no longer shown.
 _Avoid_: Photo (when meaning the link)
 
+**Carousel**:
+A product's active product images in position order, as the storefront shows them. A photo joins it only when staff approve it (ADR-0030).
+_Avoid_: Gallery (as the name of the whole set), slider
+
+**Cover**:
+The first image of a product's carousel, shown in listings, search and social posts; it holds the `main` role.
+_Avoid_: Main photo, thumbnail, hero
+
+**Approve**:
+The staff action that adds a ready photo submission to its product's carousel; until then the photo is not published.
+_Avoid_: Publish, accept
+
 **Photo submission**:
 One staff upload of a phone photo, with its corners or crop, its processing state and the Media it becomes.
 _Avoid_: Upload, job, capture
 
 **Group photo**:
-One catalog image that shows several products and is linked as a gallery image to each of them.
+One catalog image that shows several products and, once approved for each of them, joins each product's carousel.
 _Avoid_: Collage, batch photo
 
 **Rendition**:

@@ -176,8 +176,8 @@ con ML); renditions 320/800 WebP con claves derivadas; idempotencia por tienda y
 `Store.accent_color`.
 **Prerrequisito (PR humano):** `web/console/scripts/check.sh` y la fábrica corriendo el check de cada
 parte que toca un ticket; el job E2E de nivel 2 en GitHub Actions.
-**Criterio de salida:** un miembro del staff fotografía una frazada y queda como su imagen principal,
-y una foto grupal queda enlazada a varios productos. El video es la fase 4d.
+**Criterio de salida:** un miembro del staff fotografía una frazada, la aprueba y queda en el carrusel
+del producto (la primera imagen es la portada), y una foto grupal aprobada queda enlazada a varios productos. El video es la fase 4d.
 
 ### Fase 4d — Video del catálogo
 **Objetivo:** que el staff agregue un video corto del producto sin cambiar los llamadores de la fase 4b.
