@@ -58,6 +58,10 @@ OWNER_LOGIN = "daedraMex"
 MERGE_CONFLICT_CHECK = "branch conflicts with main; a human must merge main"
 
 
+def _orphan_branch_check(branch: str) -> str:
+    return f"remote branch {branch} has no open PR; delete it by hand so the next run can retry"
+
+
 @dataclass(frozen=True)
 class TicketResult:
     ticket: Ticket
@@ -137,7 +141,7 @@ class Factory:
         for ticket in select_tickets(tickets, max_tickets=self.settings.max_tickets):
             result = self._execute(
                 ticket,
-                lambda t=ticket: self._run_ticket(t),
+                lambda t=ticket: self._run_ticket(t, token),
                 f"#{ticket.number} {ticket.title}",
             )
             results.append(result)
@@ -248,7 +252,7 @@ class Factory:
         if self.git.branch_exists(self.settings.repo_dir, branch):
             self.git.delete_branch(self.settings.repo_dir, branch)
 
-    def _run_ticket(self, ticket: Ticket) -> TicketResult:
+    def _run_ticket(self, ticket: Ticket, token: str | None) -> TicketResult:
         model = select_model(
             ticket.labels,
             default_model=self.settings.factory_model,
@@ -256,6 +260,21 @@ class Factory:
         )
         branch = branch_name(ticket)
         worktree = worktree_path(self.settings.worktrees_dir, branch)
+        # A remote branch left by a run whose PR was never opened would make the push
+        # non-fast-forward forever. Stop here; deleting it stays a manual step.
+        if self.git.remote_branch_exists(
+            self.settings.repo_dir, branch, token
+        ) and not self.github.has_open_pr_for_branch(branch, token):
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions="",
+                log_path=self._log_path(ticket),
+                worktree=worktree,
+                open_question=None,
+                failing_check=_orphan_branch_check(branch),
+                attempts=0,
+            )
         self._remove_stale_ticket_worktree(worktree, branch)
         worktree = self.git.create_worktree(self.settings.repo_dir, worktree, branch)
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
@@ -295,7 +314,7 @@ class Factory:
                 timeout_seconds=int(remaining),
             )
             made += 1
-            self._write_log(ticket, result)
+            self._write_log(ticket, result, step=_step, model=model)
             decisions = self.git.read_file(worktree, DECISIONS_FILE)
             open_question = extract_open_question(decisions)
 
@@ -416,7 +435,7 @@ class Factory:
                 timeout_seconds=int(remaining),
             )
             made += 1
-            self._write_log(ticket, result)
+            self._write_log(ticket, result, step=_step, model=model)
             decisions = self.git.read_file(worktree, DECISIONS_FILE)
             open_question = extract_open_question(decisions)
 
@@ -533,8 +552,29 @@ class Factory:
         log_path: Path,
         attempts: int,
     ) -> TicketResult:
-        self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})")
+        if not self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})"):
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check="no changes made for the ticket",
+                attempts=attempts,
+            )
         diff = self.git.diff_stats(worktree)
+        if not diff.files:
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check="no changes made for the ticket",
+                attempts=attempts,
+            )
         if touches_protected_paths(f.path for f in diff.files):
             return self._stuck(
                 ticket,
@@ -555,9 +595,25 @@ class Factory:
             model=model,
             decisions=extract_decisions(decisions),
         )
-        pr_number = self.github.create_draft_pr(
-            branch=branch, title=f"#{ticket.number}: {ticket.title}", body=body, token=token
-        )
+        try:
+            pr_number = self.github.create_draft_pr(
+                branch=branch, title=f"#{ticket.number}: {ticket.title}", body=body, token=token
+            )
+        except Exception as exc:
+            # The branch is already pushed. Without a PR the next run's push would be
+            # non-fast-forward, so the ticket goes stuck and the remote branch is left
+            # for a human to delete.
+            print(f"PR for {branch} was not created: {short_error(exc)}", file=sys.stderr)
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check=_orphan_branch_check(branch),
+                attempts=attempts,
+            )
         if diff.migrations_changed:
             self.github.add_pr_label(pr_number, MIGRATION_LABEL, token)
         self._mark_pr_ready(pr_number, token)
@@ -665,12 +721,21 @@ class Factory:
         self.settings.logs_dir.mkdir(parents=True, exist_ok=True)
         return self.settings.logs_dir / f"{ticket.number}.log"
 
-    def _write_log(self, ticket: Ticket, result) -> Path:
+    def _write_log(self, ticket: Ticket, result, *, step: int, model: str) -> Path:
+        """Append one step's output under a header; step 1 starts a fresh file.
+
+        The stuck comment shows the tail of this file, so a run must never show
+        output left over from an older run of the same ticket.
+        """
         log_path = self._log_path(ticket)
         content = result.stdout or ""
         if result.stderr:
             content += ("\n" if content else "") + result.stderr
-        log_path.write_text(content)
+        if content and not content.endswith("\n"):
+            content += "\n"
+        header = f"=== step {step} (model {model}) ===\n"
+        with log_path.open("w" if step == 1 else "a") as log:
+            log.write(header + content)
         return log_path
 
     def _pr_url(self, pr_number: int) -> str:

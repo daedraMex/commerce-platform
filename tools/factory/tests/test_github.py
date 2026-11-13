@@ -605,3 +605,34 @@ def test_json_pages_raises_on_invalid_json():
 def test_json_pages_raises_when_a_page_is_not_a_list():
     with pytest.raises(GitHubError, match="gh api reviews returned an unexpected JSON shape"):
         GitHub(REPO)._json_pages('[{"id": 1}]{"message": "Not Found"}', "gh api reviews")
+
+
+def test_has_open_pr_for_branch_lists_open_prs_by_head_branch():
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        return CommandResult(exit_code=0, stdout='[{"number": 12}]', stderr="")
+
+    gh = GitHub("daedraMex/commerce-platform", run=run)
+
+    assert gh.has_open_pr_for_branch("nf/7-x", "TOKEN") is True
+    assert "--head" in calls[0] and "nf/7-x" in calls[0] and "open" in calls[0]
+
+
+def test_has_open_pr_for_branch_is_false_without_open_prs():
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=0, stdout="[]", stderr="")
+
+    assert (
+        GitHub("daedraMex/commerce-platform", run=run).has_open_pr_for_branch("nf/7-x", "TOKEN")
+        is False
+    )
+
+
+def test_has_open_pr_for_branch_raises_when_gh_fails():
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=1, stdout="", stderr="HTTP 502")
+
+    with pytest.raises(GitHubError, match="gh pr list failed: HTTP 502"):
+        GitHub("daedraMex/commerce-platform", run=run).has_open_pr_for_branch("nf/7-x", "TOKEN")

@@ -72,6 +72,36 @@ class GitHub:
         url = result.stdout.strip().splitlines()[-1].strip()
         return int(url.rstrip("/").rsplit("/", 1)[-1])
 
+    def has_open_pr_for_branch(self, branch: str, token: str) -> bool:
+        """Return True when an open PR has ``branch`` as its head branch."""
+        result = self._run(
+            [
+                "gh",
+                "pr",
+                "list",
+                "--repo",
+                self.repo,
+                "--head",
+                branch,
+                "--state",
+                "open",
+                "--json",
+                "number",
+            ],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            raise GitHubError(f"gh pr list failed: {result.stderr.strip() or result.exit_code}")
+        try:
+            prs = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GitHubError("gh pr list returned invalid JSON") from exc
+        if not isinstance(prs, list):
+            raise GitHubError("gh pr list returned an unexpected JSON shape")
+        return bool(prs)
+
     def mark_pr_ready(self, number: int, token: str) -> CommandResult:
         """Mark the PR ready for review.
 
