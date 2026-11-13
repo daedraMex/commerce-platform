@@ -5,12 +5,14 @@ import pytest
 from apps.photos.application.apply_photo import ApplyPhoto
 from apps.photos.application.discard_photo import DiscardPhoto
 from apps.photos.application.redo_photo import RedoPhoto
+from apps.photos.application.remove_photo import RemovePhoto
 from apps.photos.application.retry_photo import RetryPhoto
 from apps.photos.domain.errors import (
     AttemptsExhausted,
     CannotApply,
     CannotDiscard,
     CannotRedo,
+    CannotRemove,
     CannotStartProcessing,
 )
 from apps.photos.domain.submission import (
@@ -28,6 +30,7 @@ from tests.unit.photos.fakes import (
     FakeMediaUploader,
     FakePhotoSubmissionRepository,
     FakeProcessingQueue,
+    FakeUnitOfWork,
     make_media,
 )
 
@@ -95,8 +98,27 @@ def uploader():
     return FakeMediaUploader()
 
 
-def apply_photo(repository, catalog, authorizer):
-    return ApplyPhoto(repository=repository, catalog=catalog, authorizer=authorizer)
+@pytest.fixture
+def unit_of_work():
+    return FakeUnitOfWork()
+
+
+def apply_photo(repository, catalog, authorizer, unit_of_work):
+    return ApplyPhoto(
+        repository=repository,
+        catalog=catalog,
+        authorizer=authorizer,
+        unit_of_work=unit_of_work,
+    )
+
+
+def remove_photo(repository, catalog, authorizer, unit_of_work):
+    return RemovePhoto(
+        repository=repository,
+        catalog=catalog,
+        authorizer=authorizer,
+        unit_of_work=unit_of_work,
+    )
 
 
 def redo_photo(repository, queue, authorizer):
@@ -111,65 +133,198 @@ def discard_photo(repository, uploader, authorizer):
     return DiscardPhoto(repository=repository, uploader=uploader, authorizer=authorizer)
 
 
-def test_apply_authorizes_catalog_manage_in_the_store(repository, catalog, authorizer):
-    apply_photo(repository, catalog, authorizer)(HOME, user_id=7, submission_id=1, now=NOW)
+def test_apply_authorizes_catalog_manage_in_the_store(
+    repository, catalog, authorizer, unit_of_work
+):
+    apply_photo(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, now=NOW
+    )
 
     assert authorizer.calls == [(7, HOME, MANAGE_CATALOG)]
 
 
-def test_apply_rejects_a_user_without_catalog_manage(repository, catalog):
-    use_case = apply_photo(repository, catalog, FakeAuthorizer(allowed=False))
+def test_apply_rejects_a_user_without_catalog_manage(repository, catalog, unit_of_work):
+    use_case = apply_photo(repository, catalog, FakeAuthorizer(allowed=False), unit_of_work)
 
     with pytest.raises(PermissionDeniedError):
         use_case(HOME, user_id=7, submission_id=1, now=NOW)
 
-    assert catalog.main_calls == []
+    assert catalog.append_calls == []
     assert repository.rows[1].applied_at is None
 
 
-def test_apply_links_the_ready_result_as_the_main_image(repository, catalog, authorizer):
-    saved = apply_photo(repository, catalog, authorizer)(HOME, user_id=7, submission_id=1, now=NOW)
+def test_apply_appends_the_ready_result_to_an_empty_carousel_as_the_cover(
+    repository, catalog, authorizer, unit_of_work
+):
+    saved = apply_photo(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, now=NOW
+    )
 
-    assert catalog.main_calls == [
+    assert catalog.append_calls == [
         {
             "store": HOME,
             "product_id": 10,
             "media_id": 30,
             "variant_id": 20,
-            "position": None,
         }
     ]
+    link = next(iter(catalog.images.values()))
+    assert link.role.value == "main"
+    assert link.position == 1
     assert saved.applied_at == NOW
     assert saved.applied_by_id == 7
     assert saved.status is SubmissionStatus.READY
     assert repository.rows[1].applied_at == NOW
+    assert unit_of_work.committed == 1
 
 
-def test_apply_refuses_a_group_photo(repository, catalog, authorizer):
+def test_apply_appends_to_a_non_empty_carousel_at_the_end(
+    repository, catalog, authorizer, unit_of_work
+):
+    cover = catalog.append_to_carousel(HOME, product_id=10, media_id=30)
+    catalog.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.rows[1] = make_submission(result_media_id=31)
+
+    apply_photo(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, now=NOW
+    )
+
+    appended = catalog.images[2]
+    assert appended.role.value == "gallery"
+    assert appended.position == 2
+    assert catalog.images[cover.id].role.value == "main"
+    assert catalog.images[cover.id].is_active is True
+
+
+def test_apply_refuses_a_group_photo(repository, catalog, authorizer, unit_of_work):
     repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, result_media_id=30)
 
     with pytest.raises(CannotApply):
-        apply_photo(repository, catalog, authorizer)(HOME, user_id=7, submission_id=1, now=NOW)
+        apply_photo(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1, now=NOW
+        )
 
-    assert catalog.main_calls == []
+    assert catalog.append_calls == []
 
 
 @pytest.mark.parametrize(
     "status",
     [SubmissionStatus.UPLOADED, SubmissionStatus.PROCESSING, SubmissionStatus.FAILED],
 )
-def test_apply_refuses_a_submission_that_is_not_ready(repository, catalog, authorizer, status):
+def test_apply_refuses_a_submission_that_is_not_ready(
+    repository, catalog, authorizer, unit_of_work, status
+):
     repository.rows[1] = make_submission(status=status, result_media_id=None)
 
     with pytest.raises(CannotApply):
-        apply_photo(repository, catalog, authorizer)(HOME, user_id=7, submission_id=1, now=NOW)
+        apply_photo(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1, now=NOW
+        )
 
-    assert catalog.main_calls == []
+    assert catalog.append_calls == []
 
 
-def test_apply_never_finds_another_stores_submission(repository, catalog, authorizer):
+def test_apply_never_finds_another_stores_submission(repository, catalog, authorizer, unit_of_work):
     with pytest.raises(NotFoundError):
-        apply_photo(repository, catalog, authorizer)(ANIME, user_id=7, submission_id=1, now=NOW)
+        apply_photo(repository, catalog, authorizer, unit_of_work)(
+            ANIME, user_id=7, submission_id=1, now=NOW
+        )
+
+
+class FailingSaveRepository(FakePhotoSubmissionRepository):
+    def save(self, submission):
+        raise RuntimeError("cannot save the submission")
+
+
+def test_apply_rolls_the_unit_of_work_back_when_the_submission_save_fails(
+    catalog, authorizer, unit_of_work
+):
+    repository = FailingSaveRepository(rows=[make_submission()])
+    use_case = apply_photo(repository, catalog, authorizer, unit_of_work)
+
+    with pytest.raises(RuntimeError):
+        use_case(HOME, user_id=7, submission_id=1, now=NOW)
+
+    assert unit_of_work.entered == 1
+    assert unit_of_work.rolled_back == 1
+    assert unit_of_work.committed == 0
+
+
+def test_remove_authorizes_catalog_manage_in_the_store(
+    repository, catalog, authorizer, unit_of_work
+):
+    repository.rows[1] = make_submission(applied_at=NOW, applied_by_id=7)
+    catalog.append_to_carousel(HOME, product_id=10, media_id=30)
+
+    remove_photo(repository, catalog, authorizer, unit_of_work)(HOME, user_id=7, submission_id=1)
+
+    assert authorizer.calls == [(7, HOME, MANAGE_CATALOG)]
+
+
+def test_remove_rejects_a_user_without_catalog_manage(repository, catalog, unit_of_work):
+    repository.rows[1] = make_submission(applied_at=NOW, applied_by_id=7)
+    use_case = remove_photo(repository, catalog, FakeAuthorizer(allowed=False), unit_of_work)
+
+    with pytest.raises(PermissionDeniedError):
+        use_case(HOME, user_id=7, submission_id=1)
+
+    assert catalog.remove_calls == []
+    assert repository.rows[1].applied_at == NOW
+
+
+def test_remove_deactivates_the_carousel_link_and_clears_the_application(
+    repository, catalog, authorizer, unit_of_work
+):
+    repository.rows[1] = make_submission(applied_at=NOW, applied_by_id=7)
+    cover = catalog.append_to_carousel(HOME, product_id=10, media_id=30)
+
+    saved = remove_photo(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1
+    )
+
+    assert catalog.remove_calls == [{"store": HOME, "product_id": 10, "media_id": 30}]
+    assert catalog.images[cover.id].is_active is False
+    assert saved.applied_at is None
+    assert saved.applied_by_id is None
+    assert saved.result_media_id == 30
+    assert unit_of_work.committed == 1
+
+
+def test_remove_promotes_the_next_image_to_cover(repository, catalog, authorizer, unit_of_work):
+    repository.rows[1] = make_submission(applied_at=NOW, applied_by_id=7)
+    cover = catalog.append_to_carousel(HOME, product_id=10, media_id=30)
+    catalog.media[31] = make_media(media_id=31, content_hash="hash-2")
+    next_image = catalog.append_to_carousel(HOME, product_id=10, media_id=31)
+
+    remove_photo(repository, catalog, authorizer, unit_of_work)(HOME, user_id=7, submission_id=1)
+
+    assert catalog.images[cover.id].is_active is False
+    assert catalog.images[next_image.id].role.value == "main"
+    assert catalog.images[next_image.id].position == 2
+
+
+def test_remove_refuses_a_submission_that_is_not_applied(
+    repository, catalog, authorizer, unit_of_work
+):
+    with pytest.raises(CannotRemove):
+        remove_photo(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1
+        )
+
+    assert catalog.remove_calls == []
+
+
+def test_remove_never_finds_another_stores_submission(
+    repository, catalog, authorizer, unit_of_work
+):
+    repository.rows[1] = make_submission(applied_at=NOW, applied_by_id=7)
+
+    with pytest.raises(NotFoundError):
+        remove_photo(repository, catalog, authorizer, unit_of_work)(
+            ANIME, user_id=7, submission_id=1
+        )
+
+    assert repository.rows[1].applied_at == NOW
 
 
 def test_redo_authorizes_catalog_manage_in_the_store(repository, queue, authorizer):

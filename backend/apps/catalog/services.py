@@ -166,6 +166,10 @@ class CatalogRepository(Protocol):
         """Return the product's one active main image, if any."""
         ...
 
+    def active_product_images(self, product_id: int) -> list[ProductImageRecord]:
+        """Return the product's active image links ordered by position."""
+        ...
+
     def add_product_image(self, image: NewProductImage) -> ProductImageRecord:
         """Insert the link, assigning a position when it has none."""
         ...
@@ -263,6 +267,91 @@ class CatalogService:
             if image.role is ProductImageRole.MAIN:
                 self._retire_other_mains(image.product_id, keep_id=image.id)
             return self._repository.save_product_image(replace(image, is_active=True))
+
+    def append_to_carousel(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        media_id: int,
+        variant_id: int | None = None,
+    ) -> ProductImageRecord:
+        """Append a media to the carousel, making it the cover when there is none (ADR-0030).
+
+        An existing active link is returned unchanged. A retired link to the same
+        media is reactivated at the end instead of inserting a duplicate.
+        """
+        with self._transaction():
+            self._repository.lock_product(store.id, product_id)
+            product = self._require_product(store, product_id)
+            self._require_media(store, media_id)
+            if variant_id is not None:
+                self._require_variant_of_product(store, product, variant_id)
+
+            existing = self._repository.find_product_image(product.id, media_id)
+            if existing is not None and existing.is_active:
+                return existing
+
+            active = self._repository.active_product_images(product.id)
+            if active:
+                role = ProductImageRole.GALLERY
+                position = max(image.position for image in active) + 1
+            else:
+                role = ProductImageRole.MAIN
+                position = 1
+
+            if existing is not None:
+                return self._repository.save_product_image(
+                    replace(
+                        existing,
+                        variant_id=variant_id,
+                        role=role,
+                        position=position,
+                        is_active=True,
+                    )
+                )
+            return self._repository.add_product_image(
+                NewProductImage(
+                    product_id=product.id,
+                    media_id=media_id,
+                    variant_id=variant_id,
+                    role=role,
+                    position=position,
+                )
+            )
+
+    def remove_from_carousel(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        media_id: int,
+    ) -> ProductImageRecord:
+        """Deactivate one link, moving the main role to the next image by position."""
+        with self._transaction():
+            self._repository.lock_product(store.id, product_id)
+            product = self._require_product(store, product_id)
+            image = self._repository.find_product_image(product.id, media_id)
+            if image is None:
+                raise ProductImageNotFound("No product image links that media.")
+            if not image.is_active:
+                return image
+
+            was_cover = image.role is ProductImageRole.MAIN
+            removed = self._repository.save_product_image(
+                replace(
+                    image,
+                    role=ProductImageRole.GALLERY if was_cover else image.role,
+                    is_active=False,
+                )
+            )
+            if was_cover:
+                active = self._repository.active_product_images(product.id)
+                if active:
+                    self._repository.save_product_image(
+                        replace(active[0], role=ProductImageRole.MAIN)
+                    )
+            return removed
 
     def set_main_product_image(
         self,

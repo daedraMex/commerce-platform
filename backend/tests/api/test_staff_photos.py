@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from rest_framework_simplejwt.tokens import AccessToken
 
 from apps.accounts.services import grant_membership
@@ -29,6 +30,7 @@ DETAIL_URL = "/api/v1/staff/photos/{id}/"
 PREVIEW_URL = "/api/v1/staff/photos/{id}/preview/"
 ACTION_URLS = {
     "apply": "/api/v1/staff/photos/{id}/apply/",
+    "remove": "/api/v1/staff/photos/{id}/remove/",
     "redo": "/api/v1/staff/photos/{id}/redo/",
     "retry": "/api/v1/staff/photos/{id}/retry/",
     "discard": "/api/v1/staff/photos/{id}/discard/",
@@ -459,6 +461,8 @@ def make_submission(
     idempotency_key="action-key",
     corners=None,
     crop=None,
+    applied_at=None,
+    applied_by=None,
 ):
     return PhotoSubmission.objects.create(
         store=store,
@@ -474,6 +478,8 @@ def make_submission(
         preview_key=f"stores/{store.id}/photos/previews/{idempotency_key}.jpg",
         corners=corners,
         crop=crop,
+        applied_at=applied_at,
+        applied_by=applied_by,
     )
 
 
@@ -498,16 +504,12 @@ def post_action(client, user, action, submission_id, *, store="home", data=None)
     )
 
 
-def test_apply_makes_the_result_the_active_main_and_deactivates_the_old_one(client, home, user):
+def test_apply_appends_the_result_and_makes_it_the_cover_on_an_empty_carousel(client, home, user):
     grant_membership(user=user, store=home, role_name="content_editor")
     product = make_product(home)
-    old_media = make_media(home, key="stores/1/media/old.jpg", content_hash="old")
-    old_link = ProductMedia.objects.create(
-        product=product, media=old_media, role=ProductMedia.Role.MAIN
-    )
-    new_media = make_media(home, key="stores/1/media/new.jpg", content_hash="new")
+    media = make_media(home, key="stores/1/media/new.jpg", content_hash="new")
     submission = make_submission(
-        home, user, product=product, result_media=new_media, idempotency_key="apply-key"
+        home, user, product=product, result_media=media, idempotency_key="apply-key"
     )
 
     response = post_action(client, user, "apply", submission.pk)
@@ -517,26 +519,136 @@ def test_apply_makes_the_result_the_active_main_and_deactivates_the_old_one(clie
     assert body["status"] == "ready"
     assert body["applied_at"] is not None
     assert body["discarded_at"] is None
-    assert body["result"]["media_id"] == new_media.id
+    assert body["result"]["media_id"] == media.id
 
     submission.refresh_from_db()
-    old_link.refresh_from_db()
+    link = ProductMedia.objects.get(product=product, media=media)
     assert submission.applied_at is not None
     assert submission.applied_by_id == user.id
-    assert old_link.is_active is False
-    assert ProductMedia.objects.filter(pk=old_link.pk).exists()
-    assert Media.objects.filter(pk=old_media.pk).exists()
+    assert link.role == ProductMedia.Role.MAIN
+    assert link.position == 1
+    assert link.is_active is True
+    assert Media.objects.filter(pk=media.pk).exists()
 
-    new_link = ProductMedia.objects.get(
-        product=product, media=new_media, role=ProductMedia.Role.MAIN
+
+def test_apply_appends_a_second_photo_and_keeps_the_existing_cover(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    cover_media = make_media(home, key="stores/1/media/cover.jpg", content_hash="cover")
+    cover_link = ProductMedia.objects.create(
+        product=product, media=cover_media, role=ProductMedia.Role.MAIN
     )
+    new_media = make_media(home, key="stores/1/media/new.jpg", content_hash="new")
+    submission = make_submission(
+        home, user, product=product, result_media=new_media, idempotency_key="apply-key"
+    )
+
+    response = post_action(client, user, "apply", submission.pk)
+
+    assert response.status_code == 200
+    cover_link.refresh_from_db()
+    new_link = ProductMedia.objects.get(product=product, media=new_media)
+    assert cover_link.is_active is True
+    assert cover_link.role == ProductMedia.Role.MAIN
+    assert new_link.role == ProductMedia.Role.GALLERY
+    assert new_link.position == 2
     assert new_link.is_active is True
+
+
+def test_remove_takes_the_photo_out_and_promotes_the_next_cover(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    cover_media = make_media(home, key="stores/1/media/cover.jpg", content_hash="cover")
+    cover_submission = make_submission(
+        home,
+        user,
+        product=product,
+        result_media=cover_media,
+        idempotency_key="cover-key",
+    )
+    second_media = make_media(home, key="stores/1/media/second.jpg", content_hash="second")
+    second_submission = make_submission(
+        home,
+        user,
+        product=product,
+        result_media=second_media,
+        idempotency_key="second-key",
+    )
+    post_action(client, user, "apply", cover_submission.pk)
+    post_action(client, user, "apply", second_submission.pk)
+
+    response = post_action(client, user, "remove", cover_submission.pk)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["applied_at"] is None
+    cover_submission.refresh_from_db()
+    cover_link = ProductMedia.objects.get(product=product, media=cover_media)
+    second_link = ProductMedia.objects.get(product=product, media=second_media)
+    assert cover_submission.applied_at is None
+    assert cover_submission.applied_by_id is None
+    assert cover_link.is_active is False
+    assert second_link.role == ProductMedia.Role.MAIN
+    assert second_link.is_active is True
+    assert Media.objects.filter(pk=cover_media.pk).exists()
+    assert ProductMedia.objects.filter(pk=cover_link.pk).exists()
     assert (
         ProductMedia.objects.filter(
             product=product, role=ProductMedia.Role.MAIN, is_active=True
         ).count()
         == 1
     )
+
+
+def test_remove_refuses_a_submission_that_is_not_applied(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_submission(home, user, product=product, result_media=media)
+
+    response = post_action(client, user, "remove", submission.pk)
+
+    assert_problem_details(response, status=409, code="submission_cannot_remove")
+
+
+def test_remove_requires_catalog_manage(client, home, user):
+    grant_membership(user=user, store=home, role_name="warehouse")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        result_media=media,
+        applied_at=timezone.now(),
+        applied_by=user,
+    )
+
+    response = post_action(client, user, "remove", submission.pk)
+
+    assert_problem_details(response, status=403, code="permission_denied")
+
+
+def test_remove_never_reaches_another_stores_applied_submission(client, home, anime, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    grant_membership(user=user, store=anime, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        result_media=media,
+        applied_at=timezone.now(),
+        applied_by=user,
+        idempotency_key="isolation-remove",
+    )
+
+    response = post_action(client, user, "remove", submission.pk, store="anime")
+
+    assert_problem_details(response, status=404, code="not_found")
+    submission.refresh_from_db()
+    assert submission.applied_at is not None
 
 
 def test_apply_requires_a_ready_individual_photo(client, home, user):

@@ -12,6 +12,7 @@ from apps.photos.application.ports import (
     PhotoProcessingQueue,
     PhotoSubmissionRepository,
     PrivateMediaReader,
+    UnitOfWork,
 )
 from apps.shared.domain.ports import Authorizer, FeatureFlags, StoreResolver
 
@@ -79,6 +80,15 @@ def get_photo_processing_queue() -> PhotoProcessingQueue:
     from apps.photos.infrastructure.processing_queue import CeleryPhotoProcessingQueue
 
     return CeleryPhotoProcessingQueue()
+
+
+def get_photo_unit_of_work() -> UnitOfWork:
+    if get_photo_unit_of_work in _overrides:
+        return _overrides[get_photo_unit_of_work]()
+
+    from apps.photos.infrastructure.transaction import DjangoPhotoUnitOfWork
+
+    return DjangoPhotoUnitOfWork()
 
 
 def get_private_media_reader() -> PrivateMediaReader:

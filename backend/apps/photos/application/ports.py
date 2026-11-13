@@ -3,6 +3,7 @@
 Pure Python: no Django, DRF or infrastructure imports belong here.
 """
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import BinaryIO, Protocol
 
@@ -53,17 +54,32 @@ class PhotoCatalog(Protocol):
         """Return the media of ``store``, or None when another store owns it."""
         ...
 
-    def set_main_product_image(
+    def append_to_carousel(
         self,
         store: StoreReference,
         *,
         product_id: int,
         media_id: int,
         variant_id: int | None = None,
-        position: int | None = None,
     ) -> ProductImageRecord:
-        """Make the media the product's one active main image."""
+        """Append the media to the product's carousel, or make it the cover when empty."""
         ...
+
+    def remove_from_carousel(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        media_id: int,
+    ) -> ProductImageRecord:
+        """Deactivate the product's link to the media, promoting the next cover."""
+        ...
+
+
+class UnitOfWork(Protocol):
+    """Run a block of work atomically, rolling every change in it back on failure."""
+
+    def __call__(self) -> AbstractContextManager[None]: ...
 
 
 class PhotoProcessingQueue(Protocol):

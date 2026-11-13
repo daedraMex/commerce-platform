@@ -12,6 +12,7 @@ from apps.photos.application.apply_photo import ApplyPhoto
 from apps.photos.application.discard_photo import DiscardPhoto
 from apps.photos.application.get_photo_submission import GetPhotoSubmission, PhotoSubmissionView
 from apps.photos.application.redo_photo import RedoPhoto
+from apps.photos.application.remove_photo import RemovePhoto
 from apps.photos.application.retry_photo import RetryPhoto
 from apps.photos.application.upload_photo import UploadPhoto, UploadPhotoCommand
 from apps.photos.interfaces.serializers import (
@@ -27,6 +28,7 @@ from config.dependencies import (
     get_media_uploader,
     get_photo_processing_queue,
     get_photo_submission_repository,
+    get_photo_unit_of_work,
     get_private_media_reader,
 )
 from config.schema import problem_response
@@ -320,7 +322,7 @@ def _action_body(request, submission):
     responses={
         200: OpenApiResponse(
             response=PhotoSubmissionSerializer,
-            description="The applied submission, now the product's active main image.",
+            description=("The applied submission, now appended to the product's carousel."),
             examples=[PHOTO_SUBMISSION_EXAMPLE],
         ),
         **ACTION_ERRORS,
@@ -334,13 +336,46 @@ def _action_body(request, submission):
     },
 )
 class StaffPhotoApplyView(StoreScopedMixin, APIView):
-    """Link a ready individual photo as the product's active main image."""
+    """Append a ready individual photo to the product's carousel."""
 
     def post(self, request, pk, *args, **kwargs):
         submission = ApplyPhoto(
             repository=get_photo_submission_repository(),
             catalog=get_catalog_service(),
             authorizer=get_authorizer(),
+            unit_of_work=get_photo_unit_of_work(),
+        )(request.store, user_id=request.user.id, submission_id=pk)
+        return Response(_action_body(request, submission))
+
+
+@extend_schema(
+    request=None,
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=PhotoSubmissionSerializer,
+            description=("The removed submission, no longer applied, with its Media kept."),
+            examples=[PHOTO_SUBMISSION_EXAMPLE],
+        ),
+        **ACTION_ERRORS,
+        **problem_response(
+            409,
+            (
+                "submission_cannot_remove",
+                "Only an applied photo can be removed from the carousel.",
+            ),
+        ),
+    },
+)
+class StaffPhotoRemoveView(StoreScopedMixin, APIView):
+    """Remove an applied photo from the product's carousel without deleting it."""
+
+    def post(self, request, pk, *args, **kwargs):
+        submission = RemovePhoto(
+            repository=get_photo_submission_repository(),
+            catalog=get_catalog_service(),
+            authorizer=get_authorizer(),
+            unit_of_work=get_photo_unit_of_work(),
         )(request.store, user_id=request.user.id, submission_id=pk)
         return Response(_action_body(request, submission))
 

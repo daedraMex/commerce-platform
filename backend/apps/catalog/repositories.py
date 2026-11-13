@@ -154,6 +154,17 @@ class DjangoCatalogRepository:
         ).first()
         return _image_record(row) if row is not None else None
 
+    def active_product_images(self, product_id: int) -> list[ProductImageRecord]:
+        rows = (
+            ProductMedia.objects.filter(
+                product_id=product_id,
+                is_active=True,
+            )
+            .select_related("product")
+            .order_by("position", "pk")
+        )
+        return [_image_record(row) for row in rows]
+
     def add_product_image(self, image: NewProductImage) -> ProductImageRecord:
         row = ProductMedia.objects.create(
             product_id=image.product_id,

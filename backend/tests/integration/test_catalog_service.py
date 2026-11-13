@@ -10,6 +10,7 @@ from apps.catalog.repositories import DjangoCatalogRepository, DjangoMediaFiles
 from apps.catalog.services import (
     CatalogService,
     NewMedia,
+    ProductImageNotFound,
     ProductImageRole,
     StoreMismatch,
 )
@@ -225,6 +226,86 @@ def test_two_set_main_calls_in_turn_leave_exactly_one_active_main(media_root):
     )
     assert active_mains.count() == 1
     assert active_mains.get().pk == second.id
+
+
+def test_append_builds_an_ordered_carousel_with_one_active_cover(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    first = make_media(home, content_hash="first")
+    second = make_media(home, content_hash="second")
+    service = get_catalog_service()
+    store = StoreReference(id=home.pk, slug=home.slug)
+
+    cover = service.append_to_carousel(store, product_id=product.pk, media_id=first.pk)
+    appended = service.append_to_carousel(store, product_id=product.pk, media_id=second.pk)
+
+    assert cover.role is ProductImageRole.MAIN
+    assert cover.position == 1
+    assert appended.role is ProductImageRole.GALLERY
+    assert appended.position == 2
+    assert ProductMedia.objects.get(pk=cover.id).is_active is True
+    assert (
+        ProductMedia.objects.filter(
+            product=product, role=ProductMedia.Role.MAIN, is_active=True
+        ).count()
+        == 1
+    )
+
+
+def test_remove_keeps_the_link_and_promotes_the_next_cover(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    first = make_media(home, content_hash="first")
+    second = make_media(home, content_hash="second")
+    service = get_catalog_service()
+    store = StoreReference(id=home.pk, slug=home.slug)
+
+    cover = service.append_to_carousel(store, product_id=product.pk, media_id=first.pk)
+    appended = service.append_to_carousel(store, product_id=product.pk, media_id=second.pk)
+
+    removed = service.remove_from_carousel(store, product_id=product.pk, media_id=first.pk)
+
+    removed_row = ProductMedia.objects.get(pk=removed.id)
+    promoted_row = ProductMedia.objects.get(pk=appended.id)
+    assert removed_row.is_active is False
+    assert removed_row.role == ProductMedia.Role.GALLERY
+    assert promoted_row.role == ProductMedia.Role.MAIN
+    assert promoted_row.is_active is True
+    assert promoted_row.position == 2
+    assert Media.objects.filter(pk__in=[first.pk, second.pk]).count() == 2
+    assert ProductMedia.objects.filter(product=product).count() == 2
+    assert cover.id == removed.id
+
+
+def test_append_reactivates_a_removed_link_at_the_end(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    first = make_media(home, content_hash="first")
+    second = make_media(home, content_hash="second")
+    service = get_catalog_service()
+    store = StoreReference(id=home.pk, slug=home.slug)
+
+    cover = service.append_to_carousel(store, product_id=product.pk, media_id=first.pk)
+    returned = service.append_to_carousel(store, product_id=product.pk, media_id=second.pk)
+    service.remove_from_carousel(store, product_id=product.pk, media_id=first.pk)
+
+    restored = service.append_to_carousel(store, product_id=product.pk, media_id=first.pk)
+
+    assert restored.id == cover.id
+    assert restored.role is ProductImageRole.GALLERY
+    assert restored.position == 3
+    assert ProductMedia.objects.filter(product=product).count() == 2
+    assert ProductMedia.objects.get(pk=returned.id).role == ProductMedia.Role.MAIN
+
+
+def test_remove_rejects_a_media_that_is_not_linked(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    media = make_media(home, content_hash="unlinked")
+    store = StoreReference(id=home.pk, slug=home.slug)
+
+    with pytest.raises(ProductImageNotFound):
+        get_catalog_service().remove_from_carousel(store, product_id=product.pk, media_id=media.pk)
 
 
 def prepared_draft(store, *, color):

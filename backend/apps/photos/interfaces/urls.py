@@ -6,6 +6,7 @@ from apps.photos.interfaces.views import (
     StaffPhotoDiscardView,
     StaffPhotoPreviewView,
     StaffPhotoRedoView,
+    StaffPhotoRemoveView,
     StaffPhotoRetryView,
     StaffPhotoUploadView,
 )
@@ -20,6 +21,11 @@ urlpatterns = [
     ),
     path("photos/<int:pk>/apply/", StaffPhotoApplyView.as_view(), name="staff-photo-apply"),
     path("photos/<int:pk>/redo/", StaffPhotoRedoView.as_view(), name="staff-photo-redo"),
+    path(
+        "photos/<int:pk>/remove/",
+        StaffPhotoRemoveView.as_view(),
+        name="staff-photo-remove",
+    ),
     path("photos/<int:pk>/retry/", StaffPhotoRetryView.as_view(), name="staff-photo-retry"),
     path(
         "photos/<int:pk>/discard/",
