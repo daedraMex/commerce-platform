@@ -1905,5 +1905,16 @@ def test_review_feedback_survives_a_failed_check_and_names_the_open_finding(tmp_
     assert not results[0].ok
     assert "link and save are not atomic" in runner.builder_prompts[2]
     assert notifier.stuck[0].failing_check == (
-        "review: backend/apps/x/use_case.py:12 link and save are not atomic"
+        "check failed; review: backend/apps/x/use_case.py:12 link and save are not atomic"
     )
+
+
+def test_an_open_finding_is_listed_when_the_next_review_fails(tmp_path):
+    garbage = AgentResult(exit_code=0, stdout="LGTM", stderr="", timed_out=False)
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [IMPORTANT, garbage])
+
+    body = github.created_prs[0][2]
+    assert "automated review failed" in body
+    assert "Open finding from an earlier round" in body
+    assert "link and save are not atomic" in body

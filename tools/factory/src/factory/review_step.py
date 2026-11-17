@@ -13,8 +13,10 @@ The reviewer answers in a fixed block so the runner can parse it::
     [Nit] path/to/file.py | one-line summary | failure case
     REVIEW-FINDINGS-END
 
-or ``NO FINDINGS`` inside the block. Anything else is a failed review: the PR
-still opens, and its body tells the owner to read it in full.
+or ``NO FINDINGS`` inside the block. Lines that do not parse are listed in the
+PR body; a malformed Important line still blocks. Output with no block at all is
+a failed review: the PR still opens, and its body tells the owner to read it in
+full.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ _TEMPLATE_LINES = {
     "[Nit] path/to/file.py | one-line summary | failure case",
 }
 NO_LOCATION = "(location not given)"
+_EMPTY_FINDING = re.compile(r"^\(?\s*(none|n/?a|no findings|nothing)\b", re.IGNORECASE)
 MAX_UNPARSED_IN_PR = 5
 
 
@@ -96,11 +99,16 @@ def _blocks(text: str) -> list[list[str]]:
     return blocks
 
 
+EMPTY = Finding("Nit", "", None, "", "")  # sentinel: a tagged line that says "none"
+
+
 def _parse_line(line: str) -> Finding | None:
     match = _TAG.match(line)
     if match is None:
         return None
     tag = _CANONICAL_TAG[match.group(1).lower()]
+    if _EMPTY_FINDING.match(match.group(2).strip()):
+        return EMPTY
     parts = [part.strip() for part in match.group(2).split("|")]
     if len(parts) < 3:
         if tag != "Important":
@@ -126,6 +134,8 @@ def parse_review(text: str) -> ReviewResult:
         if line.upper() == NO_FINDINGS:
             continue
         finding = _parse_line(line)
+        if finding is EMPTY:
+            continue
         if finding is None:
             unparsed.append(line[:200])
         else:
@@ -297,8 +307,21 @@ class PrePrReview:
             return stuck_reason(self.result.important[0])
         return None
 
-    def pr_lines(self) -> tuple[str, ...]:
-        """The PR body's Review section."""
+    def pr_lines(self, open_findings: tuple[Finding, ...] = ()) -> tuple[str, ...]:
+        """The PR body's Review section.
+
+        ``open_findings`` are Important findings from an earlier round that no later
+        review cleared (the later one failed); they are listed so the owner sees them.
+        """
+        earlier = tuple(
+            f"- Open finding from an earlier round: [{f.tag}] `{f.location}` {f.summary} "
+            f"(failure: {f.failure})"
+            for f in open_findings
+            if f.tag == "Important"
+        )
+        return self._status_lines() + (earlier if self.status == "failed" else ())
+
+    def _status_lines(self) -> tuple[str, ...]:
         if self.status == "off":
             return ("- automated review off (`FACTORY_PRE_PR_REVIEW=0`).",)
         if self.status == "skipped":

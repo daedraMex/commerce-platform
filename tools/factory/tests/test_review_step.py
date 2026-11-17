@@ -192,3 +192,13 @@ def test_reviewer_config_cannot_edit_or_run_any_command():
     assert permission["webfetch"] == "deny"
     assert permission["task"] == {"*": "deny"}
     assert permission["external_directory"] == {"*": "deny"}
+
+
+def test_an_important_tag_that_says_none_is_no_finding():
+    review = parse_review(
+        "REVIEW-FINDINGS-BEGIN\n[Important] None. The change looks correct.\n"
+        "[Important] (none)\n[Important] n/a\nREVIEW-FINDINGS-END\n"
+    )
+
+    assert review.findings == ()
+    assert review.unparsed == ()

@@ -501,7 +501,9 @@ unreachable" as before.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
-  `DATABASE_URL` and `OPENCODE_CONFIG` — nothing else. The model provider key is
+  `DATABASE_URL` and `OPENCODE_CONFIG` (the reviewer gets
+  `OPENCODE_CONFIG_CONTENT` and `OPENCODE_DISABLE_PROJECT_CONFIG` instead) —
+  nothing else. The model provider key is
   not in it: the agent reads its own OpenCode auth store from its home, so the
   key never crosses sudo. The backend check runner gets the same downgrade with
   only `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret
@@ -554,7 +556,10 @@ unreachable" as before.
   times out or answers without a findings block is reported in the PR body
   ("read in full") and the PR still opens. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
-  `FACTORY_PRE_PR_REVIEW=0` turns it off.
+  `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#153): the agent's global
+  OpenCode config (`~/.config/opencode/`) is still loaded and is writable by the
+  agent user, so a builder or a test could plant global instructions that
+  weaken later reviews; the owner's review stays the gate.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** each area check script that passed or was
   skipped and the agent steps used, under **Review** the pre-PR review's

@@ -393,7 +393,7 @@ class Factory:
                     attempts=made,
                     checked_areas=check.checked_areas,
                     skipped_areas=check.skipped_areas,
-                    review_lines=review.pr_lines(),
+                    review_lines=review.pr_lines(previous_findings),
                 )
             # The open review findings stay in the next prompt until a review passes.
             feedback = check.output
@@ -406,7 +406,7 @@ class Factory:
             worktree=worktree,
             open_question=None,
             failing_check=(
-                stuck_reason(open_findings[0])
+                f"check failed; {stuck_reason(open_findings[0])}"
                 if (open_findings := [f for f in previous_findings if f.tag == "Important"])
                 else f"step budget exceeded ({self.settings.attempts} attempts)"
             ),
