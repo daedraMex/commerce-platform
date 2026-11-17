@@ -92,7 +92,7 @@ class Settings:
             max_tickets=_read_int(env, "FACTORY_MAX_TICKETS", 1),
             max_open_prs=_read_int(env, "FACTORY_MAX_OPEN_PRS", 2),
             max_tickets_per_day=_read_int(env, "FACTORY_MAX_TICKETS_PER_DAY", 6),
-            attempts=_read_int(env, "FACTORY_ATTEMPTS", 5),
+            attempts=_read_int(env, "FACTORY_ATTEMPTS", 3),
             repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or "/srv/factory/repo"),
             worktrees_dir=Path(_read(env, "FACTORY_WORKTREES_DIR") or "/srv/factory/worktrees"),
             logs_dir=Path(_read(env, "FACTORY_LOGS_DIR") or str(home / "factory" / "logs")),

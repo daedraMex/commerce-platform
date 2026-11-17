@@ -3,6 +3,7 @@ from factory.diff import (
     build_diff_stats,
     is_migration_path,
     is_protected_path,
+    is_sensitive_path,
     is_test_path,
     touches_protected_paths,
 )
@@ -81,3 +82,20 @@ def test_is_protected_path_allows_normal_code():
 def test_touches_protected_paths_ignores_nothing_normal():
     assert touches_protected_paths(["backend/apps/catalog/models.py"]) is False
     assert touches_protected_paths(["backend/apps/catalog/models.py", "AGENTS.md"]) is True
+
+
+def test_is_sensitive_path_covers_auth_permissions_and_settings():
+    sensitive = [
+        "backend/apps/accounts/views.py",
+        "backend/apps/stores/authorizer.py",
+        "backend/config/settings.py",
+        "backend/config/urls.py",
+        "backend/apps/shared/domain/ports.py",
+        "web/console/src/lib/auth/session.ts",
+    ]
+    assert all(is_sensitive_path(path) for path in sensitive)
+
+
+def test_is_sensitive_path_allows_ordinary_code():
+    assert not is_sensitive_path("backend/apps/catalog/views.py")
+    assert not is_sensitive_path("web/console/src/app/[store]/photos/page.tsx")

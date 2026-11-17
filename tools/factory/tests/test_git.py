@@ -386,6 +386,7 @@ def test_check_runs_every_selected_area_in_labeled_output(tmp_path):
 
     assert result.passed is True
     assert result.failed_areas == ()
+    assert result.checked_areas == AREAS
     assert len(run.calls) == 2
     assert "=== backend (backend/scripts/check.sh) ===" in result.output
     assert "=== console (web/console/scripts/check.sh) ===" in result.output
@@ -420,6 +421,8 @@ def test_check_skips_an_area_whose_script_is_absent(tmp_path):
 
     assert result.passed is True
     assert result.failed_areas == ()
+    assert result.checked_areas == ()
+    assert result.skipped_areas == AREAS
     assert run.calls == []
     assert "backend" in result.output
     assert "skipped" in result.output
@@ -714,25 +717,55 @@ def test_head_sha_raises_when_rev_parse_fails():
         Git(run=run).head_sha(Path("/work"))
 
 
-def test_diff_stats_since_uses_the_given_base():
+def test_diff_stats_defaults_to_origin_main():
+    results = [
+        CommandResult(0, "2\t1\tbackend/apps/x/views.py\n", ""),
+        CommandResult(0, "", ""),
+    ]
+    run = SequenceRun(results)
+
+    Git(run=run).diff_stats(Path("/work"))
+
+    assert run.calls[0][0] == ["git", "diff", "origin/main...HEAD", "--numstat"]
+    assert run.calls[1][0] == [
+        "git",
+        "diff",
+        "origin/main...HEAD",
+        "--diff-filter=A",
+        "--name-only",
+    ]
+
+
+def test_diff_stats_since_a_sha_compares_trees_not_merge_bases():
+    """A review fix compares the tree at ``since`` with HEAD (two-dot).
+
+    The agent can amend or reset the runner's merge commit, so ``since`` may stop
+    being an ancestor of HEAD; a merge-base range would then count everything
+    main brought in as the agent's own change.
+    """
     results = [
         CommandResult(0, "2\t1\tbackend/apps/x/views.py\n", ""),
         CommandResult(0, "backend/tests/test_x.py\n", ""),
     ]
     run = SequenceRun(results)
 
-    stats = Git(run=run).diff_stats_since(Path("/work"), "base123")
+    stats = Git(run=run).diff_stats(Path("/work"), since="base123")
 
     assert stats.files[0].path == "backend/apps/x/views.py"
     assert stats.new_tests == ("backend/tests/test_x.py",)
-    assert run.calls[0][0] == ["git", "diff", "base123..HEAD", "--numstat"]
+    assert run.calls[0][0] == ["git", "diff", "base123", "HEAD", "--numstat"]
     assert run.calls[1][0] == [
         "git",
         "diff",
-        "base123..HEAD",
+        "base123",
+        "HEAD",
         "--diff-filter=A",
         "--name-only",
     ]
+
+
+def test_git_has_a_single_diff_stats_method():
+    assert not hasattr(Git, "diff_stats_since")
 
 
 def test_merge_main_merges_origin_main_with_the_bot_identity_and_no_hooks():
@@ -812,3 +845,48 @@ def test_remote_branch_exists_raises_when_ls_remote_fails():
         RuntimeError, match="git ls-remote failed: fatal: could not read from remote"
     ):
         Git(run=run).remote_branch_exists(Path("/srv/factory/repo"), "nf/7-x", "TOKEN")
+
+
+def _git(repo: Path, *args: str) -> str:
+    import subprocess
+
+    env = {
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@example.com",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@example.com",
+        "HOME": str(repo),
+        "PATH": "/usr/bin:/bin",
+    }
+    return subprocess.run(
+        ["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_diff_stats_since_ignores_main_files_after_the_agent_amends_the_merge(tmp_path):
+    """Real git: the agent amends the runner's merge of main; only its file counts."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "README.md").write_text("base\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "checkout", "-qb", "nf/7-ticket")
+    (repo / "feature.py").write_text("x = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "ticket")
+    _git(repo, "checkout", "-q", "main")
+    (repo / ".github").mkdir()
+    (repo / ".github" / "ci.yml").write_text("on: push\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "main moves")
+    _git(repo, "checkout", "-q", "nf/7-ticket")
+    _git(repo, "merge", "-q", "--no-edit", "main")
+    since = _git(repo, "rev-parse", "HEAD")
+    (repo / "review.txt").write_text("fix\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "--amend", "--no-edit")
+
+    stats = Git().diff_stats(repo, since=since)
+
+    assert [f.path for f in stats.files] == ["review.txt"]

@@ -151,11 +151,9 @@ class FakeGit:
         self.committed.append(message)
         return self.commit_changed
 
-    def diff_stats(self, worktree):
-        return self.diff
-
-    def diff_stats_since(self, worktree, base):
-        self.diff_since.append((str(worktree), base))
+    def diff_stats(self, worktree, *, since=None):
+        if since is not None:
+            self.diff_since.append((str(worktree), since))
         return self.diff
 
     def head_sha(self, worktree):
@@ -511,6 +509,36 @@ def test_fetch_main_runs_before_any_worktree_is_created(tmp_path):
 
     assert "fetch_main" in git.events
     assert git.events.index("fetch_main") < git.events.index("create_worktree")
+
+
+def test_ticket_fetches_main_itself_after_the_preflight(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    after_preflight = git.events[git.events.index("create_agent_cleanup_probe") + 1 :]
+    ticket_worktree = after_preflight.index("create_worktree")
+    assert "fetch_main" in after_preflight[:ticket_worktree]
+
+
+def test_success_pr_body_carries_verification_risk_and_revert(tmp_path):
+    git = FakeGit(check_passed=True)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    body = github.created_prs[0][2]
+    assert "## Verification" in body
+    assert "Agent steps: 1 of 5" in body
+    assert "## Risk" in body
+    assert "## How to revert" in body
 
 
 def test_fetch_failure_aborts_the_run_and_notifies(tmp_path):

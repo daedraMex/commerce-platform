@@ -20,6 +20,17 @@ PROTECTED_FILES = frozenset(
     }
 )
 
+# Paths whose changes the PR body flags under Risk so the owner reads them in full:
+# authentication, store permissions and credentials, the shared ports (Authorizer,
+# CredentialStore), the project config and wiring, and the console session.
+SENSITIVE_PREFIXES = (
+    "backend/apps/accounts/",
+    "backend/apps/stores/",
+    "backend/apps/shared/",
+    "backend/config/",
+    "web/console/src/lib/auth/",
+)
+
 
 @dataclass(frozen=True)
 class FileChange:
@@ -60,6 +71,12 @@ def is_protected_path(path: str) -> bool:
         return True
     name = PurePosixPath(normalized).name
     return name.startswith("opencode") and name.endswith(".json")
+
+
+def is_sensitive_path(path: str) -> bool:
+    """Paths an unattended run may change but the owner should read in full."""
+    normalized = path.replace("\\", "/")
+    return any(normalized.startswith(prefix) for prefix in SENSITIVE_PREFIXES)
 
 
 def touches_protected_paths(paths) -> bool:
