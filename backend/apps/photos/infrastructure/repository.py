@@ -95,6 +95,14 @@ class DjangoPhotoSubmissionRepository:
         row = PhotoSubmissionModel.objects.filter(pk=submission_id, store_id=store.id).first()
         return _to_entity(row) if row is not None else None
 
+    def get_for_update(self, store: StoreReference, submission_id: int) -> PhotoSubmission | None:
+        row = (
+            PhotoSubmissionModel.objects.select_for_update()
+            .filter(pk=submission_id, store_id=store.id)
+            .first()
+        )
+        return _to_entity(row) if row is not None else None
+
     def get_by_idempotency_key(
         self, store: StoreReference, created_by: int, key: str
     ) -> PhotoSubmission | None:

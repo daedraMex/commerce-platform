@@ -113,6 +113,35 @@
         ],
         "type": "object"
       },
+      "GroupPhotoApply": {
+        "description": "The optional product selection of a group photo's first apply.",
+        "properties": {
+          "product_ids": {
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "GroupPhotoLinks": {
+        "description": "The full product selection a group photo should be linked to.",
+        "properties": {
+          "product_ids": {
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "product_ids"
+        ],
+        "type": "object"
+      },
       "KindEnum": {
         "description": "* `rectangle` - rectangle\n* `contour` - contour\n* `group` - group",
         "enum": [
@@ -413,6 +442,13 @@
           "light_correction": {
             "type": "boolean"
           },
+          "linked_product_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "readOnly": true,
+            "type": "array"
+          },
           "photographed_variant_id": {
             "nullable": true,
             "type": "integer"
@@ -458,6 +494,7 @@
           "id",
           "kind",
           "light_correction",
+          "linked_product_ids",
           "photographed_variant_id",
           "pipeline_version",
           "preview_url",
@@ -2274,6 +2311,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
@@ -2339,6 +2377,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
@@ -2607,6 +2646,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
@@ -2763,7 +2803,7 @@
     },
     "/api/v1/staff/photos/{id}/apply/": {
       "post": {
-        "description": "Append a ready individual photo to the product's carousel.",
+        "description": "Append a ready individual photo or link a group photo to its selected products.",
         "operationId": "api_v1_staff_photos_apply_create",
         "parameters": [
           {
@@ -2784,6 +2824,25 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPhotoApply"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPhotoApply"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPhotoApply"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -2825,6 +2884,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
@@ -2848,7 +2908,7 @@
                 }
               }
             },
-            "description": "The applied submission, now appended to the product's carousel."
+            "description": "The applied submission, appended to the product's carousel or linked to every selected product of a group photo."
           },
           "400": {
             "content": {
@@ -2976,7 +3036,7 @@
                     "summary": "submission_cannot_apply",
                     "value": {
                       "code": "submission_cannot_apply",
-                      "detail": "Only a ready individual photo can be applied.",
+                      "detail": "Only a ready photo can be applied, and a group photo needs products.",
                       "status": 409,
                       "title": "Conflict",
                       "type": "about:blank"
@@ -2988,7 +3048,7 @@
                 }
               }
             },
-            "description": "Only a ready individual photo can be applied."
+            "description": "Only a ready photo can be applied, and a group photo needs products."
           }
         },
         "security": [
@@ -3065,6 +3125,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
@@ -3229,6 +3290,247 @@
               }
             },
             "description": "An applied or already discarded photo cannot be discarded."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/photos/{id}/links/": {
+      "post": {
+        "description": "Replace the products an applied group photo is linked to.",
+        "operationId": "api_v1_staff_photos_links_create",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPhotoLinks"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPhotoLinks"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupPhotoLinks"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ReadyPhotoSubmission": {
+                    "summary": "Ready photo submission",
+                    "value": {
+                      "applied_at": "2026-11-12T09:32:00Z",
+                      "attempts": 1,
+                      "corners": [
+                        {
+                          "x": 0.1,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.1
+                        },
+                        {
+                          "x": 0.9,
+                          "y": 0.9
+                        },
+                        {
+                          "x": 0.1,
+                          "y": 0.9
+                        }
+                      ],
+                      "created_at": "2026-11-12T09:30:00Z",
+                      "crop": {
+                        "height": 1200,
+                        "width": 960,
+                        "x": 120,
+                        "y": 180
+                      },
+                      "discarded_at": null,
+                      "failure_code": "",
+                      "failure_message": "",
+                      "id": 12,
+                      "kind": "rectangle",
+                      "light_correction": true,
+                      "linked_product_ids": [],
+                      "photographed_variant_id": 3,
+                      "pipeline_version": "2026-11-11.2",
+                      "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "result": {
+                        "height": 1500,
+                        "media_id": 44,
+                        "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                        "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                        "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                        "width": 1200
+                      },
+                      "status": "ready",
+                      "target_product_id": 7,
+                      "updated_at": "2026-11-12T09:31:15Z",
+                      "version": 4
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoSubmission"
+                }
+              }
+            },
+            "description": "The applied group photo with its new linked product ids; removed links are deactivated and retained links keep their position."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "ValidationError": {
+                    "summary": "validation_error",
+                    "value": {
+                      "code": "validation_error",
+                      "detail": "Validation failed.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Validation failed."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No photo submission matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No photo submission matches this id in this store."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "SubmissionCannotChangeLinks": {
+                    "summary": "submission_cannot_change_links",
+                    "value": {
+                      "code": "submission_cannot_change_links",
+                      "detail": "Only an applied group photo has a product selection to change.",
+                      "status": 409,
+                      "title": "Conflict",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Only an applied group photo has a product selection to change."
           }
         },
         "security": [
@@ -3488,6 +3790,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
@@ -3708,6 +4011,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
@@ -3948,6 +4252,7 @@
                       "id": 12,
                       "kind": "rectangle",
                       "light_correction": true,
+                      "linked_product_ids": [],
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",

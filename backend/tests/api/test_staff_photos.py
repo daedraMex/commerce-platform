@@ -30,6 +30,7 @@ DETAIL_URL = "/api/v1/staff/photos/{id}/"
 PREVIEW_URL = "/api/v1/staff/photos/{id}/preview/"
 ACTION_URLS = {
     "apply": "/api/v1/staff/photos/{id}/apply/",
+    "links": "/api/v1/staff/photos/{id}/links/",
     "remove": "/api/v1/staff/photos/{id}/remove/",
     "redo": "/api/v1/staff/photos/{id}/redo/",
     "retry": "/api/v1/staff/photos/{id}/retry/",
@@ -439,6 +440,7 @@ def test_schema_documents_the_photo_upload_and_status_api(client):
     example = next(iter(response["examples"].values()))["value"]
     assert {"status", "failure_code", "failure_message", "preview_url", "result"} <= set(example)
     assert {"url", "thumbnail_url", "medium_url"} <= set(example["result"])
+    assert "linked_product_ids" in example
 
     preview = schema["paths"][PREVIEW_URL.format(id="{id}")]["get"]
     assert "200" in preview["responses"]
@@ -480,6 +482,21 @@ def make_submission(
         crop=crop,
         applied_at=applied_at,
         applied_by=applied_by,
+    )
+
+
+def make_group_submission(store, user, *, result_media, idempotency_key="group-key"):
+    return PhotoSubmission.objects.create(
+        store=store,
+        created_by=user,
+        kind=PhotoSubmission.Kind.GROUP,
+        idempotency_key=idempotency_key,
+        request_fingerprint="a" * 64,
+        status=PhotoSubmission.Status.READY,
+        result_media=result_media,
+        attempts=1,
+        original_key=f"stores/{store.id}/photos/originals/{idempotency_key}.jpg",
+        preview_key=f"stores/{store.id}/photos/previews/{idempotency_key}.jpg",
     )
 
 
@@ -876,3 +893,175 @@ def test_schema_documents_the_photo_actions(client):
     request_schema = redo["requestBody"]["content"]["application/json"]["schema"]
     component = schema["components"]["schemas"][request_schema["$ref"].rsplit("/", 1)[-1]]
     assert {"corners", "crop"} <= set(component["properties"])
+
+
+def test_group_apply_links_the_result_media_to_each_selected_product(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    first = make_product(home, name="First", slug="first")
+    second = make_product(home, name="Second", slug="second")
+    media = make_media(home, key="stores/1/media/group.jpg", content_hash="group")
+    submission = make_group_submission(home, user, result_media=media)
+
+    response = post_action(
+        client, user, "apply", submission.pk, data={"product_ids": [first.pk, second.pk]}
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["applied_at"] is not None
+    assert body["linked_product_ids"] == [first.pk, second.pk]
+    first_link = ProductMedia.objects.get(product=first, media=media)
+    second_link = ProductMedia.objects.get(product=second, media=media)
+    assert first_link.is_active is True
+    assert second_link.is_active is True
+    assert first_link.role == ProductMedia.Role.MAIN
+    assert second_link.role == ProductMedia.Role.MAIN
+    assert Media.objects.filter(pk=media.pk).count() == 1
+
+
+def test_group_apply_keeps_an_existing_cover_and_appends_a_gallery_image(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    cover_media = make_media(home, key="stores/1/media/cover.jpg", content_hash="cover")
+    cover_link = ProductMedia.objects.create(
+        product=product, media=cover_media, role=ProductMedia.Role.MAIN
+    )
+    group_media = make_media(home, key="stores/1/media/group.jpg", content_hash="group")
+    submission = make_group_submission(home, user, result_media=group_media)
+
+    response = post_action(client, user, "apply", submission.pk, data={"product_ids": [product.pk]})
+
+    assert response.status_code == 200
+    cover_link.refresh_from_db()
+    group_link = ProductMedia.objects.get(product=product, media=group_media)
+    assert cover_link.is_active is True
+    assert cover_link.role == ProductMedia.Role.MAIN
+    assert group_link.role == ProductMedia.Role.GALLERY
+    assert group_link.position == 2
+
+
+def test_group_apply_without_products_is_refused(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_group_submission(home, user, result_media=media)
+
+    response = post_action(client, user, "apply", submission.pk, data={"product_ids": []})
+
+    assert_problem_details(response, status=409, code="submission_cannot_apply")
+    assert not ProductMedia.objects.filter(product=product, media=media).exists()
+
+
+def test_group_apply_requires_catalog_manage(client, home, user):
+    grant_membership(user=user, store=home, role_name="warehouse")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_group_submission(home, user, result_media=media)
+
+    response = post_action(client, user, "apply", submission.pk, data={"product_ids": [product.pk]})
+
+    assert_problem_details(response, status=403, code="permission_denied")
+    assert not ProductMedia.objects.filter(product=product).exists()
+
+
+def test_group_links_add_remove_and_reactivate_without_duplicates(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    first = make_product(home, name="First", slug="first")
+    second = make_product(home, name="Second", slug="second")
+    third = make_product(home, name="Third", slug="third")
+    media = make_media(home, key="stores/1/media/group.jpg", content_hash="group")
+    submission = make_group_submission(home, user, result_media=media)
+    post_action(client, user, "apply", submission.pk, data={"product_ids": [first.pk, second.pk]})
+    first_link = ProductMedia.objects.get(product=first, media=media)
+    second_link = ProductMedia.objects.get(product=second, media=media)
+
+    added = post_action(
+        client, user, "links", submission.pk, data={"product_ids": [first.pk, third.pk]}
+    )
+
+    assert added.status_code == 200
+    first_link.refresh_from_db()
+    second_link.refresh_from_db()
+    assert added.json()["linked_product_ids"] == [first.pk, third.pk]
+    assert first_link.is_active is True
+    assert first_link.position == 1
+    assert second_link.is_active is False
+    third_link = ProductMedia.objects.get(product=third, media=media)
+    assert third_link.is_active is True
+
+    restored = post_action(
+        client,
+        user,
+        "links",
+        submission.pk,
+        data={"product_ids": [first.pk, second.pk, third.pk]},
+    )
+
+    assert restored.status_code == 200
+    assert restored.json()["linked_product_ids"] == [first.pk, second.pk, third.pk]
+    second_link.refresh_from_db()
+    assert second_link.is_active is True
+    assert ProductMedia.objects.filter(product=second, media=media).count() == 1
+    assert Media.objects.filter(pk=media.pk).count() == 1
+
+
+def test_group_links_never_touch_another_stores_products(client, home, anime, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    grant_membership(user=user, store=anime, role_name="content_editor")
+    home_product = make_product(home)
+    anime_product = make_product(anime, name="Anime", slug="anime-product")
+    media = make_media(home, key="stores/1/media/group.jpg", content_hash="group")
+    submission = make_group_submission(home, user, result_media=media)
+    post_action(client, user, "apply", submission.pk, data={"product_ids": [home_product.pk]})
+
+    response = post_action(
+        client,
+        user,
+        "links",
+        submission.pk,
+        store="anime",
+        data={"product_ids": [anime_product.pk]},
+    )
+
+    assert_problem_details(response, status=404, code="not_found")
+    assert not ProductMedia.objects.filter(product=anime_product).exists()
+    assert ProductMedia.objects.get(product=home_product, media=media).is_active is True
+
+
+def test_group_apply_refuses_another_stores_product(client, home, anime, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    anime_product = make_product(anime)
+    media = make_media(home)
+    submission = make_group_submission(home, user, result_media=media)
+
+    response = post_action(
+        client, user, "apply", submission.pk, data={"product_ids": [anime_product.pk]}
+    )
+
+    assert_problem_details(response, status=404, code="catalog_store_mismatch")
+    assert not ProductMedia.objects.filter(product=anime_product).exists()
+    submission.refresh_from_db()
+    assert submission.applied_at is None
+
+
+def test_group_links_require_catalog_manage(client, home, user):
+    grant_membership(user=user, store=home, role_name="warehouse")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_group_submission(home, user, result_media=media)
+
+    response = post_action(client, user, "links", submission.pk, data={"product_ids": [product.pk]})
+
+    assert_problem_details(response, status=403, code="permission_denied")
+    assert not ProductMedia.objects.filter(product=product).exists()
+
+
+def test_group_links_refuse_an_individual_photo(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home)
+    submission = make_submission(home, user, product=product, result_media=media)
+
+    response = post_action(client, user, "links", submission.pk, data={"product_ids": [product.pk]})
+
+    assert_problem_details(response, status=409, code="submission_cannot_change_links")

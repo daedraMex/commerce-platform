@@ -16,6 +16,7 @@ from apps.catalog.services import (
 from apps.photos.domain.errors import (
     AttemptsExhausted,
     CannotApply,
+    CannotChangeGroupLinks,
     CannotDiscard,
     CannotMarkFailed,
     CannotMarkReady,
@@ -67,6 +68,7 @@ DOMAIN_ERROR_STATUS = {
     CannotMarkFailed: status.HTTP_409_CONFLICT,
     CannotRedo: status.HTTP_409_CONFLICT,
     CannotApply: status.HTTP_409_CONFLICT,
+    CannotChangeGroupLinks: status.HTTP_409_CONFLICT,
     CannotRemove: status.HTTP_409_CONFLICT,
     CannotDiscard: status.HTTP_409_CONFLICT,
     ConcurrentModification: status.HTTP_409_CONFLICT,

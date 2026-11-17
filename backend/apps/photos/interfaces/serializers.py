@@ -28,6 +28,25 @@ class RedoPhotoSerializer(serializers.Serializer):
     crop = serializers.JSONField(required=False, allow_null=True)
 
 
+class GroupPhotoApplySerializer(serializers.Serializer):
+    """The optional product selection of a group photo's first apply."""
+
+    product_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=True,
+        required=False,
+    )
+
+
+class GroupPhotoLinksSerializer(serializers.Serializer):
+    """The full product selection a group photo should be linked to."""
+
+    product_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=True,
+    )
+
+
 class PhotoResultMediaSerializer(serializers.Serializer):
     """The public Media a ready submission produced, with its derived renditions."""
 
@@ -61,6 +80,7 @@ class PhotoSubmissionSerializer(serializers.Serializer):
     failure_message = serializers.CharField(source="submission.failure_message")
     preview_url = serializers.SerializerMethodField()
     result = serializers.SerializerMethodField()
+    linked_product_ids = serializers.ListField(child=serializers.IntegerField(), read_only=True)
     pipeline_version = serializers.CharField(source="submission.pipeline_version")
     attempts = serializers.IntegerField(source="submission.attempts")
     version = serializers.IntegerField(source="submission.version")

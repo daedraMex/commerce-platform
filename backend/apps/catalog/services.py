@@ -162,6 +162,10 @@ class CatalogRepository(Protocol):
         """Return the product's link to that media, active or retired, if any."""
         ...
 
+    def product_images_for_media(self, store_id: int, media_id: int) -> list[ProductImageRecord]:
+        """Return the store's links to that media, active or retired."""
+        ...
+
     def active_main_image(self, product_id: int) -> ProductImageRecord | None:
         """Return the product's one active main image, if any."""
         ...
@@ -220,6 +224,12 @@ class CatalogService:
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         """Return a media of the store, or None when another store owns it."""
         return self._repository.media_by_id(store.id, media_id)
+
+    def product_images_for_media(
+        self, store: StoreReference, media_id: int
+    ) -> list[ProductImageRecord]:
+        """Return the store's product links to one media, active or retired."""
+        return self._repository.product_images_for_media(store.id, media_id)
 
     def create_product_image(
         self,
