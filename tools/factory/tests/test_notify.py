@@ -112,6 +112,12 @@ def test_stuck_message_shows_log_path_not_content():
     assert "Traceback (most recent call last)" not in msg
 
 
+def test_stuck_message_omits_worktree_and_handoff_when_there_is_none():
+    msg = build_stuck_message(_stuck(worktree=None, handoff_command=None))
+    assert "Worktree" not in msg
+    assert "Enter:" not in msg
+
+
 def test_stuck_message_includes_handoff_command():
     msg = build_stuck_message(_stuck())
     assert "/home/factory/factory/worktrees/nf/7-add-widget" in msg

@@ -788,3 +788,27 @@ def test_merge_main_raises_when_the_abort_fails():
         Git(run=run, bot_user_id="353808367").merge_main(
             Path("/srv/factory/worktrees/nf-7-ticket-7")
         )
+
+
+def test_remote_branch_exists_asks_ls_remote_with_the_token_scoped_to_the_push():
+    run = RecordingRun(CommandResult(0, "abc123\trefs/heads/nf/7-x\n", ""))
+
+    assert Git(run=run).remote_branch_exists(Path("/srv/factory/repo"), "nf/7-x", "TOKEN") is True
+    argv, _cwd, env, _replace = run.calls[0]
+    assert argv[3:] == ["ls-remote", "--heads", "origin", "refs/heads/nf/7-x"]
+    assert env == {"FACTORY_GIT_TOKEN": "TOKEN"}
+
+
+def test_remote_branch_exists_is_false_when_ls_remote_lists_nothing():
+    run = RecordingRun(CommandResult(0, "", ""))
+
+    assert Git(run=run).remote_branch_exists(Path("/srv/factory/repo"), "nf/7-x", "TOKEN") is False
+
+
+def test_remote_branch_exists_raises_when_ls_remote_fails():
+    run = RecordingRun(CommandResult(128, "", "fatal: could not read from remote"))
+
+    with pytest.raises(
+        RuntimeError, match="git ls-remote failed: fatal: could not read from remote"
+    ):
+        Git(run=run).remote_branch_exists(Path("/srv/factory/repo"), "nf/7-x", "TOKEN")

@@ -28,6 +28,9 @@ COMMAND_BODY = "Read .agents/skills/implement/SKILL.md and follow it.\n\n$ARGUME
 DECISIONS_DOC = "# Summary\nBuilt the thing.\n\n# Decisions\n\n- Chose A.\n"
 
 
+DEFAULT_DIFF = DiffStats(files=(FileChange(path="backend/apps/x/views.py", added=3, deleted=1),))
+
+
 class FakeGit:
     def __init__(
         self,
@@ -41,16 +44,21 @@ class FakeGit:
         fetch_error=None,
         preflight_check_passed=True,
         merge_conflict=False,
+        commit_changed=True,
+        remote_branches=(),
     ):
         self.check_result = check_passed
         self.check_output = check_output
         self.failed_areas = failed_areas
         self.decisions = decisions
-        self.diff = diff or DiffStats()
+        self.diff = diff if diff is not None else DEFAULT_DIFF
         self.command_body = command_body
         self.fetch_error = fetch_error
         self.preflight_check_passed = preflight_check_passed
         self.merge_conflict = merge_conflict
+        self.commit_changed = commit_changed
+        self.remote_branches = set(remote_branches)
+        self.remote_checks = []
         self.merged = []
         self.committed = []
         self.pushed = []
@@ -141,7 +149,7 @@ class FakeGit:
 
     def commit_all(self, worktree, message):
         self.committed.append(message)
-        return True
+        return self.commit_changed
 
     def diff_stats(self, worktree):
         return self.diff
@@ -152,6 +160,10 @@ class FakeGit:
 
     def head_sha(self, worktree):
         return self.head_sha_value
+
+    def remote_branch_exists(self, repo_dir, branch, token):
+        self.remote_checks.append((branch, token))
+        return branch in self.remote_branches
 
     def push(self, worktree, branch, token):
         self.pushed.append((branch, token))
@@ -170,6 +182,8 @@ class FakeGitHub:
         auto_merge_stderr="",
         review_fixes=None,
         review_fixes_error=None,
+        pr_error=None,
+        open_pr_branches=(),
     ):
         self.tickets = tickets or []
         self.pr_number = pr_number
@@ -181,6 +195,9 @@ class FakeGitHub:
         self.auto_merge_stderr = auto_merge_stderr
         self.review_fixes = review_fixes or []
         self.review_fixes_error = review_fixes_error
+        self.pr_error = pr_error
+        self.open_pr_branches = set(open_pr_branches)
+        self.open_pr_checks = []
         self.created_prs = []
         self.ready_prs = []
         self.auto_merges = []
@@ -218,8 +235,14 @@ class FakeGitHub:
         return self.open_factory_prs
 
     def create_draft_pr(self, *, branch, title, body, token):
+        if self.pr_error is not None:
+            raise self.pr_error
         self.created_prs.append((branch, title, body, token))
         return self.pr_number
+
+    def has_open_pr_for_branch(self, branch, token):
+        self.open_pr_checks.append((branch, token))
+        return branch in self.open_pr_branches
 
     def mark_pr_ready(self, number, token):
         self.ready_prs.append((number, token))
@@ -1496,3 +1519,133 @@ def test_review_fix_on_a_branch_that_conflicts_with_main_goes_stuck_without_the_
         "branch conflicts with main; a human must merge main"
     )
     assert github.issue_labels == [(7, "needs-decision", "TOKEN")]
+
+
+ORPHAN_CHECK = "remote branch nf/7-ticket-7 has no open PR"
+
+
+def test_pr_creation_failure_after_push_goes_stuck_and_names_the_orphan_branch(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        tickets=[make_ticket(7, labels={"ready-for-agent"})],
+        pr_error=GitHubError("gh pr create failed: HTTP 422"),
+    )
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+    assert github.ready_prs == []
+    assert github.issue_labels[0][1] == "needs-decision"
+    assert ORPHAN_CHECK in github.comments[0][1]
+    assert "delete it by hand" in github.comments[0][1]
+
+
+def test_remote_branch_without_a_pr_goes_stuck_before_any_worktree_is_created(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, remote_branches={"nf/7-ticket-7"})
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.remote_checks == [("nf/7-ticket-7", "TOKEN")]
+    assert github.open_pr_checks == [("nf/7-ticket-7", "TOKEN")]
+    assert not [w for w in git.worktrees if w[0] == "nf/7-ticket-7"]
+    assert git.pushed == []
+    assert github.created_prs == []
+    assert ORPHAN_CHECK in github.comments[0][1]
+
+
+def test_orphan_branch_stuck_before_worktree_has_no_handoff_to_a_missing_worktree(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, remote_branches={"nf/7-ticket-7"})
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    factory.run()
+
+    assert len(notifier.stuck) == 1
+    assert notifier.stuck[0].worktree is None
+    assert notifier.stuck[0].handoff_command is None
+
+
+def test_nothing_to_commit_goes_stuck_without_push_or_pr(tmp_path):
+    # Sin commit del agente tampoco hay diff contra origin/main: manda el diff vacío.
+    git = FakeGit(
+        check_passed=True, decisions=DECISIONS_DOC, commit_changed=False, diff=DiffStats()
+    )
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == []
+    assert github.created_prs == []
+    assert "no changes made for the ticket" in github.comments[0][1]
+
+
+def test_empty_diff_against_main_goes_stuck_without_push_or_pr(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, diff=DiffStats())
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == []
+    assert github.created_prs == []
+    assert "no changes made for the ticket" in github.comments[0][1]
+
+
+def test_log_gets_one_header_per_step_and_a_new_run_starts_a_fresh_file(tmp_path):
+    settings = make_settings(tmp_path)
+    settings.logs_dir.mkdir(parents=True, exist_ok=True)
+    (settings.logs_dir / "7.log").write_text("OUTPUT OF AN OLDER RUN\n")
+    git = FakeGit(check_passed=False, decisions="- Tried X.")
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=RecordingNotifier(),
+        settings=settings,
+    )
+
+    factory.run()
+
+    log = (settings.logs_dir / "7.log").read_text()
+    assert "OUTPUT OF AN OLDER RUN" not in log
+    for step in range(1, settings.attempts + 1):
+        assert f"=== step {step} (model deepseek/deepseek-flash) ===" in log
+    assert log.count("=== step ") == settings.attempts
+
+
+def test_agent_committed_on_its_own_still_opens_the_pr(tmp_path):
+    # El agente hizo git commit por su cuenta: commit_all no tiene nada que
+    # commitear (False), pero el diff contra origin/main sí trae cambios.
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, commit_changed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert git.pushed != []
+    assert len(github.created_prs) == 1
+    assert "no changes made for the ticket" not in str(github.comments)
