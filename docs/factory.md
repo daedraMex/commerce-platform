@@ -602,7 +602,12 @@ unreachable" as before.
   times out or answers without a findings block is reported in the PR body
   ("read in full") and the PR still opens. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
-  `FACTORY_PRE_PR_REVIEW=0` turns it off.
+  `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#158): the agent's home
+  (`/home/factory-agent`) is still its own and is reused across runs, and
+  OpenCode reads from it at every start (`auth.json`, its local database, the
+  cached `rg`, `~/.gitconfig`). A builder could use it to blind the reviewer in
+  later runs; the reviewer is advisory, and the owner's approval, the
+  protected-path guard and the worktree fingerprint still gate every PR.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** each area check script that passed or was
   skipped and the agent steps used, under **Review** the pre-PR review's
