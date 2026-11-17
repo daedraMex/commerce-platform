@@ -63,6 +63,7 @@ def test_is_protected_path_covers_the_guarded_files_and_dirs():
         ".opencode/commands/implement.md",
         "AGENTS.md",
         "CLAUDE.md",
+        "REVIEW.md",
         ".pre-commit-config.yaml",
         "opencode.json",
         "opencode.factory.json",

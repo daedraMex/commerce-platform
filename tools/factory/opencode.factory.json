@@ -15,6 +15,7 @@
       "*.env.*": "deny",
       "AGENTS.md": "deny",
       "CLAUDE.md": "deny",
+      "REVIEW.md": "deny",
       "opencode.json": "deny",
       "opencode.factory.json": "deny",
       ".github/*": "deny",

@@ -26,10 +26,13 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Pin every GitHub Actions dependency to a commit SHA after verifying the tagged
   version exists.
 - Commit before /code-review, because it diffs `main...HEAD`.
+- Every pull request review, by an agent or with /code-review, applies REVIEW.md as read
+  from `main`.
 - Before rewording a phrase in the docs, search the whole repo for it and change
   every copy at once.
-- There is no typechecker in this repo: skip /implement's typechecking step and run
-  `./scripts/check.sh` instead.
+- The backend has no typechecker: for backend work, skip /implement's typechecking step
+  and run `backend/scripts/check.sh` instead. The console is typechecked by
+  `web/console/scripts/check.sh`.
 
 ## Stack
 - backend/: Python 3.12 managed with uv, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
