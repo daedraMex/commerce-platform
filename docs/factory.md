@@ -538,8 +538,9 @@ unreachable" as before.
   stops the ticket as stuck and notifies Telegram. Each ticket fetches
   `origin/main` itself before creating its worktree.
 - **Pull request body.** Besides the summary and decisions, every factory PR
-  lists under **Verification** each area check script that passed or was skipped and the agent
-  steps used, under **Risk** changed migrations and sensitive paths
+  lists under **Verification** each area check script that passed or was
+  skipped and the agent steps used, under **Risk** changed migrations and
+  sensitive paths
   (`SENSITIVE_PREFIXES` in `diff.py`), and under **How to revert** what undoing
   the merge takes.
 - **Areas.** Each ticket's changed files select its check areas: `backend/**`
