@@ -9,13 +9,19 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.photos.application.apply_photo import ApplyPhoto
+from apps.photos.application.change_group_photo_links import ChangeGroupPhotoLinks
 from apps.photos.application.discard_photo import DiscardPhoto
-from apps.photos.application.get_photo_submission import GetPhotoSubmission, PhotoSubmissionView
+from apps.photos.application.get_photo_submission import (
+    GetPhotoSubmission,
+    build_submission_view,
+)
 from apps.photos.application.redo_photo import RedoPhoto
 from apps.photos.application.remove_photo import RemovePhoto
 from apps.photos.application.retry_photo import RetryPhoto
 from apps.photos.application.upload_photo import UploadPhoto, UploadPhotoCommand
 from apps.photos.interfaces.serializers import (
+    GroupPhotoApplySerializer,
+    GroupPhotoLinksSerializer,
     PhotoSubmissionSerializer,
     RedoPhotoSerializer,
     UploadPhotoSerializer,
@@ -90,6 +96,7 @@ PHOTO_SUBMISSION_EXAMPLE = OpenApiExample(
             "width": 1200,
             "height": 1500,
         },
+        "linked_product_ids": [],
         "pipeline_version": "2026-11-11.2",
         "attempts": 1,
         "version": 4,
@@ -145,10 +152,15 @@ MANAGE_CATALOG_ERRORS = problem_response(
 
 
 def _submission_view(store, submission):
-    result_media = None
-    if submission.result_media_id is not None:
-        result_media = get_catalog_service().get_media(store, submission.result_media_id)
-    return PhotoSubmissionView(submission=submission, result_media=result_media)
+    return build_submission_view(get_catalog_service(), store, submission)
+
+
+def _group_product_ids(request):
+    if not request.data or "product_ids" not in request.data:
+        return None
+    serializer = GroupPhotoApplySerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data["product_ids"]
 
 
 def _idempotency_key(request):
@@ -317,12 +329,15 @@ def _action_body(request, submission):
 
 
 @extend_schema(
-    request=None,
+    request=GroupPhotoApplySerializer,
     parameters=[STORE_HEADER_PARAMETER],
     responses={
         200: OpenApiResponse(
             response=PhotoSubmissionSerializer,
-            description=("The applied submission, now appended to the product's carousel."),
+            description=(
+                "The applied submission, appended to the product's carousel or linked to "
+                "every selected product of a group photo."
+            ),
             examples=[PHOTO_SUBMISSION_EXAMPLE],
         ),
         **ACTION_ERRORS,
@@ -330,13 +345,13 @@ def _action_body(request, submission):
             409,
             (
                 "submission_cannot_apply",
-                "Only a ready individual photo can be applied.",
+                "Only a ready photo can be applied, and a group photo needs products.",
             ),
         ),
     },
 )
 class StaffPhotoApplyView(StoreScopedMixin, APIView):
-    """Append a ready individual photo to the product's carousel."""
+    """Append a ready individual photo or link a group photo to its selected products."""
 
     def post(self, request, pk, *args, **kwargs):
         submission = ApplyPhoto(
@@ -344,7 +359,58 @@ class StaffPhotoApplyView(StoreScopedMixin, APIView):
             catalog=get_catalog_service(),
             authorizer=get_authorizer(),
             unit_of_work=get_photo_unit_of_work(),
-        )(request.store, user_id=request.user.id, submission_id=pk)
+        )(
+            request.store,
+            user_id=request.user.id,
+            submission_id=pk,
+            product_ids=_group_product_ids(request),
+        )
+        return Response(_action_body(request, submission))
+
+
+@extend_schema(
+    request=GroupPhotoLinksSerializer,
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=PhotoSubmissionSerializer,
+            description=(
+                "The applied group photo with its new linked product ids; removed links are "
+                "deactivated and retained links keep their position."
+            ),
+            examples=[PHOTO_SUBMISSION_EXAMPLE],
+        ),
+        **ACTION_ERRORS,
+        **problem_response(
+            400,
+            ("validation_error", "Validation failed."),
+        ),
+        **problem_response(
+            409,
+            (
+                "submission_cannot_change_links",
+                "Only an applied group photo has a product selection to change.",
+            ),
+        ),
+    },
+)
+class StaffPhotoLinksView(StoreScopedMixin, APIView):
+    """Replace the products an applied group photo is linked to."""
+
+    def post(self, request, pk, *args, **kwargs):
+        serializer = GroupPhotoLinksSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        submission = ChangeGroupPhotoLinks(
+            repository=get_photo_submission_repository(),
+            catalog=get_catalog_service(),
+            authorizer=get_authorizer(),
+            unit_of_work=get_photo_unit_of_work(),
+        )(
+            request.store,
+            user_id=request.user.id,
+            submission_id=pk,
+            product_ids=serializer.validated_data["product_ids"],
+        )
         return Response(_action_body(request, submission))
 
 

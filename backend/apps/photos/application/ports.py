@@ -54,6 +54,12 @@ class PhotoCatalog(Protocol):
         """Return the media of ``store``, or None when another store owns it."""
         ...
 
+    def product_images_for_media(
+        self, store: StoreReference, media_id: int
+    ) -> list[ProductImageRecord]:
+        """Return the store's product links to one media, active or retired."""
+        ...
+
     def append_to_carousel(
         self,
         store: StoreReference,
@@ -103,6 +109,10 @@ class PhotoSubmissionRepository(Protocol):
 
     def get(self, store: StoreReference, submission_id: int) -> PhotoSubmission | None:
         """Return the submission of ``store``, or None when another store owns it."""
+        ...
+
+    def get_for_update(self, store: StoreReference, submission_id: int) -> PhotoSubmission | None:
+        """Return and lock the submission until the surrounding transaction ends."""
         ...
 
     def get_by_idempotency_key(

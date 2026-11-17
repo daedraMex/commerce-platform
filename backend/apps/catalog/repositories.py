@@ -146,6 +146,14 @@ class DjangoCatalogRepository:
         row = ProductMedia.objects.filter(product_id=product_id, media_id=media_id).first()
         return _image_record(row) if row is not None else None
 
+    def product_images_for_media(self, store_id: int, media_id: int) -> list[ProductImageRecord]:
+        rows = (
+            ProductMedia.objects.filter(media_id=media_id, product__store_id=store_id)
+            .select_related("product")
+            .order_by("product_id", "position", "pk")
+        )
+        return [_image_record(row) for row in rows]
+
     def active_main_image(self, product_id: int) -> ProductImageRecord | None:
         row = ProductMedia.objects.filter(
             product_id=product_id,

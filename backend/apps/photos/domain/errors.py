@@ -43,6 +43,10 @@ class CannotRemove(PhotoSubmissionError):
     code = "submission_cannot_remove"
 
 
+class CannotChangeGroupLinks(PhotoSubmissionError):
+    code = "submission_cannot_change_links"
+
+
 class CannotDiscard(PhotoSubmissionError):
     code = "submission_cannot_discard"
 

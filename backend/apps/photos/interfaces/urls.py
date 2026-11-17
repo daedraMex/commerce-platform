@@ -4,6 +4,7 @@ from apps.photos.interfaces.views import (
     StaffPhotoApplyView,
     StaffPhotoDetailView,
     StaffPhotoDiscardView,
+    StaffPhotoLinksView,
     StaffPhotoPreviewView,
     StaffPhotoRedoView,
     StaffPhotoRemoveView,
@@ -20,6 +21,7 @@ urlpatterns = [
         name="staff-photo-preview",
     ),
     path("photos/<int:pk>/apply/", StaffPhotoApplyView.as_view(), name="staff-photo-apply"),
+    path("photos/<int:pk>/links/", StaffPhotoLinksView.as_view(), name="staff-photo-links"),
     path("photos/<int:pk>/redo/", StaffPhotoRedoView.as_view(), name="staff-photo-redo"),
     path(
         "photos/<int:pk>/remove/",

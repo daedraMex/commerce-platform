@@ -74,6 +74,9 @@ class FakePhotoSubmissionRepository:
         row = self.rows.get(submission_id)
         return row if row is not None and row.store_id == store.id else None
 
+    def get_for_update(self, store: StoreReference, submission_id: int) -> PhotoSubmission | None:
+        return self.get(store, submission_id)
+
     def get_by_idempotency_key(
         self, store: StoreReference, created_by: int, key: str
     ) -> PhotoSubmission | None:
@@ -141,6 +144,18 @@ class FakeCatalog:
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         item = self.media.get(media_id)
         return item if item is not None and item.store_id == store.id else None
+
+    def product_images_for_media(
+        self, store: StoreReference, media_id: int
+    ) -> list[ProductImageRecord]:
+        return sorted(
+            (
+                image
+                for image in self.images.values()
+                if image.store_id == store.id and image.media_id == media_id
+            ),
+            key=lambda image: (image.product_id, image.position, image.id),
+        )
 
     def append_to_carousel(
         self,

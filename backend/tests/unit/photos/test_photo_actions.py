@@ -2,7 +2,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from apps.catalog.services import StoreMismatch
 from apps.photos.application.apply_photo import ApplyPhoto
+from apps.photos.application.change_group_photo_links import ChangeGroupPhotoLinks
 from apps.photos.application.discard_photo import DiscardPhoto
 from apps.photos.application.redo_photo import RedoPhoto
 from apps.photos.application.remove_photo import RemovePhoto
@@ -10,6 +12,7 @@ from apps.photos.application.retry_photo import RetryPhoto
 from apps.photos.domain.errors import (
     AttemptsExhausted,
     CannotApply,
+    CannotChangeGroupLinks,
     CannotDiscard,
     CannotRedo,
     CannotRemove,
@@ -32,6 +35,7 @@ from tests.unit.photos.fakes import (
     FakeProcessingQueue,
     FakeUnitOfWork,
     make_media,
+    make_product,
 )
 
 HOME = StoreReference(id=1, slug="home")
@@ -114,6 +118,15 @@ def apply_photo(repository, catalog, authorizer, unit_of_work):
 
 def remove_photo(repository, catalog, authorizer, unit_of_work):
     return RemovePhoto(
+        repository=repository,
+        catalog=catalog,
+        authorizer=authorizer,
+        unit_of_work=unit_of_work,
+    )
+
+
+def change_group_links(repository, catalog, authorizer, unit_of_work):
+    return ChangeGroupPhotoLinks(
         repository=repository,
         catalog=catalog,
         authorizer=authorizer,
@@ -500,3 +513,213 @@ def test_discard_refuses_an_already_discarded_submission(repository, uploader, a
 def test_discard_never_finds_another_stores_submission(repository, uploader, authorizer):
     with pytest.raises(NotFoundError):
         discard_photo(repository, uploader, authorizer)(ANIME, user_id=7, submission_id=1, now=NOW)
+
+
+def group_catalog(*product_ids):
+    return FakeCatalog(
+        products=[make_product(product_id) for product_id in product_ids],
+        media=[make_media()],
+    )
+
+
+def test_group_apply_authorizes_catalog_manage_in_the_store(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10, 11)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP)
+
+    apply_photo(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, product_ids=[10], now=NOW
+    )
+
+    assert authorizer.calls == [(7, HOME, MANAGE_CATALOG)]
+
+
+def test_group_apply_links_the_one_media_to_every_selected_product(
+    repository, authorizer, unit_of_work
+):
+    catalog = group_catalog(10, 11)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, result_media_id=30)
+
+    saved = apply_photo(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, product_ids=[11, 10], now=NOW
+    )
+
+    links = list(catalog.images.values())
+    assert {link.product_id for link in links} == {10, 11}
+    assert {link.media_id for link in links} == {30}
+    assert all(link.is_active for link in links)
+    assert saved.applied_at == NOW
+    assert saved.applied_by_id == 7
+    assert saved.result_media_id == 30
+    assert unit_of_work.committed == 1
+
+
+def test_group_apply_appends_a_gallery_image_when_the_product_has_a_cover(
+    repository, authorizer, unit_of_work
+):
+    catalog = group_catalog(10)
+    cover = catalog.append_to_carousel(HOME, product_id=10, media_id=40)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, result_media_id=30)
+
+    apply_photo(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, product_ids=[10], now=NOW
+    )
+
+    appended = next(link for link in catalog.images.values() if link.media_id == 30)
+    assert appended.role.value == "gallery"
+    assert appended.position == cover.position + 1
+    assert catalog.images[cover.id].role.value == "main"
+
+
+def test_group_apply_refuses_an_empty_selection(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10, 11)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP)
+
+    with pytest.raises(CannotApply):
+        apply_photo(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1, product_ids=[], now=NOW
+        )
+
+    assert catalog.images == {}
+    assert repository.rows[1].applied_at is None
+
+
+def test_group_apply_refuses_products_of_another_store(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP)
+
+    with pytest.raises(StoreMismatch):
+        apply_photo(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1, product_ids=[10, 99], now=NOW
+        )
+
+    assert catalog.images == {}
+    assert repository.rows[1].applied_at is None
+
+
+def test_group_apply_refuses_a_photo_that_is_not_ready(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10)
+    repository.rows[1] = make_submission(
+        kind=SubmissionKind.GROUP,
+        status=SubmissionStatus.FAILED,
+        result_media_id=None,
+    )
+
+    with pytest.raises(CannotApply):
+        apply_photo(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1, product_ids=[10], now=NOW
+        )
+
+    assert catalog.images == {}
+
+
+def test_group_links_change_authorizes_catalog_manage_in_the_store(repository, unit_of_work):
+    catalog = group_catalog(10, 11)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, applied_at=NOW, applied_by_id=7)
+    authorizer = FakeAuthorizer()
+
+    change_group_links(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, product_ids=[10]
+    )
+
+    assert authorizer.calls == [(7, HOME, MANAGE_CATALOG)]
+
+
+def test_group_links_add_remove_and_keep_retained_positions(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10, 11, 12)
+    catalog.append_to_carousel(HOME, product_id=10, media_id=40)
+    retained = catalog.append_to_carousel(HOME, product_id=10, media_id=30)
+    catalog.append_to_carousel(HOME, product_id=11, media_id=41)
+    removed = catalog.append_to_carousel(HOME, product_id=11, media_id=30)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, applied_at=NOW, applied_by_id=7)
+
+    change_group_links(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, product_ids=[10, 12]
+    )
+
+    assert catalog.images[retained.id].is_active is True
+    assert catalog.images[retained.id].position == retained.position
+    assert catalog.images[removed.id].is_active is False
+    assert catalog.images[removed.id].role.value == "gallery"
+    added = next(
+        link for link in catalog.images.values() if link.product_id == 12 and link.media_id == 30
+    )
+    assert added.is_active is True
+    assert added.role.value == "main"
+
+
+def test_group_links_reactivate_a_removed_product_without_a_duplicate(
+    repository, authorizer, unit_of_work
+):
+    catalog = group_catalog(10, 11)
+    catalog.append_to_carousel(HOME, product_id=11, media_id=41)
+    removed = catalog.append_to_carousel(HOME, product_id=11, media_id=30)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, applied_at=NOW, applied_by_id=7)
+    use_case = change_group_links(repository, catalog, authorizer, unit_of_work)
+    use_case(HOME, user_id=7, submission_id=1, product_ids=[10])
+
+    use_case(HOME, user_id=7, submission_id=1, product_ids=[10, 11])
+
+    restored = catalog.images[removed.id]
+    assert restored.id == removed.id
+    assert restored.is_active is True
+    assert (
+        len(
+            [
+                link
+                for link in catalog.images.values()
+                if link.product_id == 11 and link.media_id == 30
+            ]
+        )
+        == 1
+    )
+
+
+def test_group_links_can_remove_every_link(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10, 11)
+    first = catalog.append_to_carousel(HOME, product_id=10, media_id=30)
+    second = catalog.append_to_carousel(HOME, product_id=11, media_id=30)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, applied_at=NOW, applied_by_id=7)
+
+    change_group_links(repository, catalog, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1, product_ids=[]
+    )
+
+    assert catalog.images[first.id].is_active is False
+    assert catalog.images[second.id].is_active is False
+    assert len(catalog.images) == 2
+
+
+def test_group_links_refuse_a_submission_that_is_not_applied(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP)
+
+    with pytest.raises(CannotChangeGroupLinks):
+        change_group_links(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1, product_ids=[10]
+        )
+
+    assert catalog.images == {}
+
+
+def test_group_links_refuse_an_individual_photo(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10)
+    repository.rows[1] = make_submission(applied_at=NOW, applied_by_id=7)
+
+    with pytest.raises(CannotChangeGroupLinks):
+        change_group_links(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1, product_ids=[10]
+        )
+
+    assert catalog.images == {}
+
+
+def test_group_links_never_find_another_stores_submission(repository, authorizer, unit_of_work):
+    catalog = group_catalog(10)
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, applied_at=NOW, applied_by_id=7)
+
+    with pytest.raises(NotFoundError):
+        change_group_links(repository, catalog, authorizer, unit_of_work)(
+            ANIME, user_id=7, submission_id=1, product_ids=[10]
+        )
+
+    assert catalog.images == {}

@@ -1,8 +1,9 @@
+import threading
 from datetime import UTC, datetime
 
 import pytest
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import connection, transaction
 
 from apps.catalog.models import Category, Design, Media, Product, ProductMedia, Supplier
 from apps.catalog.repositories import DjangoCatalogRepository, DjangoMediaFiles
@@ -71,6 +72,22 @@ def make_ready_submission(store, user, product, media, *, key):
         created_by=user,
         kind=PhotoSubmission.Kind.RECTANGLE,
         target_product=product,
+        idempotency_key=key,
+        request_fingerprint="a" * 64,
+        status=PhotoSubmission.Status.READY,
+        result_media=media,
+        attempts=1,
+        pipeline_version="2026-11-11.2",
+        original_key=f"stores/{store.id}/photos/originals/{key}.jpg",
+        preview_key=f"stores/{store.id}/photos/previews/{key}.jpg",
+    )
+
+
+def make_group_submission(store, user, media, *, key="group"):
+    return PhotoSubmission.objects.create(
+        store=store,
+        created_by=user,
+        kind=PhotoSubmission.Kind.GROUP,
         idempotency_key=key,
         request_fingerprint="a" * 64,
         status=PhotoSubmission.Status.READY,
@@ -188,3 +205,54 @@ def test_remove_the_cover_promotes_the_next_and_reapplying_rejoins_at_the_end():
     assert ProductMedia.objects.filter(product=product).count() == 2
     assert Media.objects.filter(store=store).count() == 2
     assert PhotoSubmission.objects.filter(store=store).count() == 2
+
+
+@pytest.mark.django_db(transaction=True, serialized_rollback=True)
+def test_concurrent_group_applies_upsert_one_link_per_product():
+    store = make_store()
+    user = make_user()
+    first = make_product(store)
+    second_product = Product.objects.create(
+        store=store,
+        category=first.category,
+        design=first.design,
+        name="Second",
+        slug="second",
+        attributes={},
+    )
+    reference = StoreReference(id=store.id, slug=store.slug)
+    media = make_media(store, content_hash="group", storage_key="stores/1/media/group.jpg")
+    submission = make_group_submission(store, user, media, key="group-race")
+    product_ids = [first.pk, second_product.pk]
+    start = threading.Barrier(2)
+    errors = []
+
+    def link_group():
+        try:
+            start.wait(timeout=10)
+            apply_photo()(
+                reference,
+                user_id=user.id,
+                submission_id=submission.pk,
+                product_ids=product_ids,
+                now=NOW,
+            )
+        except Exception as error:  # pragma: no cover - reported through the assertion
+            errors.append(error)
+        finally:
+            connection.close()
+
+    threads = [threading.Thread(target=link_group) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+
+    assert errors == []
+    submission.refresh_from_db()
+    assert submission.applied_at == NOW
+    for product_id in product_ids:
+        links = ProductMedia.objects.filter(product_id=product_id, media=media)
+        assert links.count() == 1
+        assert links.get().is_active is True
+    assert Media.objects.filter(pk=media.pk).count() == 1
