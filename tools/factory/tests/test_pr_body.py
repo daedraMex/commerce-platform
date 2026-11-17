@@ -25,6 +25,7 @@ def _body(**overrides):
         model="deepseek/deepseek-flash",
         decisions="",
         checked_areas=(BACKEND,),
+        skipped_areas=(),
         diff=DiffStats(files=(FileChange("backend/apps/catalog/views.py", 3, 1),)),
         steps_used=2,
         step_budget=3,
@@ -43,7 +44,7 @@ def test_pr_body_lists_each_check_that_passed_and_the_steps_used():
 
 
 def test_pr_body_says_when_no_check_script_ran():
-    body = _body(checked_areas=())
+    body = _body(checked_areas=(), skipped_areas=(BACKEND,))
 
     assert "No area check script ran" in body
 
@@ -85,3 +86,10 @@ def test_pr_body_explains_how_to_revert():
     assert "Revert the merge commit" in plain
     assert "reverse migration" not in plain
     assert "reverse migration" in with_migrations
+
+
+def test_pr_body_lists_areas_whose_script_was_missing():
+    body = _body(checked_areas=(BACKEND,), skipped_areas=(CONSOLE,))
+
+    assert "- `backend/scripts/check.sh` passed" in body
+    assert "- `web/console/scripts/check.sh` skipped (script not found)" in body

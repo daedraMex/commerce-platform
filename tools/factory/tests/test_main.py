@@ -151,9 +151,9 @@ class FakeGit:
         self.committed.append(message)
         return self.commit_changed
 
-    def diff_stats(self, worktree, base="origin/main"):
-        if base != "origin/main":
-            self.diff_since.append((str(worktree), base))
+    def diff_stats(self, worktree, *, since=None):
+        if since is not None:
+            self.diff_since.append((str(worktree), since))
         return self.diff
 
     def head_sha(self, worktree):

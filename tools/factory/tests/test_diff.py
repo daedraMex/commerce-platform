@@ -88,6 +88,8 @@ def test_is_sensitive_path_covers_auth_permissions_and_settings():
         "backend/apps/accounts/views.py",
         "backend/apps/stores/authorizer.py",
         "backend/config/settings.py",
+        "backend/config/urls.py",
+        "backend/apps/shared/domain/ports.py",
         "web/console/src/lib/auth/session.ts",
     ]
     assert all(is_sensitive_path(path) for path in sensitive)

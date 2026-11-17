@@ -20,11 +20,13 @@ PROTECTED_FILES = frozenset(
 )
 
 # Paths whose changes the PR body flags under Risk so the owner reads them in full:
-# authentication, store permissions and credentials, settings, the console session.
+# authentication, store permissions and credentials, the shared ports (Authorizer,
+# CredentialStore), the project config and wiring, and the console session.
 SENSITIVE_PREFIXES = (
     "backend/apps/accounts/",
     "backend/apps/stores/",
-    "backend/config/settings.py",
+    "backend/apps/shared/",
+    "backend/config/",
     "web/console/src/lib/auth/",
 )
 

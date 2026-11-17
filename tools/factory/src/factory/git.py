@@ -59,6 +59,7 @@ class CheckResult:
     output: str
     failed_areas: tuple[Area, ...] = ()
     checked_areas: tuple[Area, ...] = ()
+    skipped_areas: tuple[Area, ...] = ()
 
 
 def port_in_use(port: int) -> bool:
@@ -380,11 +381,13 @@ class Git:
         chunks: list[str] = []
         failed: list[Area] = []
         checked: list[Area] = []
+        skipped: list[Area] = []
         for area in selected:
             script = worktree / area.script
             label = f"{area.name} ({area.script.as_posix()})"
             if not script.is_file():
                 chunks.append(f"=== {label}: skipped (script not found) ===")
+                skipped.append(area)
                 continue
             if area.port is not None and self._port_still_busy(area.port):
                 failed.append(area)
@@ -425,6 +428,7 @@ class Git:
             output=truncate_check_output("\n\n".join(chunks).strip()),
             failed_areas=tuple(failed),
             checked_areas=tuple(checked),
+            skipped_areas=tuple(skipped),
         )
 
     def head_sha(self, worktree: Path) -> str:
@@ -433,18 +437,21 @@ class Git:
             raise RuntimeError(f"could not read HEAD: {result.stderr.strip()}")
         return result.stdout.strip()
 
-    def diff_stats(self, worktree: Path, base: str = "origin/main") -> DiffStats:
-        """Changes on HEAD since its merge base with ``base``.
+    def diff_stats(self, worktree: Path, *, since: str | None = None) -> DiffStats:
+        """The changes a run made.
 
-        New tickets compare with ``origin/main``; review fixes pass the SHA the
-        fix started from, which is an ancestor of HEAD, so the three-dot range
-        is exactly the fix's own commits.
+        A new ticket compares HEAD with its merge base on ``origin/main``. A
+        review fix passes ``since``, the SHA right after the runner merged main,
+        and compares that tree with HEAD (two-dot). The agent may amend or reset
+        that merge commit, so ``since`` is not guaranteed to be an ancestor of
+        HEAD; a merge-base range would then count main's files as the agent's.
         """
+        revisions = ["origin/main...HEAD"] if since is None else [since, "HEAD"]
         numstat = self._run(
-            ["git", "diff", f"{base}...HEAD", "--numstat"], str(worktree), timeout=120
+            ["git", "diff", *revisions, "--numstat"], str(worktree), timeout=120
         ).stdout
         new_files = self._run(
-            ["git", "diff", f"{base}...HEAD", "--diff-filter=A", "--name-only"],
+            ["git", "diff", *revisions, "--diff-filter=A", "--name-only"],
             str(worktree),
             timeout=120,
         ).stdout.splitlines()

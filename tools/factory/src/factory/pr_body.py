@@ -18,6 +18,7 @@ def build_pr_body(
     model: str,
     decisions: str,
     checked_areas: tuple[Area, ...],
+    skipped_areas: tuple[Area, ...],
     diff: DiffStats,
     steps_used: int,
     step_budget: int,
@@ -33,16 +34,27 @@ def build_pr_body(
         parts += ["", f"Model: {model}"]
     if decisions.strip():
         parts += ["", "## Decisions", "", decisions.strip()]
-    parts += ["", "## Verification", "", *_verification(checked_areas, steps_used, step_budget)]
+    parts += [
+        "",
+        "## Verification",
+        "",
+        *_verification(checked_areas, skipped_areas, steps_used, step_budget),
+    ]
     parts += ["", "## Risk", "", *_risk(diff)]
     parts += ["", "## How to revert", "", *_revert(diff)]
     return "\n".join(parts) + "\n"
 
 
-def _verification(checked_areas: tuple[Area, ...], steps_used: int, step_budget: int) -> list[str]:
+def _verification(
+    checked_areas: tuple[Area, ...],
+    skipped_areas: tuple[Area, ...],
+    steps_used: int,
+    step_budget: int,
+) -> list[str]:
     lines = [f"- `{area.script.as_posix()}` passed" for area in checked_areas]
     if not lines:
-        lines = ["- No area check script ran (no script found for the changed files)."]
+        lines = ["- No area check script ran."]
+    lines += [f"- `{area.script.as_posix()}` skipped (script not found)" for area in skipped_areas]
     return [*lines, f"- Agent steps: {steps_used} of {step_budget}"]
 
 

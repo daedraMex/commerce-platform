@@ -354,6 +354,7 @@ class Factory:
                     log_path=log_path,
                     attempts=made,
                     checked_areas=check.checked_areas,
+                    skipped_areas=check.skipped_areas,
                 )
             feedback = check.output
             failed_areas = check.failed_areas
@@ -512,7 +513,7 @@ class Factory:
                 failing_check="no changes made for the review",
                 attempts=attempts,
             )
-        diff = self.git.diff_stats(worktree, base=base_sha)
+        diff = self.git.diff_stats(worktree, since=base_sha)
         if touches_protected_paths(f.path for f in diff.files):
             return self._stuck(
                 ticket,
@@ -556,6 +557,7 @@ class Factory:
         log_path: Path,
         attempts: int,
         checked_areas: tuple[Area, ...] = (),
+        skipped_areas: tuple[Area, ...] = (),
     ) -> TicketResult:
         # El valor de commit_all no decide nada: el agente pudo haber commiteado
         # por su cuenta (commit_all da False y el trabajo ya está en la rama).
@@ -593,6 +595,7 @@ class Factory:
             model=model,
             decisions=extract_decisions(decisions),
             checked_areas=checked_areas,
+            skipped_areas=skipped_areas,
             diff=diff,
             steps_used=attempts,
             step_budget=self.settings.attempts,

@@ -538,7 +538,7 @@ unreachable" as before.
   stops the ticket as stuck and notifies Telegram. Each ticket fetches
   `origin/main` itself before creating its worktree.
 - **Pull request body.** Besides the summary and decisions, every factory PR
-  lists under **Verification** each area check script that passed and the agent
+  lists under **Verification** each area check script that passed or was skipped and the agent
   steps used, under **Risk** changed migrations and sensitive paths
   (`SENSITIVE_PREFIXES` in `diff.py`), and under **How to revert** what undoing
   the merge takes.
@@ -693,7 +693,9 @@ branch even on failure.
 Any failed step sends `preflight failed: <step>: <short error>` to Telegram
 (truncated, with no environment values or secrets) and exits non-zero without
 touching a ticket. The hourly run performs the same preflight before selecting
-any ticket.
+any ticket. The ticket then fetches `origin/main` again for its own worktree, so
+its base can be newer than the `main` the preflight checked; a fetch failure at
+that point counts as a failed attempt toward the daily cap.
 
 ## Run once by hand
 
