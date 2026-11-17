@@ -109,6 +109,27 @@ def test_pr_activity_never_a_draft_is_ready_when_created():
     assert pr_activity.is_open is True
 
 
+def test_pr_activity_back_to_draft_keeps_its_first_ready_time():
+    pr = {
+        "number": 7,
+        "title": "t",
+        "created_at": iso(at(50)),
+        "merged_at": None,
+        "state": "open",
+        "draft": True,
+    }
+    timeline = [
+        {"event": "ready_for_review", "created_at": iso(at(40))},
+        {"event": "convert_to_draft", "created_at": iso(at(10))},
+    ]
+
+    pr_activity = pr_activity_from_rest(
+        pr, timeline=timeline, reviews=[], comments=[], owner=OWNER, bot=BOT
+    )
+
+    assert pr_activity.ready_at == at(40)
+
+
 def test_pr_activity_still_a_draft_has_no_ready_time():
     pr = {
         "number": 7,
@@ -237,6 +258,21 @@ def test_a_pr_still_waiting_counts_with_its_oldest_wait():
 
     assert window.still_waiting == 2
     assert window.oldest_wait_hours == pytest.approx(64)
+
+
+def test_oldest_wait_starts_at_the_first_unanswered_fix():
+    prs = [
+        activity(
+            1,
+            created=at(100),
+            reviews=[review("CHANGES_REQUESTED", 90)],
+            addressed=[at(48), at(24)],
+        ),
+    ]
+
+    window = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=7)
+
+    assert window.oldest_wait_hours == pytest.approx(48)
 
 
 def test_a_review_on_a_draft_never_makes_a_negative_wait():
@@ -391,6 +427,35 @@ def test_github_adapter_collects_factory_prs_with_rest_only():
     assert data.stuck_at == [at(3)]
     assert data.revert_merges == [at(4)]
     assert all(argv[:2] == ["gh", "api"] for argv in run.calls)
+
+
+def test_github_adapter_keeps_open_factory_prs_with_no_recent_activity():
+    repo = "o/r"
+    run = FakeRun(
+        {
+            f"repos/{repo}/pulls?state=all": [
+                {
+                    "number": 9,
+                    "title": "#3: t",
+                    "created_at": iso(at(24 * 31)),
+                    "updated_at": iso(at(24 * 30)),
+                    "merged_at": None,
+                    "state": "open",
+                    "draft": False,
+                    "user": {"login": "xolo-bot[bot]"},
+                    "head": {"ref": "nf/3-t"},
+                },
+            ],
+        }
+    )
+    github = MetricsGitHub(repo, owner=OWNER, bot=BOT, run=run)
+
+    data = github.collect(since=NOW - timedelta(days=28), token="TOKEN")
+    window = compute_window(data.prs, stuck_at=[], reverts=0, now=NOW, days=7)
+
+    assert [pr.number for pr in data.prs] == [9]
+    assert window.still_waiting == 1
+    assert window.oldest_wait_hours == pytest.approx(24 * 31)
 
 
 def test_github_adapter_raises_when_gh_fails():

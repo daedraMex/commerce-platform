@@ -136,10 +136,12 @@ def pr_activity_from_rest(
         and str(item.get("body", "")).startswith(ADDRESSED_PREFIX)
         and (moment := _timestamp(item.get("created_at"))) is not None
     )
-    if pr.get("draft"):
+    if ready_events:
+        ready_at = ready_events[0]
+    elif pr.get("draft"):
         ready_at = None
     else:
-        ready_at = ready_events[0] if ready_events else created_at
+        ready_at = created_at
     return PrActivity(
         number=int(pr["number"]),
         title=str(pr.get("title", "")),
@@ -199,7 +201,7 @@ def _waiting_since(pr: PrActivity) -> datetime | None:
         return None
     if _first_review_after(pr, pr.ready_at) is None:
         return pr.ready_at
-    for addressed in reversed(pr.addressed_at):
+    for addressed in pr.addressed_at:
         if _first_review_after(pr, addressed) is None:
             return addressed
     return None
@@ -333,13 +335,17 @@ class MetricsGitHub:
     def collect(self, *, since: datetime, token: str | None) -> CollectedData:
         pulls = self._get(f"repos/{self.repo}/pulls?state=all&sort=updated&direction=desc", token)
         # Updated, not created, since the window: a PR opened earlier can still be
-        # reviewed, fixed or merged inside it.
+        # reviewed, fixed or merged inside it. Open PRs are kept whatever their age,
+        # because the longest wait is the one with no activity.
         factory_prs = [
             pr
             for pr in pulls
             if _same_login(_login(pr), self.bot)
             and str((pr.get("head") or {}).get("ref", "")).startswith(FACTORY_BRANCH_PREFIX)
-            and (_timestamp(pr.get("updated_at")) or _timestamp(pr.get("created_at"))) >= since
+            and (
+                pr.get("state") == "open"
+                or (_timestamp(pr.get("updated_at")) or _timestamp(pr.get("created_at"))) >= since
+            )
         ]
         prs = [
             pr_activity_from_rest(
