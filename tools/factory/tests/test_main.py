@@ -1375,6 +1375,41 @@ def test_review_fix_protected_path_goes_stuck_without_push(tmp_path):
     assert notifier.stuck[0].failing_check == "protected path changed"
 
 
+def test_review_fix_already_committed_by_the_agent_is_pushed_not_stuck(tmp_path):
+    # The agent ran `git commit` itself: commit_all has nothing left (False),
+    # but the diff since the fix's base carries its work (#137).
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, commit_changed=False)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+    assert notifier.stuck == []
+    assert github.comments[0][1].startswith("Addressed the review in ")
+
+
+def test_review_fix_with_no_diff_since_its_base_goes_stuck_without_push(tmp_path):
+    git = FakeGit(
+        check_passed=True, decisions=DECISIONS_DOC, commit_changed=False, diff=DiffStats()
+    )
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == []
+    assert notifier.stuck[0].failing_check == "no changes made for the review"
+
+
 def test_review_fix_listing_failure_is_skipped_and_a_ticket_still_runs(tmp_path, capsys):
     git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
     github = FakeGitHub(
@@ -1672,7 +1707,7 @@ def test_orphan_branch_stuck_before_worktree_has_no_handoff_to_a_missing_worktre
 
 
 def test_nothing_to_commit_goes_stuck_without_push_or_pr(tmp_path):
-    # Sin commit del agente tampoco hay diff contra origin/main: manda el diff vacío.
+    # No agent commit and no diff against origin/main: the fake returns an empty diff.
     git = FakeGit(
         check_passed=True, decisions=DECISIONS_DOC, commit_changed=False, diff=DiffStats()
     )
@@ -1729,8 +1764,8 @@ def test_log_gets_one_header_per_step_and_a_new_run_starts_a_fresh_file(tmp_path
 
 
 def test_agent_committed_on_its_own_still_opens_the_pr(tmp_path):
-    # El agente hizo git commit por su cuenta: commit_all no tiene nada que
-    # commitear (False), pero el diff contra origin/main sí trae cambios.
+    # The agent ran `git commit` itself: commit_all has nothing left to commit
+    # (False), but the diff against origin/main carries its changes.
     git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, commit_changed=False)
     github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
     factory = build_factory(
