@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from .areas import Area
 from .cleanup import cleanup_old
 from .config import Settings
 from .credentials import GithubAppTokenProvider, TokenProvider
@@ -276,6 +277,8 @@ class Factory:
                 attempts=0,
             )
         self._remove_stale_ticket_worktree(worktree, branch)
+        # Each ticket fetches its own base; it must not depend on the preflight's fetch.
+        self.git.fetch_main(self.settings.repo_dir)
         worktree = self.git.create_worktree(self.settings.repo_dir, worktree, branch)
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
@@ -350,6 +353,7 @@ class Factory:
                     decisions=decisions,
                     log_path=log_path,
                     attempts=made,
+                    checked_areas=check.checked_areas,
                 )
             feedback = check.output
             failed_areas = check.failed_areas
@@ -508,7 +512,7 @@ class Factory:
                 failing_check="no changes made for the review",
                 attempts=attempts,
             )
-        diff = self.git.diff_stats_since(worktree, base_sha)
+        diff = self.git.diff_stats(worktree, base=base_sha)
         if touches_protected_paths(f.path for f in diff.files):
             return self._stuck(
                 ticket,
@@ -551,6 +555,7 @@ class Factory:
         decisions: str,
         log_path: Path,
         attempts: int,
+        checked_areas: tuple[Area, ...] = (),
     ) -> TicketResult:
         # El valor de commit_all no decide nada: el agente pudo haber commiteado
         # por su cuenta (commit_all da False y el trabajo ya está en la rama).
@@ -587,6 +592,10 @@ class Factory:
             summary=summary,
             model=model,
             decisions=extract_decisions(decisions),
+            checked_areas=checked_areas,
+            diff=diff,
+            steps_used=attempts,
+            step_budget=self.settings.attempts,
         )
         try:
             pr_number = self.github.create_draft_pr(

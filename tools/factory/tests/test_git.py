@@ -386,6 +386,7 @@ def test_check_runs_every_selected_area_in_labeled_output(tmp_path):
 
     assert result.passed is True
     assert result.failed_areas == ()
+    assert result.checked_areas == AREAS
     assert len(run.calls) == 2
     assert "=== backend (backend/scripts/check.sh) ===" in result.output
     assert "=== console (web/console/scripts/check.sh) ===" in result.output
@@ -420,6 +421,7 @@ def test_check_skips_an_area_whose_script_is_absent(tmp_path):
 
     assert result.passed is True
     assert result.failed_areas == ()
+    assert result.checked_areas == ()
     assert run.calls == []
     assert "backend" in result.output
     assert "skipped" in result.output
@@ -714,25 +716,48 @@ def test_head_sha_raises_when_rev_parse_fails():
         Git(run=run).head_sha(Path("/work"))
 
 
-def test_diff_stats_since_uses_the_given_base():
+def test_diff_stats_defaults_to_origin_main():
+    results = [
+        CommandResult(0, "2\t1\tbackend/apps/x/views.py\n", ""),
+        CommandResult(0, "", ""),
+    ]
+    run = SequenceRun(results)
+
+    Git(run=run).diff_stats(Path("/work"))
+
+    assert run.calls[0][0] == ["git", "diff", "origin/main...HEAD", "--numstat"]
+    assert run.calls[1][0] == [
+        "git",
+        "diff",
+        "origin/main...HEAD",
+        "--diff-filter=A",
+        "--name-only",
+    ]
+
+
+def test_diff_stats_uses_the_given_base():
     results = [
         CommandResult(0, "2\t1\tbackend/apps/x/views.py\n", ""),
         CommandResult(0, "backend/tests/test_x.py\n", ""),
     ]
     run = SequenceRun(results)
 
-    stats = Git(run=run).diff_stats_since(Path("/work"), "base123")
+    stats = Git(run=run).diff_stats(Path("/work"), base="base123")
 
     assert stats.files[0].path == "backend/apps/x/views.py"
     assert stats.new_tests == ("backend/tests/test_x.py",)
-    assert run.calls[0][0] == ["git", "diff", "base123..HEAD", "--numstat"]
+    assert run.calls[0][0] == ["git", "diff", "base123...HEAD", "--numstat"]
     assert run.calls[1][0] == [
         "git",
         "diff",
-        "base123..HEAD",
+        "base123...HEAD",
         "--diff-filter=A",
         "--name-only",
     ]
+
+
+def test_git_has_a_single_diff_stats_method():
+    assert not hasattr(Git, "diff_stats_since")
 
 
 def test_merge_main_merges_origin_main_with_the_bot_identity_and_no_hooks():

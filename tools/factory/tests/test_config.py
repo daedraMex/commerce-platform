@@ -20,6 +20,16 @@ def test_from_env_reads_models_and_defaults(monkeypatch):
     assert settings.max_tickets == 1
 
 
+def test_from_env_defaults_the_step_budget_to_three():
+    settings = Settings.from_env(
+        {
+            "FACTORY_MODEL": "deepseek/deepseek-flash",
+            "FACTORY_STRONG_MODEL": "deepseek/deepseek-v4-pro",
+        }
+    )
+    assert settings.attempts == 3
+
+
 def test_from_env_missing_default_model_fails_clearly():
     with pytest.raises(FactoryConfigError, match="FACTORY_MODEL"):
         Settings.from_env({"FACTORY_STRONG_MODEL": "deepseek/deepseek-v4-pro"})

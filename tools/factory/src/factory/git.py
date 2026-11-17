@@ -58,6 +58,7 @@ class CheckResult:
     passed: bool
     output: str
     failed_areas: tuple[Area, ...] = ()
+    checked_areas: tuple[Area, ...] = ()
 
 
 def port_in_use(port: int) -> bool:
@@ -378,6 +379,7 @@ class Git:
         selected = select_areas(self.changed_files(worktree)) if areas is None else areas
         chunks: list[str] = []
         failed: list[Area] = []
+        checked: list[Area] = []
         for area in selected:
             script = worktree / area.script
             label = f"{area.name} ({area.script.as_posix()})"
@@ -394,6 +396,7 @@ class Git:
                 agent_home=self._agent_home,
                 area=area,
             )
+            checked.append(area)
             argv = [str(script)]
             if self._agent_user:
                 argv = sudo_argv(self._agent_user, argv, env)
@@ -421,6 +424,7 @@ class Git:
             passed=not failed,
             output=truncate_check_output("\n\n".join(chunks).strip()),
             failed_areas=tuple(failed),
+            checked_areas=tuple(checked),
         )
 
     def head_sha(self, worktree: Path) -> str:
@@ -429,23 +433,18 @@ class Git:
             raise RuntimeError(f"could not read HEAD: {result.stderr.strip()}")
         return result.stdout.strip()
 
-    def diff_stats(self, worktree: Path) -> DiffStats:
-        numstat = self._run(
-            ["git", "diff", "origin/main...HEAD", "--numstat"], str(worktree), timeout=120
-        ).stdout
-        new_files = self._run(
-            ["git", "diff", "origin/main...HEAD", "--diff-filter=A", "--name-only"],
-            str(worktree),
-            timeout=120,
-        ).stdout.splitlines()
-        return build_diff_stats(numstat, new_files)
+    def diff_stats(self, worktree: Path, base: str = "origin/main") -> DiffStats:
+        """Changes on HEAD since its merge base with ``base``.
 
-    def diff_stats_since(self, worktree: Path, base: str) -> DiffStats:
+        New tickets compare with ``origin/main``; review fixes pass the SHA the
+        fix started from, which is an ancestor of HEAD, so the three-dot range
+        is exactly the fix's own commits.
+        """
         numstat = self._run(
-            ["git", "diff", f"{base}..HEAD", "--numstat"], str(worktree), timeout=120
+            ["git", "diff", f"{base}...HEAD", "--numstat"], str(worktree), timeout=120
         ).stdout
         new_files = self._run(
-            ["git", "diff", f"{base}..HEAD", "--diff-filter=A", "--name-only"],
+            ["git", "diff", f"{base}...HEAD", "--diff-filter=A", "--name-only"],
             str(worktree),
             timeout=120,
         ).stdout.splitlines()

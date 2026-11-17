@@ -320,7 +320,7 @@ Run these once, as the admin user unless a step says `factory`.
     FACTORY_STATE_DIR=/home/factory/state        # pause marker + append-only attempts ledger
     # other optional overrides:
     # FACTORY_MAX_TICKETS=1
-    # FACTORY_ATTEMPTS=5              # max agent steps per ticket
+    # FACTORY_ATTEMPTS=3              # max agent steps per ticket
     # FACTORY_TIME_LIMIT_MINUTES=120  # max wall-clock per ticket
     # FACTORY_REPO=daedraMex/commerce-platform
     # FACTORY_REPO_DIR=/srv/factory/repo
@@ -533,9 +533,15 @@ unreachable" as before.
   for the provider key, issue a new Telegram token and update `secrets.env`, or
   regenerate the xolo-bot key and replace `xolo-bot.pem`, then restart the
   timer. Deleting the log line is not enough.
-- **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`) and
-  a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either stops the
-  ticket as stuck and notifies Telegram.
+- **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`,
+  default 3) and a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either
+  stops the ticket as stuck and notifies Telegram. Each ticket fetches
+  `origin/main` itself before creating its worktree.
+- **Pull request body.** Besides the summary and decisions, every factory PR
+  lists under **Verification** each area check script that passed and the agent
+  steps used, under **Risk** changed migrations and sensitive paths
+  (`SENSITIVE_PREFIXES` in `diff.py`), and under **How to revert** what undoing
+  the merge takes.
 - **Areas.** Each ticket's changed files select its check areas: `backend/**`
   runs `backend/scripts/check.sh`, and `web/console/**` or `packages/**` runs
   `web/console/scripts/check.sh` (so a backend ticket that refreshes
