@@ -35,15 +35,18 @@ def activity(
     reviews=(),
     addressed=(),
     title="#1: ticket",
+    is_open=None,
+    draft=False,
 ):
     return PrActivity(
         number=number,
         title=title,
         created_at=created,
-        ready_at=ready or created,
+        ready_at=None if draft else (ready or created),
         merged_at=merged,
         owner_reviews=tuple(reviews),
         addressed_at=tuple(addressed),
+        is_open=(merged is None) if is_open is None else is_open,
     )
 
 
@@ -88,7 +91,14 @@ def test_pr_activity_takes_ready_time_from_the_timeline_and_only_owner_reviews()
 
 
 def test_pr_activity_never_a_draft_is_ready_when_created():
-    pr = {"number": 7, "title": "t", "created_at": iso(at(5)), "merged_at": None}
+    pr = {
+        "number": 7,
+        "title": "t",
+        "created_at": iso(at(5)),
+        "merged_at": None,
+        "state": "open",
+        "draft": False,
+    }
 
     pr_activity = pr_activity_from_rest(
         pr, timeline=[], reviews=[], comments=[], owner=OWNER, bot=BOT
@@ -96,6 +106,24 @@ def test_pr_activity_never_a_draft_is_ready_when_created():
 
     assert pr_activity.ready_at == at(5)
     assert pr_activity.merged_at is None
+    assert pr_activity.is_open is True
+
+
+def test_pr_activity_still_a_draft_has_no_ready_time():
+    pr = {
+        "number": 7,
+        "title": "t",
+        "created_at": iso(at(5)),
+        "merged_at": None,
+        "state": "open",
+        "draft": True,
+    }
+
+    pr_activity = pr_activity_from_rest(
+        pr, timeline=[], reviews=[], comments=[], owner=OWNER, bot=BOT
+    )
+
+    assert pr_activity.ready_at is None
 
 
 # --- computing one window ---------------------------------------------------
@@ -107,13 +135,13 @@ def review(state, hours_ago):
     return OwnerReview(state=state, submitted_at=at(hours_ago))
 
 
-def test_window_counts_rounds_merges_and_owner_wait():
+def test_window_counts_merges_rounds_and_owner_wait():
     prs = [
         # ready 100h ago, first review 96h ago (4h wait), approved, merged 90h ago
         activity(
             1, created=at(101), ready=at(100), merged=at(90), reviews=[review("APPROVED", 96)]
         ),
-        # ready 60h ago, change request 50h ago (10h wait), fix addressed 40h ago,
+        # change request 50h ago (10h wait), fix addressed 40h ago,
         # owner re-reviews 38h ago (2h wait), merged 37h ago
         activity(
             2,
@@ -122,24 +150,116 @@ def test_window_counts_rounds_merges_and_owner_wait():
             reviews=[review("CHANGES_REQUESTED", 50), review("APPROVED", 38)],
             addressed=[at(40)],
         ),
-        # open, never reviewed: counts as a PR, not in the wait stats
+        # open and never reviewed: opened, waiting, not part of the merged stats
         activity(3, created=at(20)),
     ]
 
     window = compute_window(prs, stuck_at=[at(30), at(400)], reverts=0, now=NOW, days=7)
 
-    assert window.prs == 3
+    assert window.opened == 3
     assert window.merged == 2
-    assert window.no_changes_requested == 2
-    assert window.mean_change_rounds == pytest.approx(1 / 3)
+    assert window.clean_merges == 1
+    assert window.merged_without_review == 0
+    assert window.mean_change_rounds == pytest.approx(0.5)
     assert window.median_hours_to_merge == pytest.approx((11 + 23) / 2)
     assert window.first_review_wait.median == pytest.approx((4 + 10) / 2)
     assert window.first_review_wait.count == 2
     assert window.after_fix_wait.median == pytest.approx(2)
+    assert window.still_waiting == 1
+    assert window.oldest_wait_hours == pytest.approx(20)
     assert window.stuck == 1
 
 
-def test_window_only_counts_prs_created_inside_it():
+def test_open_unreviewed_prs_do_not_count_as_clean_merges():
+    prs = [
+        activity(
+            1,
+            created=at(30),
+            merged=at(5),
+            reviews=[
+                review("CHANGES_REQUESTED", 20),
+                review("CHANGES_REQUESTED", 10),
+                review("APPROVED", 6),
+            ],
+        ),
+        activity(2, created=at(10)),
+        activity(3, created=at(9)),
+        activity(4, created=at(8)),
+    ]
+
+    window = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=7)
+
+    assert window.clean_merges == 0
+    assert window.mean_change_rounds == pytest.approx(2)
+
+
+def test_a_merge_with_no_owner_review_is_reported_not_clean():
+    prs = [activity(1, created=at(10), merged=at(5))]
+
+    window = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=7)
+
+    assert window.merged_without_review == 1
+    assert window.clean_merges == 0
+
+
+def test_waits_are_windowed_by_review_date_not_creation_date():
+    prs = [
+        # created 10 days ago, ready then, reviewed 2 days ago: in the 7-day window
+        activity(
+            1, created=at(240), ready=at(240), reviews=[review("COMMENTED", 48)], is_open=True
+        ),
+        # created 10 days ago, fix addressed 3 days ago, re-reviewed 1 hour later
+        activity(
+            2,
+            created=at(240),
+            reviews=[review("CHANGES_REQUESTED", 200), review("APPROVED", 71)],
+            addressed=[at(72)],
+            merged=at(70),
+        ),
+    ]
+
+    week = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=7)
+
+    assert week.opened == 0
+    assert week.first_review_wait.count == 1
+    assert week.first_review_wait.median == pytest.approx(240 - 48)
+    assert week.after_fix_wait.median == pytest.approx(1)
+
+
+def test_a_pr_still_waiting_counts_with_its_oldest_wait():
+    prs = [
+        activity(1, created=at(64)),
+        activity(2, created=at(10), reviews=[review("CHANGES_REQUESTED", 9)], addressed=[at(5)]),
+        activity(3, created=at(3), reviews=[review("APPROVED", 2)]),
+    ]
+
+    window = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=7)
+
+    assert window.still_waiting == 2
+    assert window.oldest_wait_hours == pytest.approx(64)
+
+
+def test_a_review_on_a_draft_never_makes_a_negative_wait():
+    prs = [
+        # still a draft: no ready time, not waiting, no first-review sample
+        activity(1, created=at(10), draft=True, reviews=[review("COMMENTED", 9)]),
+        # reviewed before it became ready: that review does not end the wait
+        activity(
+            2,
+            created=at(20),
+            ready=at(10),
+            reviews=[review("COMMENTED", 15), review("APPROVED", 7)],
+        ),
+    ]
+
+    window = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=7)
+
+    assert window.first_review_wait.count == 1
+    assert window.first_review_wait.median == pytest.approx(3)
+    assert window.still_waiting == 0
+
+
+def test_window_only_counts_prs_opened_inside_it():
     prs = [
         activity(1, created=at(24 * 3)),
         activity(2, created=at(24 * 10)),
@@ -148,8 +268,8 @@ def test_window_only_counts_prs_created_inside_it():
     week = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=7)
     month = compute_window(prs, stuck_at=[], reverts=0, now=NOW, days=28)
 
-    assert week.prs == 1
-    assert month.prs == 2
+    assert week.opened == 1
+    assert month.opened == 2
 
 
 def test_p90_uses_the_nearest_rank():
@@ -166,10 +286,11 @@ def test_p90_uses_the_nearest_rank():
 def test_empty_window_has_no_averages():
     window = compute_window([], stuck_at=[], reverts=0, now=NOW, days=7)
 
-    assert window.prs == 0
+    assert window.opened == 0
     assert window.mean_change_rounds is None
     assert window.median_hours_to_merge is None
     assert window.first_review_wait.median is None
+    assert window.still_waiting == 0
 
 
 # --- message ----------------------------------------------------------------
@@ -190,6 +311,7 @@ def test_message_shows_both_windows_and_marks_missing_values():
     assert "Wait for first owner review: median 4.0 h" in text
     assert "n/a" in text
     assert "Reverts: 1" in text
+    assert "Waiting for you now: none" in text
 
 
 # --- GitHub adapter (REST only) ----------------------------------------------
@@ -339,3 +461,21 @@ def test_run_metrics_reports_a_failure_once_and_exits_non_zero():
     assert messages.metrics == []
     assert len(messages.failures) == 1
     assert messages.failures[0].startswith("metrics failed:")
+
+
+def test_run_metrics_exits_non_zero_when_the_report_is_not_delivered():
+    from factory.metrics import CollectedData
+
+    class Undeliverable(Messages):
+        def send_metrics(self, text):
+            raise RuntimeError("Telegram send failed: 400 can't parse entities")
+
+    code = run_metrics(
+        FakeCollector(CollectedData(prs=[], stuck_at=[], revert_merges=[])),
+        Undeliverable(),
+        FakeTokens(),
+        repo="o/r",
+        now=NOW,
+    )
+
+    assert code == 1
