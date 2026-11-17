@@ -6,6 +6,7 @@ import os
 import sys
 import time
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .areas import Area
@@ -18,6 +19,7 @@ from .git import Git, verify_git_version
 from .github import GitHub, GitHubError
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
+from .metrics import MetricsGitHub, run_metrics
 from .models import select_model
 from .notify import (
     Notifier,
@@ -846,10 +848,30 @@ def preflight_main() -> int:
     return 0
 
 
+def metrics_main() -> int:
+    """Send the weekly review metrics over Telegram (``factory metrics``)."""
+    notifier = _startup_notifier()
+    try:
+        settings = Settings.from_env()
+        notifier = _build_notifier(settings)
+        tokens = _build_token_provider(settings)
+    except Exception as exc:
+        return _report_failure(notifier, f"metrics failed: {short_error(exc)}")
+    return run_metrics(
+        MetricsGitHub(settings.repo, owner=OWNER_LOGIN, bot=FACTORY_BOT_LOGIN),
+        notifier,
+        tokens,
+        repo=settings.repo,
+        now=datetime.now(UTC),
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     if args and args[0] == "preflight":
         return preflight_main()
+    if args and args[0] == "metrics":
+        return metrics_main()
     notifier = _startup_notifier()
     phase = "startup"
     try:

@@ -1,0 +1,12 @@
+[Unit]
+Description=Night factory: send the weekly review metrics over Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/factory/secrets.env
+WorkingDirectory=/srv/factory/repo/tools/factory
+UMask=0007
+ExecStart=/usr/local/bin/uv run factory metrics
+TimeoutStartSec=15min
