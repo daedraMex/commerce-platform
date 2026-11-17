@@ -37,6 +37,8 @@ class Notifier(Protocol):
 
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None: ...
 
+    def send_metrics(self, text: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class ReviewSkippedInfo:
@@ -396,6 +398,9 @@ class NullNotifier:
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
         return None
 
+    def send_metrics(self, text: str) -> None:
+        pass
+
 
 class TelegramNotifier:
     """Send messages to one fixed chat id via the Bot API."""
@@ -426,7 +431,17 @@ class TelegramNotifier:
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
         self._send(build_review_skipped_message(info), [])
 
-    def _send(self, text: str, keyboard: list[list[dict[str, str]]]) -> None:
+    def send_metrics(self, text: str) -> None:
+        """Unlike alerts, a lost report must fail the command, so errors propagate."""
+        self._send(_bound_message(text), [], raise_errors=True)
+
+    def _send(
+        self,
+        text: str,
+        keyboard: list[list[dict[str, str]]],
+        *,
+        raise_errors: bool = False,
+    ) -> None:
         url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
         payload: dict = {
             "chat_id": self._chat_id,
@@ -438,14 +453,20 @@ class TelegramNotifier:
             payload["reply_markup"] = json.dumps({"inline_keyboard": keyboard})
         try:
             self._post(url, payload)
-        except TelegramError as exc:
-            self._log_failure(exc.status, exc.description)
-        except HTTPError as exc:
-            self._log_failure(exc.code, _telegram_description(exc))
-        except URLError as exc:
-            self._log_failure(None, str(exc.reason))
         except Exception as exc:
-            self._log_failure(None, f"{type(exc).__name__}: {exc}")
+            if raise_errors:
+                raise RuntimeError(f"Telegram send failed: {self._redact(str(exc))}") from None
+            self._report(exc)
+
+    def _report(self, error: Exception) -> None:
+        if isinstance(error, TelegramError):
+            self._log_failure(error.status, error.description)
+        elif isinstance(error, HTTPError):
+            self._log_failure(error.code, _telegram_description(error))
+        elif isinstance(error, URLError):
+            self._log_failure(None, str(error.reason))
+        else:
+            self._log_failure(None, f"{type(error).__name__}: {error}")
 
     def _log_failure(self, status: int | None, description: str) -> None:
         description = self._redact(description)

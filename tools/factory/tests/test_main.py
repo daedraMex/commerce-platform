@@ -1149,6 +1149,37 @@ def test_preflight_cli_reports_failure_and_exits_nonzero(monkeypatch, capsys, tm
     assert "preflight failed: check.sh: check.sh failed" in capsys.readouterr().out
 
 
+def test_metrics_cli_routes_to_the_metrics_command(monkeypatch, tmp_path):
+    import factory.main as main_module
+
+    calls = []
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+    monkeypatch.setattr(main_module, "_build_notifier", lambda settings: RecordingNotifier())
+    monkeypatch.setattr(main_module, "_build_token_provider", lambda settings: FakeTokenProvider())
+    monkeypatch.setattr(
+        main_module,
+        "run_metrics",
+        lambda collector, notifier, tokens, *, repo, now: calls.append((collector.repo, repo)) or 0,
+    )
+
+    assert main_module.main(["metrics"]) == 0
+    assert calls == [(make_settings(tmp_path).repo, make_settings(tmp_path).repo)]
+
+
+def test_metrics_cli_reports_bad_settings_and_exits_nonzero(monkeypatch, capsys):
+    import factory.main as main_module
+
+    def broken(cls):
+        raise RuntimeError("FACTORY_MODEL is not set")
+
+    monkeypatch.setattr(main_module.Settings, "from_env", classmethod(broken))
+
+    assert main_module.main(["metrics"]) == 1
+    assert "metrics failed: FACTORY_MODEL is not set" in capsys.readouterr().out
+
+
 def test_main_reports_an_unexpected_run_error_and_notifies(monkeypatch, capsys, tmp_path):
     import factory.main as main_module
 

@@ -350,8 +350,11 @@ Run these once, as the admin user unless a step says `factory`.
     mkdir -p ~/.config/systemd/user
     cp /srv/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
     cp /srv/factory/repo/tools/factory/systemd/factory.timer  ~/.config/systemd/user/
+    cp /srv/factory/repo/tools/factory/systemd/factory-metrics.service ~/.config/systemd/user/
+    cp /srv/factory/repo/tools/factory/systemd/factory-metrics.timer  ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now factory.timer
+    systemctl --user enable --now factory-metrics.timer
     loginctl enable-linger factory   # keep the timer alive when nobody is logged in
     ```
     The timer fires hourly. `factory.service` is `Type=oneshot`, so systemd
@@ -731,14 +734,35 @@ set -a; source ~/factory/secrets.env; set +a
 uv run factory
 ```
 
+## Weekly metrics
+
+`factory metrics` sends one Telegram message with the review metrics for the
+factory's PRs (`xolo-bot`, `nf/*`) over the last 7 and 28 days, each number
+windowed by the date of its own event: PRs opened and merged; of the merged
+ones, how many were clean (reviewed, no change requested), how many had no
+owner review, the change-request rounds and the open-to-merge hours; the
+owner's wait by review date (from ready for review to her first review, and
+from each "Addressed the review" comment to her next review); the PRs still
+waiting for her and the oldest wait; stuck tickets and reverts. It reads the
+GitHub REST API with a freshly minted installation token and changes nothing.
+`factory-metrics.timer` runs it on Mondays at 09:00 `America/Mexico_City`; a
+failure to collect sends one `metrics failed: ...` message, and a report that
+Telegram does not accept makes the command exit non-zero. By hand:
+```bash
+cd /srv/factory/repo/tools/factory
+set -a; source ~/factory/secrets.env; set +a
+uv run factory metrics
+```
+
 ## Stopping it
 
 ```bash
 systemctl --user stop factory.timer   # stop the schedule
 systemctl --user stop factory.service # stop a run in progress
+systemctl --user stop factory-metrics.timer   # stop the Monday metrics
 ```
 
 To see when the next run is scheduled:
 ```bash
-systemctl --user list-timers factory.timer
+systemctl --user list-timers 'factory*.timer'
 ```

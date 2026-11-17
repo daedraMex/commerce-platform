@@ -2,6 +2,8 @@ import io
 import json
 from urllib.error import HTTPError
 
+import pytest
+
 from factory.notify import (
     PausedInfo,
     PrReadyInfo,
@@ -270,3 +272,27 @@ def test_review_addressed_message_names_the_pr_commit_and_comments():
     assert "a" * 40 in message
     assert "Review comments: 3" in message
     assert build_review_addressed_keyboard(info)[0][0]["text"] == "PR"
+
+
+def test_telegram_metrics_send_raises_when_delivery_fails():
+    from factory.notify import TelegramNotifier
+
+    def failing_post(url, payload):
+        raise RuntimeError("400 Bad Request: can't parse entities for SECRET-TOKEN")
+
+    notifier = TelegramNotifier("SECRET-TOKEN", "123", post=failing_post)
+
+    with pytest.raises(RuntimeError, match="Telegram send failed") as excinfo:
+        notifier.send_metrics("<b>Night factory metrics</b>")
+    assert "SECRET-TOKEN" not in str(excinfo.value)
+
+
+def test_telegram_alerts_still_swallow_delivery_failures(capsys):
+    from factory.notify import RunFailedInfo, TelegramNotifier
+
+    def failing_post(url, payload):
+        raise RuntimeError("boom")
+
+    TelegramNotifier("t", "c", post=failing_post).send_run_failed(RunFailedInfo(reason="x"))
+
+    assert "Telegram notification failed" in capsys.readouterr().err
