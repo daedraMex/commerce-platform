@@ -552,17 +552,10 @@ class Factory:
         log_path: Path,
         attempts: int,
     ) -> TicketResult:
-        if not self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})"):
-            return self._stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                worktree=worktree,
-                open_question=None,
-                failing_check="no changes made for the ticket",
-                attempts=attempts,
-            )
+        # El valor de commit_all no decide nada: el agente pudo haber commiteado
+        # por su cuenta (commit_all da False y el trabajo ya está en la rama).
+        # La decisión la toma el diff contra origin/main.
+        self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})")
         diff = self.git.diff_stats(worktree)
         if not diff.files:
             return self._stuck(

@@ -1578,7 +1578,10 @@ def test_orphan_branch_stuck_before_worktree_has_no_handoff_to_a_missing_worktre
 
 
 def test_nothing_to_commit_goes_stuck_without_push_or_pr(tmp_path):
-    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, commit_changed=False)
+    # Sin commit del agente tampoco hay diff contra origin/main: manda el diff vacío.
+    git = FakeGit(
+        check_passed=True, decisions=DECISIONS_DOC, commit_changed=False, diff=DiffStats()
+    )
     github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
     factory = build_factory(
         tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
@@ -1629,3 +1632,20 @@ def test_log_gets_one_header_per_step_and_a_new_run_starts_a_fresh_file(tmp_path
     for step in range(1, settings.attempts + 1):
         assert f"=== step {step} (model deepseek/deepseek-flash) ===" in log
     assert log.count("=== step ") == settings.attempts
+
+
+def test_agent_committed_on_its_own_still_opens_the_pr(tmp_path):
+    # El agente hizo git commit por su cuenta: commit_all no tiene nada que
+    # commitear (False), pero el diff contra origin/main sí trae cambios.
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, commit_changed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and results[0].ok
+    assert git.pushed != []
+    assert len(github.created_prs) == 1
+    assert "no changes made for the ticket" not in str(github.comments)
