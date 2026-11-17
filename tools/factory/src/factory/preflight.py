@@ -55,6 +55,7 @@ class Preflight:
         verify_isolation_fn: Callable[..., None] = verify_isolation,
         verify_git_version_fn: Callable[[], None] = verify_git_version,
         verify_sudoers_logging_fn: Callable[[], None] = verify_sudoers_logging,
+        runner=None,
     ):
         self.settings = settings
         self.git = git
@@ -65,6 +66,9 @@ class Preflight:
         self._verify_isolation = verify_isolation_fn
         self._verify_git_version = verify_git_version_fn
         self._verify_sudoers_logging = verify_sudoers_logging_fn
+        # The agent runner, when given, proves the cleanup works and that OpenCode
+        # starts as the agent with the real env (read-only config home, #153).
+        self.runner = runner
 
     def run(self, token: str | None = None) -> list[Ticket]:
         run_id = str(self._clock())
@@ -85,7 +89,10 @@ class Preflight:
                 agent_user=self.settings.agent_user,
                 paths=sensitive_paths(self.settings),
                 write_paths=write_protected_paths(self.settings),
-                existing_dirs=[self.settings.agent_config_home],
+                existing_dirs=[
+                    self.settings.agent_config_home,
+                    self.settings.agent_config_home / "opencode",
+                ],
                 repo_dir=self.settings.repo_dir,
             )
 
@@ -111,6 +118,11 @@ class Preflight:
             if not check.passed:
                 self._write_check_log(log_path, check.output)
                 raise RuntimeError(f"check.sh failed; see {log_path}")
+
+            if self.runner is not None:
+                step = "verify agent sandbox"
+                self.runner.ensure_clean()
+                self.runner.smoke_check(worktree)
 
             step = "verify worktree cleanup"
             probe = self.git.create_agent_cleanup_probe(worktree)

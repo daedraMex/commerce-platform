@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -318,6 +319,12 @@ class FailingTokenProvider:
 
 
 class FakeRunner:
+    def ensure_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     def __init__(self, result=None):
         self.result = result or AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
         self.calls = []
@@ -347,6 +354,12 @@ class FakeRunner:
 
 
 class ExplodingRunner:
+    def ensure_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     def __init__(self, error):
         self.error = error
 
@@ -355,6 +368,12 @@ class ExplodingRunner:
 
 
 class BaseExceptionRunner:
+    def ensure_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     def __init__(self, error):
         self.error = error
 
@@ -1787,6 +1806,12 @@ BUILDER_OK = AgentResult(exit_code=0, stdout="built", stderr="", timed_out=False
 
 
 class ScriptedRunner:
+    def ensure_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     """Builder calls always succeed; reviewer calls (with a config path) follow a script."""
 
     def __init__(self, reviews):
@@ -1844,7 +1869,10 @@ def test_reviewer_runs_with_the_strong_model_and_rules_from_origin_main(tmp_path
     assert len(runner.review_calls) == 1
     call = runner.review_calls[0]
     assert call["model"] == "deepseek/deepseek-v4-pro"
-    assert call["config_content"] == git.reviewer_config
+    assert (
+        json.loads(call["config_content"])["permission"]
+        == (json.loads(git.reviewer_config)["permission"])
+    )
     assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.reviewer.json") in (
         git.ref_reads
     )
@@ -1988,7 +2016,10 @@ def test_builder_gets_main_s_factory_config_inline_and_keeps_project_config(tmp_
     factory.run()
 
     builder = runner.calls[0]
-    assert builder["config_content"] == git.builder_config
+    config = json.loads(builder["config_content"])
+    expected = json.loads(git.builder_config)["permission"]
+    assert config["permission"] == expected
+    assert config["agent"]["build"]["permission"] == expected
     assert builder["disable_project_config"] is False
     assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.factory.json") in (
         git.ref_reads
@@ -2005,7 +2036,10 @@ def test_review_fix_builder_also_gets_main_s_factory_config_inline(tmp_path):
 
     factory.run()
 
-    assert runner.calls[0]["config_content"] == git.builder_config
+    assert (
+        json.loads(runner.calls[0]["config_content"])["permission"]
+        == (json.loads(git.builder_config)["permission"])
+    )
 
 
 def test_reviewer_still_disables_project_config(tmp_path):
@@ -2013,3 +2047,17 @@ def test_reviewer_still_disables_project_config(tmp_path):
 
     assert results[0].ok
     assert len(runner.review_calls) == 1
+
+
+def test_a_blank_builder_config_on_main_fails_the_run_closed(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.builder_config = "   "
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    with pytest.raises(RunFailed, match="opencode.factory.json"):
+        factory.run()
+    assert runner.calls == []

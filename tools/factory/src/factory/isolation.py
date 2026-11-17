@@ -46,6 +46,7 @@ def write_protected_paths(settings: Settings) -> list[Path]:
         settings.repo_dir,
         settings.repo_dir / ".git" / "hooks",
         settings.agent_config_home,
+        settings.agent_config_home / "opencode",
     ]
 
 

@@ -92,6 +92,7 @@ def test_write_protected_paths_cover_factory_repo_and_hooks(tmp_path):
         tmp_path / "repo",
         tmp_path / "repo" / ".git" / "hooks",
         settings.agent_config_home,
+        settings.agent_config_home / "opencode",
     ]
 
 

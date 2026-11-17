@@ -328,3 +328,38 @@ def test_preflight_fails_loudly_on_leftover_worktree_entries(tmp_path):
 
     assert "nf-66-leftover" in notifier.run_failed[0].reason
     assert [call[0] for call in git.calls][-1] == "verify_no_leaked_worktrees"
+
+
+class SandboxRunner:
+    def __init__(self, events, error=None):
+        self.events = events
+        self.error = error
+
+    def ensure_clean(self):
+        self.events.append(("agent_cleanup",))
+
+    def smoke_check(self, worktree):
+        self.events.append(("opencode_smoke",))
+        if self.error:
+            raise self.error
+
+
+def test_preflight_proves_cleanup_and_that_opencode_starts_as_the_agent(tmp_path):
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events)
+
+    preflight.run()
+
+    names = [event[0] for event in events]
+    assert names.index("agent_cleanup") < names.index("opencode_smoke")
+    assert names.index("opencode_smoke") < names.index("create_agent_cleanup_probe")
+
+
+def test_preflight_fails_when_opencode_cannot_start_as_the_agent(tmp_path):
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events, error=RuntimeError("EACCES mkdir"))
+
+    with pytest.raises(PreflightError, match="verify agent sandbox"):
+        preflight.run()

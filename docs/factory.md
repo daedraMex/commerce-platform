@@ -305,14 +305,31 @@ Run these once, as the admin user unless a step says `factory`.
    default `/srv/factory/agent-config`), so the global config is something the
    agent can read but never write; its own `~/.config/opencode/` is ignored. The
    auth store stays in `~/.local/share/opencode/`, which `XDG_CONFIG_HOME` does
-   not move:
+   not move. OpenCode creates `<config home>/opencode` at startup, so that
+   subdirectory must already exist:
    ```bash
    sudo install -d -o factory -g factory -m 0755 /srv/factory/agent-config
+   sudo install -d -o factory -g factory -m 0755 /srv/factory/agent-config/opencode
    ```
-   Leave it empty unless OpenCode needs global settings; if it does, review the
-   file and put it in `/srv/factory/agent-config/opencode/` (owned by `factory`,
-   mode `0644`). The preflight fails if the directory is missing or writable by
-   the agent.
+   Leave `opencode/` empty unless OpenCode needs global settings; if it does,
+   review the file and put it there (owned by `factory`, mode `0644`).
+
+   OpenCode also loads `~/.opencode/` (config and plugins) from the agent's home
+   even with project config disabled, and `~/.claude/` and `~/.agents/` unless
+   switched off. Every run sets `OPENCODE_DISABLE_CLAUDE_CODE=1` and
+   `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, and before every OpenCode run the
+   factory checks that none of `~/.opencode`, `~/.claude` or `~/.agents` exists
+   in `/home/factory-agent`; if one does, the run stops and names it. Review
+   any of them (and the old `~/.config/opencode/`, now ignored) and remove them:
+   ```bash
+   sudo ls -la /home/factory-agent/.opencode /home/factory-agent/.claude \
+     /home/factory-agent/.agents /home/factory-agent/.config/opencode
+   strings /usr/bin/opencode | grep -c OPENCODE_DISABLE_CLAUDE_CODE      # expect > 0
+   strings /usr/bin/opencode | grep -c OPENCODE_DISABLE_EXTERNAL_SKILLS  # expect > 0
+   ```
+   The preflight fails if the config home or its `opencode/` is missing or
+   writable by the agent, if the agent cleanup (`pkill` through sudo) does not
+   work, or if OpenCode cannot start as the agent with the real environment.
 
 9. **Create the secrets file** `~/factory/secrets.env`, `chmod 600`, with the
    settings the factory reads from the environment:
@@ -520,13 +537,18 @@ unreachable" as before.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
-  `DATABASE_URL`, `XDG_CONFIG_HOME` (the read-only config home) and
+  `DATABASE_URL`, `XDG_CONFIG_HOME` (the read-only config home),
+  `OPENCODE_DISABLE_CLAUDE_CODE`, `OPENCODE_DISABLE_EXTERNAL_SKILLS` and
   `OPENCODE_CONFIG_CONTENT` (main's `opencode.factory.json` for the builder,
   `opencode.reviewer.json` plus `OPENCODE_DISABLE_PROJECT_CONFIG` for the
   reviewer) — nothing else. An inline config outranks the repo's
-  `opencode.json`, which a file named by `OPENCODE_CONFIG` does not. After every
-  OpenCode run and every set of area checks, the factory kills every process the
-  agent user still has, so nothing it started can change files later. The model
+  `opencode.json`, which a file named by `OPENCODE_CONFIG` does not; its
+  permissions are also set as the `build` agent's, which the repo's
+  `opencode.json` defines. A blank or invalid config on `origin/main` fails the
+  run. After every OpenCode run and every set of area checks, the factory kills
+  every process the agent user still has, repeating while `pkill` finds some; a
+  cleanup sudo refuses fails the run, so nothing the agent started can change
+  files later. The model
   provider key is
   not in it: the agent reads its own OpenCode auth store from its home, so the
   key never crosses sudo. The backend check runner gets the same downgrade with

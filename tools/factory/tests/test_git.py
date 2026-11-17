@@ -529,7 +529,11 @@ def test_check_cleans_up_a_busy_console_port_once_then_runs(tmp_path):
         "-u",
         "factory-agent",
     ]
-    assert run.calls[1][0][-1] == str(worktree / CONSOLE.script)
+    script = [
+        i for i, call in enumerate(run.calls) if call[0][-1] == str(worktree / CONSOLE.script)
+    ]
+    assert len(script) == 1
+    assert all("/usr/bin/pkill" in call[0] for call in run.calls[: script[0]])
 
 
 def test_check_fails_with_a_clear_message_when_port_3000_stays_busy(tmp_path):

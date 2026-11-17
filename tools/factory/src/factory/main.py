@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -249,6 +250,7 @@ class Factory:
             verify_isolation_fn=self._preflight_verify_isolation,
             verify_git_version_fn=self._preflight_verify_git_version,
             verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
+            runner=self.runner,
         ).run(token=token)
 
     def _remove_expired_worktree(self, worktree: Path) -> None:
@@ -804,7 +806,26 @@ class Factory:
     def _builder_config(self) -> str:
         """Main's builder permissions, passed inline so the repo's opencode.json cannot
         override them (an OPENCODE_CONFIG file ranks below project config, #153)."""
-        return self.git.read_ref_file(self.settings.repo_dir, "origin/main", OPENCODE_CONFIG_PATH)
+        return self._inline_config(OPENCODE_CONFIG_PATH)
+
+    def _inline_config(self, path: str) -> str:
+        """An OpenCode config from origin/main, ready to pass inline.
+
+        A blank or invalid file fails closed: OpenCode would silently skip it and run
+        with the repo's own permissions. The top-level permissions are also set as the
+        ``build`` agent's, because agent-level permissions are merged after top-level
+        ones and the repo's opencode.json defines that agent.
+        """
+        text = self.git.read_ref_file(self.settings.repo_dir, "origin/main", path)
+        try:
+            config = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"{path} on origin/main is not valid JSON") from exc
+        if not isinstance(config, dict) or not isinstance(config.get("permission"), dict):
+            raise RuntimeError(f"{path} on origin/main has no permission block")
+        build = config.setdefault("agent", {}).setdefault("build", {})
+        build["permission"] = config["permission"]
+        return json.dumps(config)
 
     def _pre_pr_review(
         self,
@@ -832,9 +853,7 @@ class Factory:
             rules = self.git.read_ref_file(self.settings.repo_dir, "origin/main", REVIEW_RULES)
             # Main's reviewer permissions, passed inline: they outrank the repo's own
             # opencode.json and .opencode/, and the worktree copy is never read.
-            reviewer_config = self.git.read_ref_file(
-                self.settings.repo_dir, "origin/main", REVIEWER_CONFIG_PATH
-            )
+            reviewer_config = self._inline_config(REVIEWER_CONFIG_PATH)
             diff = self.git.review_diff(worktree)
             before = self.git.worktree_fingerprint(worktree)
         except Exception as exc:

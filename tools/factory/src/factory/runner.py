@@ -43,14 +43,42 @@ def agent_cleanup_argv(agent_user: str) -> list[str]:
     return ["sudo", "-n", "-u", agent_user, AGENT_KILL_BIN, "-KILL", "-u", agent_user]
 
 
-def kill_agent_processes(run: RunCommand, agent_user: str | None) -> None:
-    """Best-effort cleanup of any agent process left by a timed-out command."""
+class AgentSandboxError(RuntimeError):
+    """The agent's sandbox could not be proven: cleanup failed or its home was tampered."""
+
+
+# Home-directory sources OpenCode loads even with project config disabled; the agent
+# owns its home, so any of these appearing means something planted config (#153).
+AGENT_HOME_PLANTS = (".opencode", ".claude", ".agents")
+MAX_CLEANUP_PASSES = 3
+
+
+def ensure_agent_cleanup(run: RunCommand, agent_user: str | None) -> None:
+    """Kill every agent process, repeating while pkill still finds some.
+
+    pkill exits 0 when it killed something and 1 when nothing matched. Anything
+    else, or sudo refusing (which also exits 1), means the cleanup cannot be
+    trusted and raises, so a broken sudoers rule fails loudly instead of silently.
+    """
     if not agent_user:
         return
+    for _ in range(MAX_CLEANUP_PASSES):
+        result = run(agent_cleanup_argv(agent_user), "/", timeout=AGENT_KILL_TIMEOUT_SECONDS)
+        if "sudo:" in result.stderr:
+            raise AgentSandboxError(f"agent cleanup refused by sudo: {result.stderr.strip()}")
+        if result.exit_code == 1:
+            return
+        if result.exit_code != 0:
+            raise AgentSandboxError(
+                f"agent cleanup failed: {result.stderr.strip() or result.exit_code}"
+            )
+
+
+def kill_agent_processes(run: RunCommand, agent_user: str | None) -> None:
+    """Best-effort cleanup after a timeout, where the timeout is the reported failure."""
     try:
-        run(agent_cleanup_argv(agent_user), "/", timeout=AGENT_KILL_TIMEOUT_SECONDS)
+        ensure_agent_cleanup(run, agent_user)
     except Exception:
-        # Cleanup is best effort; the timeout itself is the reported failure.
         pass
 
 
@@ -99,7 +127,13 @@ def build_agent_env(
     own OpenCode auth store, so it never crosses the sudo boundary (and never
     appears in the journal).
     """
-    env = {"OPENCODE_CONFIG": config_path}
+    env = {
+        "OPENCODE_CONFIG": config_path,
+        # Global sources OpenCode can turn off: ~/.claude (CLAUDE.md, skills) and
+        # external skill directories (#153).
+        "OPENCODE_DISABLE_CLAUDE_CODE": "1",
+        "OPENCODE_DISABLE_EXTERNAL_SKILLS": "1",
+    }
     env.update(_allowlisted_env(base_env, agent_user=agent_user, agent_home=agent_home))
     env.update(TEST_SETTINGS)
     return env
@@ -200,6 +234,7 @@ class AgentRunner:
             env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
         if self.config_home:
             env["XDG_CONFIG_HOME"] = self.config_home
+        self.verify_home_is_clean()
         argv: list[str] = [OPENCODE_BIN, "run", "--model", model, prompt]
         if self.agent_user:
             argv = sudo_argv(self.agent_user, argv, env)
@@ -216,10 +251,61 @@ class AgentRunner:
             return AgentResult(exit_code=None, stdout="", stderr="", timed_out=True)
         # A normal exit can leave background processes (nohup, servers) that would
         # change files after the checks or the review; none may outlive the step.
-        kill_agent_processes(self._run, self.agent_user)
+        ensure_agent_cleanup(self._run, self.agent_user)
         return AgentResult(
             exit_code=result.exit_code,
             stdout=result.stdout,
             stderr=result.stderr,
             timed_out=False,
         )
+
+    def verify_home_is_clean(self) -> None:
+        """Refuse to start OpenCode when the agent's home holds a config source.
+
+        OpenCode loads ``~/.opencode`` (config, plugins) even with project config
+        disabled, and ``~/.claude``/``~/.agents`` unless switched off. The agent owns
+        its home, so any of them appearing means something planted config (#153).
+        """
+        if not self.agent_user:
+            return
+        home = self.agent_home or f"/home/{self.agent_user}"
+        for name in AGENT_HOME_PLANTS:
+            path = f"{home}/{name}"
+            result = self._run(
+                ["sudo", "-n", "-u", self.agent_user, "--", "/usr/bin/test", "-e", path],
+                "/",
+                timeout=60,
+            )
+            if result.exit_code == 0:
+                raise AgentSandboxError(
+                    f"{path} exists in the agent's home; OpenCode would load it as global "
+                    "config. Review and remove it (see docs/factory.md), then rerun."
+                )
+            if result.exit_code != 1:
+                raise AgentSandboxError(
+                    f"could not check {path}: {result.stderr.strip() or result.exit_code}"
+                )
+
+    def ensure_clean(self) -> None:
+        """Kill every agent process; raise if the cleanup cannot be trusted."""
+        ensure_agent_cleanup(self._run, self.agent_user)
+
+    def smoke_check(self, worktree: Path) -> None:
+        """Start OpenCode once as the agent, with the real env, and fail if it cannot."""
+        env = build_agent_env(
+            self.base_env,
+            config_path=str(worktree / OPENCODE_CONFIG_PATH),
+            agent_user=self.agent_user,
+            agent_home=self.agent_home,
+        )
+        if self.config_home:
+            env["XDG_CONFIG_HOME"] = self.config_home
+        argv: list[str] = [OPENCODE_BIN, "--version"]
+        if self.agent_user:
+            argv = sudo_argv(self.agent_user, argv, env)
+        result = self._run(argv, str(worktree), timeout=120, env=env, replace_env=True)
+        if result.exit_code != 0:
+            raise AgentSandboxError(
+                "OpenCode cannot start as the agent: "
+                f"{result.stderr.strip() or result.stdout.strip() or result.exit_code}"
+            )

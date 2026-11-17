@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from factory.areas import CONSOLE
 from factory.runner import (
     TEST_SETTINGS,
@@ -13,13 +15,20 @@ from factory.shell import CommandResult
 
 
 class RecordingRun:
+    """Answer like the machine: `test -e` finds nothing and pkill has nothing left (1)."""
+
     def __init__(self, result=None):
         self.result = result or CommandResult(exit_code=0, stdout="", stderr="")
         self.calls = []
 
     def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
         self.calls.append((argv, cwd, env, replace_env))
+        if "/usr/bin/test" in argv or "/usr/bin/pkill" in argv:
+            return CommandResult(exit_code=1, stdout="", stderr="")
         return self.result
+
+    def opencode_call(self):
+        return next(call for call in self.calls if "/usr/bin/opencode" in call[0])
 
 
 def test_build_agent_env_allowlists_only_known_vars():
@@ -183,11 +192,12 @@ def test_run_uses_non_interactive_sudo_and_full_path(tmp_path):
     )
     runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
 
-    argv, _cwd, env, replace_env = recorder.calls[0]
+    argv, _cwd, env, replace_env = recorder.opencode_call()
     assert argv == [
         "sudo",
         "-n",
-        "--preserve-env=OPENCODE_CONFIG,PATH,HOME,LANG,DATABASE_URL,"
+        "--preserve-env=OPENCODE_CONFIG,OPENCODE_DISABLE_CLAUDE_CODE,"
+        "OPENCODE_DISABLE_EXTERNAL_SKILLS,PATH,HOME,LANG,DATABASE_URL,"
         "SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL,PYTEST_ADDOPTS",
         "-u",
         "factory-agent",
@@ -255,15 +265,16 @@ def test_run_timeout_cleans_up_every_agent_process(tmp_path):
 
     def run(argv, cwd, *, timeout, env=None, replace_env=False):
         calls.append((argv, cwd, env, replace_env))
-        if len(calls) == 1:
+        if "/usr/bin/opencode" in argv:
             raise CommandTimeout("slow")
-        return CommandResult(exit_code=0, stdout="", stderr="")
+        return CommandResult(exit_code=1, stdout="", stderr="")
 
     runner = AgentRunner(run=run, agent_user="factory-agent", base_env={"PATH": "/usr/bin"})
     result = runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
 
     assert result.timed_out is True
-    assert calls[1] == (
+    opencode = next(i for i, call in enumerate(calls) if "/usr/bin/opencode" in call[0])
+    assert calls[opencode + 1] == (
         [
             "sudo",
             "-n",
@@ -365,3 +376,102 @@ def test_a_normal_run_still_kills_every_agent_process_left_behind(tmp_path):
         "-u",
         "factory-agent",
     ]
+
+
+class ScriptedRun:
+    """Answer each argv by a rule; record every call."""
+
+    def __init__(self, rule):
+        self.rule = rule
+        self.calls = []
+
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        self.calls.append((argv, cwd, env, replace_env))
+        return self.rule(argv)
+
+
+PKILL = ["sudo", "-n", "-u", "factory-agent", "/usr/bin/pkill", "-KILL", "-u", "factory-agent"]
+
+
+def test_every_run_disables_claude_code_and_external_skills(tmp_path):
+    run = RecordingRun()
+    AgentRunner(run=run, agent_user=None, base_env={"PATH": "/usr/bin"}).run(
+        worktree=tmp_path, model="m", prompt="p", timeout_seconds=10
+    )
+
+    env = run.calls[0][2]
+    assert env["OPENCODE_DISABLE_CLAUDE_CODE"] == "1"
+    assert env["OPENCODE_DISABLE_EXTERNAL_SKILLS"] == "1"
+
+
+def test_a_planted_dot_opencode_in_the_agent_home_stops_the_run(tmp_path):
+    from factory.runner import AgentSandboxError
+
+    def rule(argv):
+        if argv[-2:] == ["-e", "/home/factory-agent/.opencode"]:
+            return CommandResult(0, "", "")
+        if "/usr/bin/test" in argv:
+            return CommandResult(1, "", "")
+        return CommandResult(1, "", "")
+
+    run = ScriptedRun(rule)
+    runner = AgentRunner(
+        run=run, agent_user="factory-agent", agent_home="/home/factory-agent", base_env={}
+    )
+
+    with pytest.raises(AgentSandboxError, match=r"/home/factory-agent/\.opencode"):
+        runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=10)
+    assert not any("/usr/bin/opencode" in call[0] for call in run.calls)
+
+
+def test_cleanup_repeats_until_nothing_is_left():
+    from factory.runner import ensure_agent_cleanup
+
+    answers = iter([0, 0, 1])
+    run = ScriptedRun(lambda argv: CommandResult(next(answers), "", ""))
+
+    ensure_agent_cleanup(run, "factory-agent")
+
+    assert [call[0] for call in run.calls] == [PKILL, PKILL, PKILL]
+
+
+def test_cleanup_that_sudo_refuses_fails_loudly():
+    from factory.runner import AgentSandboxError, ensure_agent_cleanup
+
+    run = ScriptedRun(lambda argv: CommandResult(1, "", "sudo: a password is required"))
+
+    with pytest.raises(AgentSandboxError, match="password is required"):
+        ensure_agent_cleanup(run, "factory-agent")
+
+
+def test_cleanup_with_an_unexpected_exit_fails_loudly():
+    from factory.runner import AgentSandboxError, ensure_agent_cleanup
+
+    run = ScriptedRun(lambda argv: CommandResult(3, "", "pkill: fatal"))
+
+    with pytest.raises(AgentSandboxError, match="pkill: fatal"):
+        ensure_agent_cleanup(run, "factory-agent")
+
+
+def test_smoke_check_starts_opencode_with_the_agent_env(tmp_path):
+    from factory.runner import AgentSandboxError
+
+    run = ScriptedRun(
+        lambda argv: (
+            CommandResult(1, "", "EACCES: mkdir '/srv/factory/agent-config/opencode'")
+            if "--version" in argv
+            else CommandResult(1, "", "")
+        )
+    )
+    runner = AgentRunner(
+        run=run,
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        base_env={},
+        config_home="/srv/factory/agent-config",
+    )
+
+    with pytest.raises(AgentSandboxError, match="EACCES"):
+        runner.smoke_check(tmp_path)
+    version_call = next(call for call in run.calls if "--version" in call[0])
+    assert version_call[2]["XDG_CONFIG_HOME"] == "/srv/factory/agent-config"
