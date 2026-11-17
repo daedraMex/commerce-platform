@@ -63,6 +63,7 @@ class Settings:
     secrets_file: Path = field(default_factory=lambda: Path.home() / "factory" / "secrets.env")
     deploy_key: Path = field(default_factory=lambda: Path.home() / ".ssh" / "commerce_deploy")
     handoff_host: str | None = None
+    pre_pr_review: bool = False
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -93,6 +94,7 @@ class Settings:
             max_open_prs=_read_int(env, "FACTORY_MAX_OPEN_PRS", 2),
             max_tickets_per_day=_read_int(env, "FACTORY_MAX_TICKETS_PER_DAY", 6),
             attempts=_read_int(env, "FACTORY_ATTEMPTS", 3),
+            pre_pr_review=_read(env, "FACTORY_PRE_PR_REVIEW") not in ("0", "false", "no"),
             repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or "/srv/factory/repo"),
             worktrees_dir=Path(_read(env, "FACTORY_WORKTREES_DIR") or "/srv/factory/worktrees"),
             logs_dir=Path(_read(env, "FACTORY_LOGS_DIR") or str(home / "factory" / "logs")),

@@ -890,3 +890,52 @@ def test_diff_stats_since_ignores_main_files_after_the_agent_amends_the_merge(tm
     stats = Git().diff_stats(repo, since=since)
 
     assert [f.path for f in stats.files] == ["review.txt"]
+
+
+def test_read_ref_file_reads_a_file_from_a_ref_not_the_worktree(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "REVIEW.md").write_text("rules from main\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "rules")
+    (repo / "REVIEW.md").write_text("tampered in the worktree\n")
+
+    assert Git().read_ref_file(repo, "main", "REVIEW.md") == "rules from main\n"
+
+
+def test_review_diff_includes_new_untracked_files(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "a.py").write_text("a = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (repo / "a.py").write_text("a = 2\n")
+    (repo / "new.py").write_text("b = 1\n")
+
+    diff = Git().review_diff(repo)
+
+    assert "+a = 2" in diff
+    assert "new.py" in diff and "+b = 1" in diff
+
+
+def test_worktree_fingerprint_changes_when_any_file_changes(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "a.py").write_text("a = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    (repo / "a.py").write_text("a = 2\n")
+    git = Git()
+
+    before = git.worktree_fingerprint(repo)
+    assert git.worktree_fingerprint(repo) == before
+    (repo / "a.py").write_text("a = 3\n")
+    after_edit = git.worktree_fingerprint(repo)
+    (repo / "c.py").write_text("c = 1\n")
+
+    assert after_edit != before
+    assert git.worktree_fingerprint(repo) != after_edit

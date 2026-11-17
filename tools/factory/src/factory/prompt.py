@@ -37,6 +37,7 @@ def compose_prompt(
     overlay: str,
     feedback: str = "",
     failed_areas: tuple[Area, ...] = (),
+    review_feedback: str = "",
 ) -> str:
     arguments = f"#{ticket.number}: {ticket.title}\n\n{ticket.body}".strip()
     base = command_template.replace(ARGUMENTS_TOKEN, arguments)
@@ -46,6 +47,8 @@ def compose_prompt(
     prompt = f"{base}\n\n{filled_overlay}".strip()
     if feedback:
         prompt += _feedback_section(feedback, failed_areas)
+    if review_feedback:
+        prompt += "\n\n" + review_feedback
     return prompt + "\n"
 
 

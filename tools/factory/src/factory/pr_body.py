@@ -20,6 +20,7 @@ def build_pr_body(
     checked_areas: tuple[Area, ...],
     skipped_areas: tuple[Area, ...],
     diff: DiffStats,
+    review_lines: tuple[str, ...] = (),
     steps_used: int,
     step_budget: int,
 ) -> str:
@@ -40,6 +41,8 @@ def build_pr_body(
         "",
         *_verification(checked_areas, skipped_areas, steps_used, step_budget),
     ]
+    if review_lines:
+        parts += ["", "## Review", "", *review_lines]
     parts += ["", "## Risk", "", *_risk(diff)]
     parts += ["", "## How to revert", "", *_revert(diff)]
     return "\n".join(parts) + "\n"

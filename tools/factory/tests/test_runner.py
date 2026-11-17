@@ -278,3 +278,19 @@ def test_run_timeout_cleans_up_every_agent_process(tmp_path):
         None,
         False,
     )
+
+
+def test_runner_uses_an_explicit_config_path_when_given(tmp_path):
+    run = RecordingRun()
+    runner = AgentRunner(run=run, agent_user=None, base_env={"PATH": "/usr/bin"})
+
+    runner.run(
+        worktree=tmp_path,
+        model="m",
+        prompt="p",
+        timeout_seconds=10,
+        config_path=str(tmp_path / "tools/factory/opencode.reviewer.json"),
+    )
+
+    env = run.calls[0][2]
+    assert env["OPENCODE_CONFIG"] == str(tmp_path / "tools/factory/opencode.reviewer.json")

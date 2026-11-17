@@ -172,10 +172,12 @@ class AgentRunner:
         model: str,
         prompt: str,
         timeout_seconds: int,
+        config_path: str | None = None,
     ) -> AgentResult:
+        """Run OpenCode once; ``config_path`` overrides the builder config (the reviewer's)."""
         env = build_agent_env(
             self.base_env,
-            config_path=str(worktree / OPENCODE_CONFIG_PATH),
+            config_path=config_path or str(worktree / OPENCODE_CONFIG_PATH),
             agent_user=self.agent_user,
             agent_home=self.agent_home,
         )
