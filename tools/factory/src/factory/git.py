@@ -144,6 +144,11 @@ def verify_git_version(run: RunCommand = run_command) -> None:
         )
 
 
+TOKEN_CREDENTIAL_HELPER = (
+    '!f() { echo "username=x-access-token"; echo "password=$FACTORY_GIT_TOKEN"; }; f'
+)
+
+
 class Git:
     def __init__(
         self,
@@ -294,10 +299,30 @@ class Git:
             raise RuntimeError(f"git commit failed: {result.stderr.strip()}")
         return True
 
+    def remote_branch_exists(self, repo_dir: Path, branch: str, token: str) -> bool:
+        """Ask origin whether ``branch`` exists, authenticating like ``push`` does."""
+        result = self._run(
+            [
+                "git",
+                "-c",
+                f"credential.helper={TOKEN_CREDENTIAL_HELPER}",
+                "ls-remote",
+                "--heads",
+                "origin",
+                f"refs/heads/{branch}",
+            ],
+            str(repo_dir),
+            timeout=300,
+            env={"FACTORY_GIT_TOKEN": token},
+        )
+        if result.exit_code != 0:
+            raise RuntimeError(f"git ls-remote failed: {result.stderr.strip()}")
+        return bool(result.stdout.strip())
+
     def push(self, worktree: Path, branch: str, token: str) -> None:
         # Authenticate this one push with the freshly minted token, scoped to
         # this subprocess, without touching any global git credential helper.
-        helper = '!f() { echo "username=x-access-token"; echo "password=$FACTORY_GIT_TOKEN"; }; f'
+        helper = TOKEN_CREDENTIAL_HELPER
         result = self._run(
             ["git", "-c", f"credential.helper={helper}", "push", "-u", "origin", branch],
             str(worktree),
