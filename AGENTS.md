@@ -26,6 +26,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Pin every GitHub Actions dependency to a commit SHA after verifying the tagged
   version exists.
 - Commit before /code-review, because it diffs `main...HEAD`.
+- Every pull request review, by an agent or with /code-review, applies REVIEW.md as read
+  from `main`.
 - Before rewording a phrase in the docs, search the whole repo for it and change
   every copy at once.
 - There is no typechecker in this repo: skip /implement's typechecking step and run

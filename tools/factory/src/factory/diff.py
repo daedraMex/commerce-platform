@@ -15,6 +15,7 @@ PROTECTED_FILES = frozenset(
     {
         "AGENTS.md",
         "CLAUDE.md",
+        "REVIEW.md",
         ".pre-commit-config.yaml",
     }
 )
