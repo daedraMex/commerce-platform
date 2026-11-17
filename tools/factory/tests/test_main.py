@@ -71,6 +71,8 @@ class FakeGit:
         self.fingerprints = []
         self.reviewer_config = '{"permission": {"edit": {"*": "deny"}}}'
         self.worktree_reviewer_config = None
+        self.review_files = ["backend/apps/x.py"]
+        self.check_script = []
         self.removed_worktrees = []
         self.deleted_branches = []
         self.events = []
@@ -159,6 +161,9 @@ class FakeGit:
     def review_diff(self, worktree):
         return "diff --git a/x.py b/x.py\n+x = 1\n"
 
+    def review_changed_files(self, worktree):
+        return list(self.review_files)
+
     def worktree_fingerprint(self, worktree):
         if self.fingerprints:
             return self.fingerprints.pop(0)
@@ -168,6 +173,9 @@ class FakeGit:
         self.events.append("check")
         if "preflight" in str(worktree):
             return CheckResult(self.preflight_check_passed, "")
+        if self.check_script:
+            passed = self.check_script.pop(0)
+            return CheckResult(passed, "" if passed else "1 failed", ())
         return CheckResult(self.check_result, self.check_output, self.failed_areas)
 
     def commit_all(self, worktree, message):
@@ -311,7 +319,9 @@ class FakeRunner:
         self.result = result or AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
         self.calls = []
 
-    def run(self, *, worktree, model, prompt, timeout_seconds, config_path=None):
+    def run(
+        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+    ):
         self.calls.append(
             {"model": model, "prompt": prompt, "worktree": worktree, "config_path": config_path}
         )
@@ -1735,11 +1745,15 @@ class ScriptedRunner:
         self.builder_prompts = []
         self.review_calls = []
 
-    def run(self, *, worktree, model, prompt, timeout_seconds, config_path=None):
-        if config_path is None:
+    def run(
+        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+    ):
+        if config_content is None:
             self.builder_prompts.append(prompt)
             return BUILDER_OK
-        self.review_calls.append({"model": model, "prompt": prompt, "config_path": config_path})
+        self.review_calls.append(
+            {"model": model, "prompt": prompt, "config_content": config_content}
+        )
         return self.reviews.pop(0)
 
 
@@ -1773,7 +1787,10 @@ def test_reviewer_runs_with_the_strong_model_and_rules_from_origin_main(tmp_path
     assert len(runner.review_calls) == 1
     call = runner.review_calls[0]
     assert call["model"] == "deepseek/deepseek-v4-pro"
-    assert call["config_path"].endswith("tools/factory/opencode.reviewer.json")
+    assert call["config_content"] == git.reviewer_config
+    assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.reviewer.json") in (
+        git.ref_reads
+    )
     assert "### 1. Multi-step writes commit together" in call["prompt"]
     assert (str(tmp_path / "repo"), "origin/main", "REVIEW.md") in git.ref_reads
     body = github.created_prs[0][2]
@@ -1866,11 +1883,27 @@ def test_reviewer_off_keeps_the_old_flow(tmp_path):
     assert "automated review off" in github.created_prs[0][2]
 
 
-def test_a_reviewer_config_changed_in_the_worktree_is_never_used(tmp_path):
+def test_protected_paths_go_stuck_before_the_reviewer_runs(tmp_path):
     git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
-    git.worktree_reviewer_config = '{"permission": {"edit": {"*": "allow"}}}'
+    git.review_files = ["backend/apps/x.py", "opencode.jsonc"]
 
-    results, _, github, runner, _ = run_with_reviewer(tmp_path, [], git=git)
+    results, git, github, runner, notifier = run_with_reviewer(tmp_path, [], git=git)
 
+    assert not results[0].ok
     assert runner.review_calls == []
-    assert "reviewer config in the worktree differs from origin/main" in github.created_prs[0][2]
+    assert notifier.stuck[0].failing_check == "protected path changed"
+
+
+def test_review_feedback_survives_a_failed_check_and_names_the_open_finding(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.check_script = [True, False, False]
+
+    results, git, github, runner, notifier = run_with_reviewer(
+        tmp_path, [IMPORTANT], git=git, attempts=3
+    )
+
+    assert not results[0].ok
+    assert "link and save are not atomic" in runner.builder_prompts[2]
+    assert notifier.stuck[0].failing_check == (
+        "review: backend/apps/x/use_case.py:12 link and save are not atomic"
+    )

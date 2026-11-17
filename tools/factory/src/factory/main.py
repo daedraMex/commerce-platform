@@ -45,6 +45,7 @@ from .review_step import (
     build_reviewer_feedback,
     compose_reviewer_prompt,
     parse_review,
+    stuck_reason,
 )
 from .reviews import ReviewFix
 from .runner import AgentRunner
@@ -394,9 +395,9 @@ class Factory:
                     skipped_areas=check.skipped_areas,
                     review_lines=review.pr_lines(),
                 )
+            # The open review findings stay in the next prompt until a review passes.
             feedback = check.output
             failed_areas = check.failed_areas
-            review_feedback = ""
         return self._stuck(
             ticket,
             model=model,
@@ -404,7 +405,11 @@ class Factory:
             log_path=log_path,
             worktree=worktree,
             open_question=None,
-            failing_check=f"step budget exceeded ({self.settings.attempts} attempts)",
+            failing_check=(
+                stuck_reason(open_findings[0])
+                if (open_findings := [f for f in previous_findings if f.tag == "Important"])
+                else f"step budget exceeded ({self.settings.attempts} attempts)"
+            ),
             attempts=made,
         )
 
@@ -809,16 +814,16 @@ class Factory:
         if remaining <= 0:
             return PrePrReview.failed(reviewer, "no time left in the ticket's budget")
         try:
+            # The publish guard runs again later; running it here keeps the reviewer
+            # off any change to protected paths, OpenCode configs included.
+            if touches_protected_paths(self.git.review_changed_files(worktree)):
+                return PrePrReview.protected()
             rules = self.git.read_ref_file(self.settings.repo_dir, "origin/main", REVIEW_RULES)
-            # OpenCode reads the reviewer's permissions from the worktree; use them only
-            # when they are exactly main's, so a builder edit can never widen them.
-            expected = self.git.read_ref_file(
+            # Main's reviewer permissions, passed inline: they outrank the repo's own
+            # opencode.json and .opencode/, and the worktree copy is never read.
+            reviewer_config = self.git.read_ref_file(
                 self.settings.repo_dir, "origin/main", REVIEWER_CONFIG_PATH
             )
-            if self.git.read_file(worktree, REVIEWER_CONFIG_PATH) != expected:
-                return PrePrReview.failed(
-                    reviewer, "reviewer config in the worktree differs from origin/main"
-                )
             diff = self.git.review_diff(worktree)
             before = self.git.worktree_fingerprint(worktree)
         except Exception as exc:
@@ -830,7 +835,7 @@ class Factory:
                 ticket, review_rules=rules, diff=diff, previous=previous
             ),
             timeout_seconds=int(remaining),
-            config_path=str(worktree / REVIEWER_CONFIG_PATH),
+            config_content=reviewer_config,
         )
         self._write_log(ticket, result, step=step, model=reviewer, review=True)
         if self.git.worktree_fingerprint(worktree) != before:

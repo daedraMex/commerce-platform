@@ -495,6 +495,13 @@ class Git:
         """Everything the builder changed against origin/main, new files included."""
         return self._with_temp_index(worktree, ["git", "diff", "--cached", "origin/main"])
 
+    def review_changed_files(self, worktree: Path) -> list[str]:
+        """Every path the builder changed against origin/main, new files included."""
+        out = self._with_temp_index(
+            worktree, ["git", "diff", "--cached", "--name-only", "origin/main"]
+        )
+        return [line for line in out.splitlines() if line.strip()]
+
     def worktree_fingerprint(self, worktree: Path) -> str:
         """HEAD plus the tree of every current file; any edit or commit changes it."""
         tree = self._with_temp_index(worktree, ["git", "write-tree"]).strip()

@@ -294,3 +294,21 @@ def test_runner_uses_an_explicit_config_path_when_given(tmp_path):
 
     env = run.calls[0][2]
     assert env["OPENCODE_CONFIG"] == str(tmp_path / "tools/factory/opencode.reviewer.json")
+
+
+def test_runner_passes_inline_config_above_project_config(tmp_path):
+    run = RecordingRun()
+    runner = AgentRunner(run=run, agent_user=None, base_env={"PATH": "/usr/bin"})
+
+    runner.run(
+        worktree=tmp_path,
+        model="m",
+        prompt="p",
+        timeout_seconds=10,
+        config_content='{"permission": {"edit": {"*": "deny"}}}',
+    )
+
+    env = run.calls[0][2]
+    assert env["OPENCODE_CONFIG_CONTENT"] == '{"permission": {"edit": {"*": "deny"}}}'
+    assert env["OPENCODE_DISABLE_PROJECT_CONFIG"] == "1"
+    assert "OPENCODE_CONFIG" not in env

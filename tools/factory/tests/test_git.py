@@ -939,3 +939,17 @@ def test_worktree_fingerprint_changes_when_any_file_changes(tmp_path):
 
     assert after_edit != before
     assert git.worktree_fingerprint(repo) != after_edit
+
+
+def test_review_changed_files_lists_new_and_changed_paths(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "a.py").write_text("a = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "base")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    (repo / "a.py").write_text("a = 2\n")
+    (repo / "opencode.jsonc").write_text("{}\n")
+
+    assert sorted(Git().review_changed_files(repo)) == ["a.py", "opencode.jsonc"]

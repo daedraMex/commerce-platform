@@ -538,18 +538,23 @@ unreachable" as before.
   default 3) and a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either
   stops the ticket as stuck and notifies Telegram. Each ticket fetches
   `origin/main` itself before creating its worktree.
-- **Pre-PR review.** After every selected area's check passes, a reviewer
-  (`FACTORY_STRONG_MODEL`) reviews the diff in a fresh OpenCode session with
-  read-only permissions (`opencode.reviewer.json`, used only when the worktree's
-  copy matches `origin/main`). It applies `REVIEW.md` read from `origin/main`,
-  never from the worktree, and answers in a `REVIEW-FINDINGS` block. Important
-  findings go back to the builder as the next step's feedback; when the step
-  budget ends with one open, the ticket goes stuck as `review: <file:line>
-  <summary>`. Nits and Pre-existing findings go to the PR body. A reviewer that
-  changes the worktree sends the ticket to stuck; a reviewer that times out or
-  answers in another format is reported in the PR body ("read in full") and the
-  PR still opens. `strong-model` tickets skip the review, because the builder
-  model never reviews its own work; `FACTORY_PRE_PR_REVIEW=0` turns it off.
+- **Pre-PR review.** After every selected area's check passes, the factory
+  first applies the protected-path guard (a change there goes stuck before any
+  review), then a reviewer (`FACTORY_STRONG_MODEL`) reviews the diff in a fresh
+  OpenCode session. Its permissions are main's `opencode.reviewer.json` (no
+  edits, no shell), passed inline as `OPENCODE_CONFIG_CONTENT` with
+  `OPENCODE_DISABLE_PROJECT_CONFIG=1`: an inline config outranks the repo's
+  `opencode.json` and `.opencode/`, which a file named by `OPENCODE_CONFIG` does
+  not. It applies `REVIEW.md` read from `origin/main`, never from the worktree,
+  and answers in a `REVIEW-FINDINGS` block. Important findings go back to the
+  builder and stay in its prompt until a review passes; when the step budget
+  ends with one open, the ticket goes stuck as `review: <file:line> <summary>`.
+  Nits, Pre-existing findings and unparsed reviewer lines go to the PR body. A
+  reviewer that changes the worktree sends the ticket to stuck; a reviewer that
+  times out or answers without a findings block is reported in the PR body
+  ("read in full") and the PR still opens. `strong-model` tickets skip the
+  review, because the builder model never reviews its own work;
+  `FACTORY_PRE_PR_REVIEW=0` turns it off.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** each area check script that passed or was
   skipped and the agent steps used, under **Review** the pre-PR review's
