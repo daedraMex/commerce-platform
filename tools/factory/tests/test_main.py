@@ -1562,6 +1562,21 @@ def test_remote_branch_without_a_pr_goes_stuck_before_any_worktree_is_created(tm
     assert ORPHAN_CHECK in github.comments[0][1]
 
 
+def test_orphan_branch_stuck_before_worktree_has_no_handoff_to_a_missing_worktree(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, remote_branches={"nf/7-ticket-7"})
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    factory.run()
+
+    assert len(notifier.stuck) == 1
+    assert notifier.stuck[0].worktree is None
+    assert notifier.stuck[0].handoff_command is None
+
+
 def test_nothing_to_commit_goes_stuck_without_push_or_pr(tmp_path):
     git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, commit_changed=False)
     github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])

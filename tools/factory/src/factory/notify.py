@@ -82,8 +82,8 @@ class StuckInfo:
     comment_url: str
     ticket_url: str
     log_path: str
-    worktree: str
-    handoff_command: str
+    worktree: str | None
+    handoff_command: str | None
 
 
 @dataclass(frozen=True)
@@ -252,12 +252,12 @@ def build_stuck_message(info: StuckInfo) -> str:
     ]
     if info.open_question:
         lines += ["", f"Open question: {escape_html(info.open_question)}"]
-    lines += [
-        "",
-        f"Log: {escape_html(info.log_path)}",
-        f"Worktree: <code>{escape_html(info.worktree)}</code>",
-        f"Enter: <code>{escape_html(info.handoff_command)}</code>",
-    ]
+    lines += ["", f"Log: {escape_html(info.log_path)}"]
+    if info.worktree is not None and info.handoff_command is not None:
+        lines += [
+            f"Worktree: <code>{escape_html(info.worktree)}</code>",
+            f"Enter: <code>{escape_html(info.handoff_command)}</code>",
+        ]
     return _bound_message("\n".join(lines))
 
 

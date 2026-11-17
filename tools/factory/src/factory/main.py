@@ -270,7 +270,7 @@ class Factory:
                 model=model,
                 decisions="",
                 log_path=self._log_path(ticket),
-                worktree=worktree,
+                worktree=None,
                 open_question=None,
                 failing_check=_orphan_branch_check(branch),
                 attempts=0,
@@ -642,7 +642,7 @@ class Factory:
         model: str,
         decisions: str,
         log_path: Path,
-        worktree: Path,
+        worktree: Path | None,
         open_question: str | None,
         failing_check: str,
         attempts: int,
@@ -668,9 +668,11 @@ class Factory:
             comment_url=comment_url,
             ticket_url=self._ticket_url(ticket.number),
             log_path=str(log_path),
-            worktree=str(worktree),
-            handoff_command=build_handoff_command(
-                host=self.settings.handoff_host, worktree=str(worktree)
+            worktree=None if worktree is None else str(worktree),
+            handoff_command=(
+                None
+                if worktree is None
+                else build_handoff_command(host=self.settings.handoff_host, worktree=str(worktree))
             ),
         )
         self._notify(self.notifier.send_stuck, info)
