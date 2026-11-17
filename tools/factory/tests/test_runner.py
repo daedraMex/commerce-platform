@@ -475,3 +475,22 @@ def test_smoke_check_starts_opencode_with_the_agent_env(tmp_path):
         runner.smoke_check(tmp_path)
     version_call = next(call for call in run.calls if "--version" in call[0])
     assert version_call[2]["XDG_CONFIG_HOME"] == "/srv/factory/agent-config"
+
+
+def test_cleanup_that_keeps_finding_processes_fails_loudly():
+    from factory.runner import AgentSandboxError, ensure_agent_cleanup
+
+    run = ScriptedRun(lambda argv: CommandResult(0, "", ""))
+
+    with pytest.raises(AgentSandboxError, match="still running"):
+        ensure_agent_cleanup(run, "factory-agent")
+
+
+def test_a_harmless_sudo_warning_is_not_a_cleanup_failure():
+    from factory.runner import ensure_agent_cleanup
+
+    run = ScriptedRun(
+        lambda argv: CommandResult(1, "", "sudo: unable to resolve host pop-os: Name or service")
+    )
+
+    ensure_agent_cleanup(run, "factory-agent")

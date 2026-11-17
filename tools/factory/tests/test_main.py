@@ -322,6 +322,9 @@ class FakeRunner:
     def ensure_clean(self):
         pass
 
+    def verify_home_is_clean(self):
+        pass
+
     def smoke_check(self, worktree):
         pass
 
@@ -357,6 +360,9 @@ class ExplodingRunner:
     def ensure_clean(self):
         pass
 
+    def verify_home_is_clean(self):
+        pass
+
     def smoke_check(self, worktree):
         pass
 
@@ -369,6 +375,9 @@ class ExplodingRunner:
 
 class BaseExceptionRunner:
     def ensure_clean(self):
+        pass
+
+    def verify_home_is_clean(self):
         pass
 
     def smoke_check(self, worktree):
@@ -1809,6 +1818,9 @@ class ScriptedRunner:
     def ensure_clean(self):
         pass
 
+    def verify_home_is_clean(self):
+        pass
+
     def smoke_check(self, worktree):
         pass
 
@@ -2020,6 +2032,7 @@ def test_builder_gets_main_s_factory_config_inline_and_keeps_project_config(tmp_
     expected = json.loads(git.builder_config)["permission"]
     assert config["permission"] == expected
     assert config["agent"]["build"]["permission"] == expected
+    assert config["default_agent"] == "build"
     assert builder["disable_project_config"] is False
     assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.factory.json") in (
         git.ref_reads

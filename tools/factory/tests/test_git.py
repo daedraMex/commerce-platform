@@ -21,12 +21,16 @@ from factory.shell import CommandResult, CommandTimeout
 
 
 class RecordingRun:
+    """Answer like the machine: pkill exits 1 once no agent process is left."""
+
     def __init__(self, result=None):
         self.result = result or CommandResult(exit_code=0, stdout="", stderr="")
         self.calls = []
 
     def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
         self.calls.append((argv, cwd, env, replace_env))
+        if "/usr/bin/pkill" in argv:
+            return CommandResult(exit_code=1, stdout="", stderr="")
         return self.result
 
 
@@ -476,7 +480,7 @@ class TimeoutThenRecord:
         self.calls.append((argv, cwd, env, replace_env))
         if len(self.calls) == 1:
             raise CommandTimeout("slow")
-        return CommandResult(exit_code=0, stdout="", stderr="")
+        return CommandResult(exit_code=1, stdout="", stderr="")
 
 
 def test_check_on_timeout_runs_the_agent_cleanup_through_sudo(tmp_path):

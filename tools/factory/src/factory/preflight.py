@@ -122,6 +122,7 @@ class Preflight:
             if self.runner is not None:
                 step = "verify agent sandbox"
                 self.runner.ensure_clean()
+                self.runner.verify_home_is_clean()
                 self.runner.smoke_check(worktree)
 
             step = "verify worktree cleanup"

@@ -825,6 +825,9 @@ class Factory:
             raise RuntimeError(f"{path} on origin/main has no permission block")
         build = config.setdefault("agent", {}).setdefault("build", {})
         build["permission"] = config["permission"]
+        # Pin the agent: a planted .opencode/opencode.json (project config, ranked
+        # below inline) cannot switch the run to an agent with wider permissions.
+        config["default_agent"] = "build"
         return json.dumps(config)
 
     def _pre_pr_review(

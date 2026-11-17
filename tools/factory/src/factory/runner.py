@@ -64,14 +64,30 @@ def ensure_agent_cleanup(run: RunCommand, agent_user: str | None) -> None:
         return
     for _ in range(MAX_CLEANUP_PASSES):
         result = run(agent_cleanup_argv(agent_user), "/", timeout=AGENT_KILL_TIMEOUT_SECONDS)
-        if "sudo:" in result.stderr:
-            raise AgentSandboxError(f"agent cleanup refused by sudo: {result.stderr.strip()}")
+        refusal = _sudo_refusal(result.stderr)
+        if refusal:
+            raise AgentSandboxError(f"agent cleanup refused by sudo: {refusal}")
         if result.exit_code == 1:
             return
         if result.exit_code != 0:
             raise AgentSandboxError(
                 f"agent cleanup failed: {result.stderr.strip() or result.exit_code}"
             )
+    raise AgentSandboxError(
+        f"agent processes still running after {MAX_CLEANUP_PASSES} pkill passes"
+    )
+
+
+# sudo warnings that do not stop the command it runs.
+_HARMLESS_SUDO = ("unable to resolve host",)
+
+
+def _sudo_refusal(stderr: str) -> str:
+    """The first sudo error line in ``stderr``, ignoring harmless warnings."""
+    for line in stderr.splitlines():
+        if line.startswith("sudo:") and not any(warning in line for warning in _HARMLESS_SUDO):
+            return line.strip()
+    return ""
 
 
 def kill_agent_processes(run: RunCommand, agent_user: str | None) -> None:

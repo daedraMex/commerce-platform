@@ -338,6 +338,9 @@ class SandboxRunner:
     def ensure_clean(self):
         self.events.append(("agent_cleanup",))
 
+    def verify_home_is_clean(self):
+        self.events.append(("agent_home_clean",))
+
     def smoke_check(self, worktree):
         self.events.append(("opencode_smoke",))
         if self.error:
@@ -352,7 +355,8 @@ def test_preflight_proves_cleanup_and_that_opencode_starts_as_the_agent(tmp_path
     preflight.run()
 
     names = [event[0] for event in events]
-    assert names.index("agent_cleanup") < names.index("opencode_smoke")
+    assert names.index("agent_cleanup") < names.index("agent_home_clean")
+    assert names.index("agent_home_clean") < names.index("opencode_smoke")
     assert names.index("opencode_smoke") < names.index("create_agent_cleanup_probe")
 
 
