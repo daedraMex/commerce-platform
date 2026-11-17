@@ -425,6 +425,8 @@ class Git:
             chunks.append(f"=== {label} ===\n{body}" if body else f"=== {label} ===")
             if result.exit_code != 0:
                 failed.append(area)
+        # Tests and dev servers run as the agent; none may outlive the checks.
+        kill_agent_processes(self._run, self._agent_user)
         return CheckResult(
             passed=not failed,
             output=truncate_check_output("\n\n".join(chunks).strip()),

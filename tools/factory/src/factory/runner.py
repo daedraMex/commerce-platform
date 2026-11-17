@@ -159,11 +159,15 @@ class AgentRunner:
         agent_user: str | None = None,
         agent_home: str | None = None,
         base_env: dict[str, str] | None = None,
+        config_home: str | None = None,
     ):
         self._run = run
         self.agent_user = agent_user
         self.agent_home = agent_home
         self.base_env = dict(base_env if base_env is not None else os.environ)
+        # XDG_CONFIG_HOME for OpenCode: a factory-owned directory the agent can read
+        # but not write, so nothing the agent runs can plant global config (#153).
+        self.config_home = config_home
 
     def run(
         self,
@@ -174,12 +178,14 @@ class AgentRunner:
         timeout_seconds: int,
         config_path: str | None = None,
         config_content: str | None = None,
+        disable_project_config: bool = False,
     ) -> AgentResult:
-        """Run OpenCode once.
+        """Run OpenCode once, then kill any agent process it left behind.
 
-        ``config_content`` (the reviewer's) is passed inline and project config is
-        disabled: an inline config ranks above the repo's ``opencode.json`` and
-        ``.opencode/``, which a ``OPENCODE_CONFIG`` file does not.
+        ``config_content`` is passed inline: it ranks above the repo's
+        ``opencode.json`` and ``.opencode/``, which an ``OPENCODE_CONFIG`` file does
+        not. The reviewer also disables project config; the builder keeps it, because
+        it needs the repo's AGENTS.md.
         """
         env = build_agent_env(
             self.base_env,
@@ -190,7 +196,10 @@ class AgentRunner:
         if config_content is not None:
             del env["OPENCODE_CONFIG"]
             env["OPENCODE_CONFIG_CONTENT"] = config_content
+        if disable_project_config:
             env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
+        if self.config_home:
+            env["XDG_CONFIG_HOME"] = self.config_home
         argv: list[str] = [OPENCODE_BIN, "run", "--model", model, prompt]
         if self.agent_user:
             argv = sudo_argv(self.agent_user, argv, env)
@@ -205,6 +214,9 @@ class AgentRunner:
         except CommandTimeout:
             kill_agent_processes(self._run, self.agent_user)
             return AgentResult(exit_code=None, stdout="", stderr="", timed_out=True)
+        # A normal exit can leave background processes (nohup, servers) that would
+        # change files after the checks or the review; none may outlive the step.
+        kill_agent_processes(self._run, self.agent_user)
         return AgentResult(
             exit_code=result.exit_code,
             stdout=result.stdout,

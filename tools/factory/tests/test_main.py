@@ -70,6 +70,7 @@ class FakeGit:
         self.review_rules = "## Rules\n\n### 1. Multi-step writes commit together"
         self.fingerprints = []
         self.reviewer_config = '{"permission": {"edit": {"*": "deny"}}}'
+        self.builder_config = '{"permission": {"edit": {"AGENTS.md": "deny"}}}'
         self.worktree_reviewer_config = None
         self.review_files = ["backend/apps/x.py"]
         self.check_script = []
@@ -156,6 +157,8 @@ class FakeGit:
         self.ref_reads.append((str(repo_dir), ref, path))
         if path == "tools/factory/opencode.reviewer.json":
             return self.reviewer_config
+        if path == "tools/factory/opencode.factory.json":
+            return self.builder_config
         return self.review_rules
 
     def review_diff(self, worktree):
@@ -320,10 +323,25 @@ class FakeRunner:
         self.calls = []
 
     def run(
-        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+        self,
+        *,
+        worktree,
+        model,
+        prompt,
+        timeout_seconds,
+        config_path=None,
+        config_content=None,
+        disable_project_config=False,
     ):
         self.calls.append(
-            {"model": model, "prompt": prompt, "worktree": worktree, "config_path": config_path}
+            {
+                "model": model,
+                "prompt": prompt,
+                "worktree": worktree,
+                "config_path": config_path,
+                "config_content": config_content,
+                "disable_project_config": disable_project_config,
+            }
         )
         return self.result
 
@@ -332,7 +350,7 @@ class ExplodingRunner:
     def __init__(self, error):
         self.error = error
 
-    def run(self, *, worktree, model, prompt, timeout_seconds):
+    def run(self, *, worktree, model, prompt, timeout_seconds, **_options):
         raise self.error
 
 
@@ -340,7 +358,7 @@ class BaseExceptionRunner:
     def __init__(self, error):
         self.error = error
 
-    def run(self, *, worktree, model, prompt, timeout_seconds):
+    def run(self, *, worktree, model, prompt, timeout_seconds, **_options):
         raise self.error
 
 
@@ -1777,9 +1795,17 @@ class ScriptedRunner:
         self.review_calls = []
 
     def run(
-        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+        self,
+        *,
+        worktree,
+        model,
+        prompt,
+        timeout_seconds,
+        config_path=None,
+        config_content=None,
+        disable_project_config=False,
     ):
-        if config_content is None:
+        if not disable_project_config:
             self.builder_prompts.append(prompt)
             return BUILDER_OK
         self.review_calls.append(
@@ -1949,3 +1975,41 @@ def test_an_open_finding_is_listed_when_the_next_review_fails(tmp_path):
     assert "automated review failed" in body
     assert "Open finding from an earlier round" in body
     assert "link and save are not atomic" in body
+
+
+def test_builder_gets_main_s_factory_config_inline_and_keeps_project_config(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    builder = runner.calls[0]
+    assert builder["config_content"] == git.builder_config
+    assert builder["disable_project_config"] is False
+    assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.factory.json") in (
+        git.ref_reads
+    )
+
+
+def test_review_fix_builder_also_gets_main_s_factory_config_inline(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert runner.calls[0]["config_content"] == git.builder_config
+
+
+def test_reviewer_still_disables_project_config(tmp_path):
+    results, _, _, runner, _ = run_with_reviewer(tmp_path, [NO_FINDINGS])
+
+    assert results[0].ok
+    assert len(runner.review_calls) == 1

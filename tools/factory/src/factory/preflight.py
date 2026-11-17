@@ -85,6 +85,7 @@ class Preflight:
                 agent_user=self.settings.agent_user,
                 paths=sensitive_paths(self.settings),
                 write_paths=write_protected_paths(self.settings),
+                existing_dirs=[self.settings.agent_config_home],
                 repo_dir=self.settings.repo_dir,
             )
 

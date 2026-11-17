@@ -139,3 +139,13 @@ def test_from_env_turns_the_pre_pr_review_on_by_default_and_reads_the_switch():
     }
     assert Settings.from_env(base).pre_pr_review is True
     assert Settings.from_env({**base, "FACTORY_PRE_PR_REVIEW": "0"}).pre_pr_review is False
+
+
+def test_from_env_reads_the_agent_config_home():
+    base = {
+        "FACTORY_MODEL": "deepseek/deepseek-flash",
+        "FACTORY_STRONG_MODEL": "deepseek/deepseek-v4-pro",
+    }
+    assert Settings.from_env(base).agent_config_home == Path("/srv/factory/agent-config")
+    custom = Settings.from_env({**base, "FACTORY_AGENT_CONFIG_HOME": "/opt/agent-config"})
+    assert custom.agent_config_home == Path("/opt/agent-config")

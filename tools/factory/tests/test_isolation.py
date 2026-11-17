@@ -47,6 +47,7 @@ class FakeRun:
         read_stderr="cat: target: Permission denied",
         write_exit=1,
         write_stderr="",
+        dir_exit=0,
     ):
         self.control_exit = control_exit
         self.control_stderr = control_stderr
@@ -54,12 +55,15 @@ class FakeRun:
         self.read_stderr = read_stderr
         self.write_exit = write_exit
         self.write_stderr = write_stderr
+        self.dir_exit = dir_exit
         self.calls = []
 
     def __call__(self, argv, cwd, *, timeout, env=None):
         self.calls.append(argv)
         if argv[-1] == "/etc/hostname":
             return CommandResult(self.control_exit, "", self.control_stderr)
+        if argv[-3] == "/usr/bin/test" and argv[-2] == "-d":
+            return CommandResult(self.dir_exit, "", "")
         if argv[-3] == "/usr/bin/test":
             return CommandResult(self.write_exit, "", self.write_stderr)
         return CommandResult(self.read_exit, "", self.read_stderr)
@@ -87,6 +91,7 @@ def test_write_protected_paths_cover_factory_repo_and_hooks(tmp_path):
         tmp_path,
         tmp_path / "repo",
         tmp_path / "repo" / ".git" / "hooks",
+        settings.agent_config_home,
     ]
 
 
@@ -345,3 +350,38 @@ def test_verify_isolation_uses_positive_control_and_non_interactive_sudo(tmp_pat
         ["sudo", "-n", "-u", "factory-agent", "--", "/usr/bin/cat", "-n", "/secret"],
         ["sudo", "-n", "-u", "factory-agent", "--", "/usr/bin/test", "-w", "/srv/factory/repo"],
     ]
+
+
+def test_verify_isolation_requires_the_agent_config_home_to_exist(tmp_path):
+    run = FakeRun(dir_exit=1)
+
+    with pytest.raises(IsolationError, match="does not exist"):
+        verify_isolation(
+            agent_user="factory-agent",
+            paths=[],
+            existing_dirs=[tmp_path / "agent-config"],
+            run=run,
+        )
+
+
+def test_verify_isolation_accepts_an_existing_read_only_agent_config_home(tmp_path):
+    run = FakeRun()
+
+    verify_isolation(
+        agent_user="factory-agent",
+        paths=[],
+        write_paths=[tmp_path / "agent-config"],
+        existing_dirs=[tmp_path / "agent-config"],
+        run=run,
+    )
+
+    assert [
+        "sudo",
+        "-n",
+        "-u",
+        "factory-agent",
+        "--",
+        "/usr/bin/test",
+        "-d",
+        str(tmp_path / "agent-config"),
+    ] in run.calls

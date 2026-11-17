@@ -546,9 +546,11 @@ def test_check_fails_with_a_clear_message_when_port_3000_stays_busy(tmp_path):
     assert result.passed is False
     assert result.failed_areas == (CONSOLE,)
     assert "port 3000 busy" in result.output
-    assert len(run.calls) == 1
-    assert run.calls[0][0][-2:] == ["-u", "factory-agent"]
-    assert str(worktree / CONSOLE.script) not in run.calls[0][0]
+    # Only agent cleanups ran (the busy-port one and the final one); never the script.
+    assert all(
+        call[0][-4:] == ["/usr/bin/pkill", "-KILL", "-u", "factory-agent"] for call in run.calls
+    )
+    assert all(str(worktree / CONSOLE.script) not in call[0] for call in run.calls)
 
 
 def test_commit_never_runs_hooks():
@@ -953,3 +955,23 @@ def test_review_changed_files_lists_new_and_changed_paths(tmp_path):
     (repo / "opencode.jsonc").write_text("{}\n")
 
     assert sorted(Git().review_changed_files(repo)) == ["a.py", "opencode.jsonc"]
+
+
+def test_check_kills_agent_processes_left_behind_by_the_scripts(tmp_path):
+    worktree = tmp_path
+    write_script(worktree, BACKEND)
+    run = RecordingRun()
+
+    result = Git(run=run, agent_user="factory-agent").check(worktree, areas=(BACKEND,))
+
+    assert result.passed is True
+    assert run.calls[-1][0] == [
+        "sudo",
+        "-n",
+        "-u",
+        "factory-agent",
+        "/usr/bin/pkill",
+        "-KILL",
+        "-u",
+        "factory-agent",
+    ]

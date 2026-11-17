@@ -45,6 +45,7 @@ def write_protected_paths(settings: Settings) -> list[Path]:
         settings.repo_dir.parent,
         settings.repo_dir,
         settings.repo_dir / ".git" / "hooks",
+        settings.agent_config_home,
     ]
 
 
@@ -115,10 +116,15 @@ def verify_isolation(
     agent_user: str,
     paths: list[Path],
     write_paths: list[Path] | None = None,
+    existing_dirs: list[Path] | None = None,
     repo_dir: Path | None = None,
     run: RunCommand = run_command,
 ) -> None:
-    """Fail unless ``agent_user`` cannot read ``paths`` or write ``write_paths``."""
+    """Fail unless ``agent_user`` cannot read ``paths`` or write ``write_paths``.
+
+    ``existing_dirs`` must be directories the agent can see (for example its
+    read-only OpenCode config home), so a missing one fails before OpenCode runs.
+    """
     if not agent_user:
         return
 
@@ -152,6 +158,14 @@ def verify_isolation(
             shown = ", ".join(str(path) for path in violations)
             raise IsolationError(
                 f"repo tree at {repo_dir} is unsafe for agent user {agent_user!r}: {shown}"
+            )
+
+    for path in existing_dirs or []:
+        result = run(_sudo(agent_user, [TEST, "-d", str(path)]), cwd="/", timeout=60)
+        if result.exit_code != 0:
+            raise IsolationError(
+                f"{path} does not exist or is not visible to agent user {agent_user!r}; "
+                "create it owned by factory, mode 0755 (see docs/factory.md)."
             )
 
     for path in write_paths or []:

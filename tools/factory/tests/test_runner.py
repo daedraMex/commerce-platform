@@ -306,9 +306,62 @@ def test_runner_passes_inline_config_above_project_config(tmp_path):
         prompt="p",
         timeout_seconds=10,
         config_content='{"permission": {"edit": {"*": "deny"}}}',
+        disable_project_config=True,
     )
 
     env = run.calls[0][2]
     assert env["OPENCODE_CONFIG_CONTENT"] == '{"permission": {"edit": {"*": "deny"}}}'
     assert env["OPENCODE_DISABLE_PROJECT_CONFIG"] == "1"
     assert "OPENCODE_CONFIG" not in env
+
+
+def test_builder_config_is_inline_but_keeps_the_project_config(tmp_path):
+    run = RecordingRun()
+    runner = AgentRunner(run=run, agent_user=None, base_env={"PATH": "/usr/bin"})
+
+    runner.run(
+        worktree=tmp_path,
+        model="m",
+        prompt="p",
+        timeout_seconds=10,
+        config_content='{"permission": {"edit": {"AGENTS.md": "deny"}}}',
+        disable_project_config=False,
+    )
+
+    env = run.calls[0][2]
+    assert env["OPENCODE_CONFIG_CONTENT"] == '{"permission": {"edit": {"AGENTS.md": "deny"}}}'
+    assert "OPENCODE_DISABLE_PROJECT_CONFIG" not in env
+    assert "OPENCODE_CONFIG" not in env
+
+
+def test_every_opencode_run_reads_global_config_from_the_factory_owned_dir(tmp_path):
+    run = RecordingRun()
+    runner = AgentRunner(
+        run=run,
+        agent_user=None,
+        base_env={"PATH": "/usr/bin"},
+        config_home="/srv/factory/agent-config",
+    )
+
+    runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=10)
+
+    assert run.calls[0][2]["XDG_CONFIG_HOME"] == "/srv/factory/agent-config"
+
+
+def test_a_normal_run_still_kills_every_agent_process_left_behind(tmp_path):
+    run = RecordingRun()
+    runner = AgentRunner(run=run, agent_user="factory-agent", base_env={"PATH": "/usr/bin"})
+
+    result = runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=10)
+
+    assert result.timed_out is False
+    assert run.calls[-1][0] == [
+        "sudo",
+        "-n",
+        "-u",
+        "factory-agent",
+        "/usr/bin/pkill",
+        "-KILL",
+        "-u",
+        "factory-agent",
+    ]
