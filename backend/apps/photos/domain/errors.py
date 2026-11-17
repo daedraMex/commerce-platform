@@ -39,6 +39,10 @@ class CannotApply(PhotoSubmissionError):
     code = "submission_cannot_apply"
 
 
+class CannotRemove(PhotoSubmissionError):
+    code = "submission_cannot_remove"
+
+
 class CannotDiscard(PhotoSubmissionError):
     code = "submission_cannot_discard"
 

@@ -136,3 +136,9 @@ class StorageMediaUploader:
             width=width,
             height=height,
         )
+
+    def delete(self, store: StoreReference, key: str) -> None:
+        """Delete a file that belongs to this store's private photo area."""
+        if not key or not key.startswith(f"stores/{store.id}/photos/"):
+            return
+        get_private_storage().delete(key)

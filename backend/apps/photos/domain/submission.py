@@ -16,6 +16,7 @@ from apps.photos.domain.errors import (
     CannotMarkFailed,
     CannotMarkReady,
     CannotRedo,
+    CannotRemove,
     CannotStartProcessing,
     IdempotencyConflict,
     InvalidSubmissionTarget,
@@ -169,6 +170,13 @@ class PhotoSubmission:
             raise CannotApply("This submission is already applied.")
         self.applied_at = now
         self.applied_by_id = user_id
+
+    def remove(self) -> None:
+        """Return an applied submission to not applied, keeping its result Media."""
+        if self.applied_at is None:
+            raise CannotRemove("Only an applied submission can be removed.")
+        self.applied_at = None
+        self.applied_by_id = None
 
     def discard(self, now: datetime) -> None:
         """Stamp an unapplied submission as discarded; it is never deleted."""

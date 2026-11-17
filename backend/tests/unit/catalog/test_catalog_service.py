@@ -102,6 +102,16 @@ class FakeCatalogRepository:
             None,
         )
 
+    def active_product_images(self, product_id):
+        return sorted(
+            (
+                image
+                for image in self.images.values()
+                if image.product_id == product_id and image.is_active
+            ),
+            key=lambda image: (image.position, image.id),
+        )
+
     def add_product_image(self, image):
         position = image.position
         if position is None:
@@ -385,6 +395,114 @@ def test_upsert_updates_a_link_without_losing_its_position(service, repository):
     assert image.role is ProductImageRole.MAIN
     assert image.is_active is True
     assert image.position == 4
+
+
+def test_append_to_an_empty_carousel_makes_the_media_the_cover(service, repository):
+    image = service.append_to_carousel(HOME, product_id=10, media_id=30)
+
+    assert image.role is ProductImageRole.MAIN
+    assert image.position == 1
+    assert image.is_active is True
+
+
+def test_append_to_a_non_empty_carousel_adds_a_gallery_image_at_the_end(service, repository):
+    repository.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.images[40] = make_image(role=ProductImageRole.MAIN, position=1)
+
+    image = service.append_to_carousel(HOME, product_id=10, media_id=31)
+
+    assert image.role is ProductImageRole.GALLERY
+    assert image.position == 2
+    assert repository.images[40].role is ProductImageRole.MAIN
+    assert repository.images[40].is_active is True
+
+
+def test_append_reactivates_a_retired_link_at_the_end_without_duplicating_it(service, repository):
+    repository.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.images[40] = make_image(
+        image_id=40,
+        media_id=31,
+        role=ProductImageRole.GALLERY,
+        position=2,
+        is_active=False,
+    )
+    repository.images[41] = make_image(
+        image_id=41, media_id=30, role=ProductImageRole.MAIN, position=1
+    )
+
+    image = service.append_to_carousel(HOME, product_id=10, media_id=31)
+
+    assert image.id == 40
+    assert image.is_active is True
+    assert image.role is ProductImageRole.GALLERY
+    assert image.position == 2
+    assert len(repository.images) == 2
+
+
+def test_append_returns_an_existing_active_link_unchanged(service, repository):
+    repository.images[40] = make_image(role=ProductImageRole.MAIN, position=1)
+
+    image = service.append_to_carousel(HOME, product_id=10, media_id=30)
+
+    assert image.id == 40
+    assert image.position == 1
+    assert len(repository.images) == 1
+
+
+def test_remove_the_cover_promotes_the_next_image_by_position(service, repository):
+    repository.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.images[40] = make_image(
+        image_id=40, media_id=30, role=ProductImageRole.MAIN, position=1
+    )
+    repository.images[41] = make_image(
+        image_id=41, media_id=31, role=ProductImageRole.GALLERY, position=2
+    )
+
+    removed = service.remove_from_carousel(HOME, product_id=10, media_id=30)
+
+    assert removed.is_active is False
+    assert removed.role is ProductImageRole.GALLERY
+    assert repository.images[41].role is ProductImageRole.MAIN
+    assert repository.images[41].is_active is True
+
+
+def test_remove_a_gallery_image_keeps_the_cover(service, repository):
+    repository.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.images[40] = make_image(
+        image_id=40, media_id=30, role=ProductImageRole.MAIN, position=1
+    )
+    repository.images[41] = make_image(
+        image_id=41, media_id=31, role=ProductImageRole.GALLERY, position=2
+    )
+
+    removed = service.remove_from_carousel(HOME, product_id=10, media_id=31)
+
+    assert removed.is_active is False
+    assert repository.images[40].role is ProductImageRole.MAIN
+    assert repository.images[40].is_active is True
+
+
+def test_remove_rejects_a_media_that_is_not_linked(service):
+    with pytest.raises(ProductImageNotFound):
+        service.remove_from_carousel(HOME, product_id=10, media_id=99)
+
+
+def test_append_runs_in_a_transaction_and_locks_the_product(service, repository, transaction):
+    service.append_to_carousel(HOME, product_id=10, media_id=30)
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]
+
+
+def test_remove_runs_in_a_transaction_and_locks_the_product(service, repository, transaction):
+    repository.images[40] = make_image()
+
+    service.remove_from_carousel(HOME, product_id=10, media_id=30)
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]
 
 
 def test_deactivate_and_reactivate_preserve_the_position(service, repository):

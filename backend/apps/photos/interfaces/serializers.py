@@ -21,6 +21,13 @@ class UploadPhotoSerializer(serializers.Serializer):
     light_correction = serializers.BooleanField(required=False, default=True)
 
 
+class RedoPhotoSerializer(serializers.Serializer):
+    """The new corners or crop of a redo; an omitted field keeps its stored value."""
+
+    corners = serializers.JSONField(required=False, allow_null=True)
+    crop = serializers.JSONField(required=False, allow_null=True)
+
+
 class PhotoResultMediaSerializer(serializers.Serializer):
     """The public Media a ready submission produced, with its derived renditions."""
 
@@ -66,6 +73,12 @@ class PhotoSubmissionSerializer(serializers.Serializer):
     light_correction = serializers.BooleanField(source="submission.light_correction")
     corners = serializers.JSONField(source="submission.corners", allow_null=True)
     crop = serializers.JSONField(source="submission.crop", allow_null=True)
+    applied_at = serializers.DateTimeField(
+        source="submission.applied_at", allow_null=True, required=False
+    )
+    discarded_at = serializers.DateTimeField(
+        source="submission.discarded_at", allow_null=True, required=False
+    )
     created_at = serializers.DateTimeField(source="submission.created_at")
     updated_at = serializers.DateTimeField(source="submission.updated_at")
 
