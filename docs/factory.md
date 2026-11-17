@@ -321,6 +321,7 @@ Run these once, as the admin user unless a step says `factory`.
     # other optional overrides:
     # FACTORY_MAX_TICKETS=1
     # FACTORY_ATTEMPTS=3              # max agent steps per ticket
+    # FACTORY_PRE_PR_REVIEW=1         # 0 turns the pre-PR reviewer off
     # FACTORY_TIME_LIMIT_MINUTES=120  # max wall-clock per ticket
     # FACTORY_REPO=daedraMex/commerce-platform
     # FACTORY_REPO_DIR=/srv/factory/repo
@@ -503,7 +504,9 @@ unreachable" as before.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
-  `DATABASE_URL` and `OPENCODE_CONFIG` — nothing else. The model provider key is
+  `DATABASE_URL` and `OPENCODE_CONFIG` (the reviewer gets
+  `OPENCODE_CONFIG_CONTENT` and `OPENCODE_DISABLE_PROJECT_CONFIG` instead) —
+  nothing else. The model provider key is
   not in it: the agent reads its own OpenCode auth store from its home, so the
   key never crosses sudo. The backend check runner gets the same downgrade with
   only `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret
@@ -540,9 +543,30 @@ unreachable" as before.
   default 3) and a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either
   stops the ticket as stuck and notifies Telegram. Each ticket fetches
   `origin/main` itself before creating its worktree.
+- **Pre-PR review.** After every selected area's check passes, the factory
+  first applies the protected-path guard (a change there goes stuck before any
+  review), then a reviewer (`FACTORY_STRONG_MODEL`) reviews the diff in a fresh
+  OpenCode session. Its permissions are main's `opencode.reviewer.json` (no
+  edits, no shell), passed inline as `OPENCODE_CONFIG_CONTENT` with
+  `OPENCODE_DISABLE_PROJECT_CONFIG=1`: an inline config outranks the repo's
+  `opencode.json` and `.opencode/`, which a file named by `OPENCODE_CONFIG` does
+  not. It applies `REVIEW.md` read from `origin/main`, never from the worktree,
+  and answers in a `REVIEW-FINDINGS` block. Important findings go back to the
+  builder and stay in its prompt until a review passes; when the step budget
+  ends with one open, the ticket goes stuck as `review: <file:line> <summary>`.
+  Nits, Pre-existing findings and unparsed reviewer lines go to the PR body. A
+  reviewer that changes the worktree sends the ticket to stuck; a reviewer that
+  times out or answers without a findings block is reported in the PR body
+  ("read in full") and the PR still opens. `strong-model` tickets skip the
+  review, because the builder model never reviews its own work;
+  `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#153): the agent's global
+  OpenCode config (`~/.config/opencode/`) is still loaded and is writable by the
+  agent user, so a builder or a test could plant global instructions that
+  weaken later reviews; the owner's review stays the gate.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** each area check script that passed or was
-  skipped and the agent steps used, under **Risk** changed migrations and
+  skipped and the agent steps used, under **Review** the pre-PR review's
+  outcome and non-blocking findings, under **Risk** changed migrations and
   sensitive paths
   (`SENSITIVE_PREFIXES` in `diff.py`), and under **How to revert** what undoing
   the merge takes.

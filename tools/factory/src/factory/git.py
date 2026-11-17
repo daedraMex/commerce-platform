@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import socket
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -456,6 +458,55 @@ class Git:
             timeout=120,
         ).stdout.splitlines()
         return build_diff_stats(numstat, new_files)
+
+    def read_ref_file(self, repo_dir: Path, ref: str, path: str) -> str:
+        """A file's content at ``ref`` (for example REVIEW.md on origin/main)."""
+        result = self._run(["git", "show", f"{ref}:{path}"], str(repo_dir), timeout=60)
+        if result.exit_code != 0:
+            raise RuntimeError(f"git show {ref}:{path} failed: {result.stderr.strip()}")
+        return result.stdout
+
+    def _with_temp_index(self, worktree: Path, argv: list[str]) -> str:
+        """Run ``argv`` against a throwaway index holding every current file.
+
+        The real index stays untouched, so untracked files show up in the diff
+        and fingerprint without staging anything for the runner's commit.
+        """
+        index = self._run(["git", "rev-parse", "--git-path", "index"], str(worktree), timeout=60)
+        if index.exit_code != 0:
+            raise RuntimeError(f"git rev-parse failed: {index.stderr.strip()}")
+        real_index = Path(index.stdout.strip())
+        if not real_index.is_absolute():
+            real_index = worktree / real_index
+        with tempfile.TemporaryDirectory(prefix="factory-index-") as tmp:
+            temp_index = Path(tmp) / "index"
+            if real_index.exists():
+                shutil.copyfile(real_index, temp_index)
+            env = {"GIT_INDEX_FILE": str(temp_index)}
+            added = self._run(["git", "add", "-A"], str(worktree), timeout=300, env=env)
+            if added.exit_code != 0:
+                raise RuntimeError(f"git add (temporary index) failed: {added.stderr.strip()}")
+            result = self._run(argv, str(worktree), timeout=300, env=env)
+        if result.exit_code != 0:
+            raise RuntimeError(f"{' '.join(argv[:2])} failed: {result.stderr.strip()}")
+        return result.stdout
+
+    def review_diff(self, worktree: Path) -> str:
+        """Everything the builder changed against origin/main, new files included."""
+        return self._with_temp_index(worktree, ["git", "diff", "--cached", "origin/main"])
+
+    def review_changed_files(self, worktree: Path) -> list[str]:
+        """Every path the builder changed against origin/main, new files included."""
+        out = self._with_temp_index(
+            worktree, ["git", "diff", "--cached", "--name-only", "origin/main"]
+        )
+        return [line for line in out.splitlines() if line.strip()]
+
+    def worktree_fingerprint(self, worktree: Path) -> str:
+        """HEAD plus the tree of every current file; any edit or commit changes it."""
+        tree = self._with_temp_index(worktree, ["git", "write-tree"]).strip()
+        head = self._run(["git", "rev-parse", "HEAD"], str(worktree), timeout=60).stdout.strip()
+        return f"{head}:{tree}"
 
     def read_file(self, worktree: Path, relpath: str) -> str:
         result = self._run(["cat", relpath], str(worktree), timeout=60)

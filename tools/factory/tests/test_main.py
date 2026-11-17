@@ -66,6 +66,13 @@ class FakeGit:
         self.created_from = []
         self.fetched_branches = []
         self.diff_since = []
+        self.ref_reads = []
+        self.review_rules = "## Rules\n\n### 1. Multi-step writes commit together"
+        self.fingerprints = []
+        self.reviewer_config = '{"permission": {"edit": {"*": "deny"}}}'
+        self.worktree_reviewer_config = None
+        self.review_files = ["backend/apps/x.py"]
+        self.check_script = []
         self.removed_worktrees = []
         self.deleted_branches = []
         self.events = []
@@ -139,12 +146,36 @@ class FakeGit:
             return self.decisions
         if relpath == ".opencode/commands/implement.md":
             return self.command_body
+        if relpath == "tools/factory/opencode.reviewer.json":
+            if self.worktree_reviewer_config is not None:
+                return self.worktree_reviewer_config
+            return self.reviewer_config
         return ""
+
+    def read_ref_file(self, repo_dir, ref, path):
+        self.ref_reads.append((str(repo_dir), ref, path))
+        if path == "tools/factory/opencode.reviewer.json":
+            return self.reviewer_config
+        return self.review_rules
+
+    def review_diff(self, worktree):
+        return "diff --git a/x.py b/x.py\n+x = 1\n"
+
+    def review_changed_files(self, worktree):
+        return list(self.review_files)
+
+    def worktree_fingerprint(self, worktree):
+        if self.fingerprints:
+            return self.fingerprints.pop(0)
+        return "same"
 
     def check(self, worktree, *, areas=None):
         self.events.append("check")
         if "preflight" in str(worktree):
             return CheckResult(self.preflight_check_passed, "")
+        if self.check_script:
+            passed = self.check_script.pop(0)
+            return CheckResult(passed, "" if passed else "1 failed", ())
         return CheckResult(self.check_result, self.check_output, self.failed_areas)
 
     def commit_all(self, worktree, message):
@@ -288,8 +319,12 @@ class FakeRunner:
         self.result = result or AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
         self.calls = []
 
-    def run(self, *, worktree, model, prompt, timeout_seconds):
-        self.calls.append({"model": model, "prompt": prompt, "worktree": worktree})
+    def run(
+        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+    ):
+        self.calls.append(
+            {"model": model, "prompt": prompt, "worktree": worktree, "config_path": config_path}
+        )
         return self.result
 
 
@@ -1708,3 +1743,209 @@ def test_agent_committed_on_its_own_still_opens_the_pr(tmp_path):
     assert git.pushed != []
     assert len(github.created_prs) == 1
     assert "no changes made for the ticket" not in str(github.comments)
+
+
+# --- pre-PR reviewer (#141) -------------------------------------------------
+
+NO_FINDINGS = AgentResult(
+    exit_code=0,
+    stdout="REVIEW-FINDINGS-BEGIN\nNO FINDINGS\nREVIEW-FINDINGS-END\n",
+    stderr="",
+    timed_out=False,
+)
+IMPORTANT = AgentResult(
+    exit_code=0,
+    stdout=(
+        "REVIEW-FINDINGS-BEGIN\n"
+        "[Important] backend/apps/x/use_case.py:12 | link and save are not atomic | "
+        "save raises -> partial state\n"
+        "[Nit] backend/apps/x/views.py:3 | duplicated helper | none\n"
+        "REVIEW-FINDINGS-END\n"
+    ),
+    stderr="",
+    timed_out=False,
+)
+BUILDER_OK = AgentResult(exit_code=0, stdout="built", stderr="", timed_out=False)
+
+
+class ScriptedRunner:
+    """Builder calls always succeed; reviewer calls (with a config path) follow a script."""
+
+    def __init__(self, reviews):
+        self.reviews = list(reviews)
+        self.builder_prompts = []
+        self.review_calls = []
+
+    def run(
+        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+    ):
+        if config_content is None:
+            self.builder_prompts.append(prompt)
+            return BUILDER_OK
+        self.review_calls.append(
+            {"model": model, "prompt": prompt, "config_content": config_content}
+        )
+        return self.reviews.pop(0)
+
+
+def review_settings(tmp_path, **overrides):
+    from dataclasses import replace
+
+    return replace(make_settings(tmp_path), **{"pre_pr_review": True, **overrides})
+
+
+def run_with_reviewer(tmp_path, reviews, *, labels=("ready-for-agent",), git=None, **settings):
+    git = git or FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels=set(labels))], pr_number=101)
+    runner = ScriptedRunner(reviews)
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=runner,
+        notifier=notifier,
+        settings=review_settings(tmp_path, **settings),
+    )
+    results = factory.run()
+    return results, git, github, runner, notifier
+
+
+def test_reviewer_runs_with_the_strong_model_and_rules_from_origin_main(tmp_path):
+    results, git, github, runner, _ = run_with_reviewer(tmp_path, [NO_FINDINGS])
+
+    assert results[0].ok
+    assert len(runner.review_calls) == 1
+    call = runner.review_calls[0]
+    assert call["model"] == "deepseek/deepseek-v4-pro"
+    assert call["config_content"] == git.reviewer_config
+    assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.reviewer.json") in (
+        git.ref_reads
+    )
+    assert "### 1. Multi-step writes commit together" in call["prompt"]
+    assert (str(tmp_path / "repo"), "origin/main", "REVIEW.md") in git.ref_reads
+    body = github.created_prs[0][2]
+    assert "## Review" in body
+    assert "No blocking findings" in body
+
+
+def test_important_finding_goes_back_to_the_builder_then_the_pr_opens(tmp_path):
+    results, _, github, runner, _ = run_with_reviewer(tmp_path, [IMPORTANT, NO_FINDINGS])
+
+    assert results[0].ok
+    assert len(runner.builder_prompts) == 2
+    assert "link and save are not atomic" in runner.builder_prompts[1]
+    assert "untrusted" in runner.builder_prompts[1]
+    assert "Findings from your previous round" in runner.review_calls[1]["prompt"]
+    assert len(github.created_prs) == 1
+
+
+def test_important_finding_until_the_budget_ends_goes_stuck_naming_it(tmp_path):
+    results, git, github, runner, notifier = run_with_reviewer(
+        tmp_path, [IMPORTANT, IMPORTANT], attempts=2
+    )
+
+    assert not results[0].ok
+    assert github.created_prs == []
+    assert git.pushed == []
+    assert notifier.stuck[0].failing_check == (
+        "review: backend/apps/x/use_case.py:12 link and save are not atomic"
+    )
+
+
+def test_nits_are_listed_in_the_pr_body_and_never_block(tmp_path):
+    nits_only = AgentResult(
+        exit_code=0,
+        stdout=(
+            "REVIEW-FINDINGS-BEGIN\n"
+            "[Nit] backend/apps/x/views.py:3 | duplicated helper | none\n"
+            "[Pre-existing] backend/apps/y.py | old bug | x -> y\n"
+            "REVIEW-FINDINGS-END\n"
+        ),
+        stderr="",
+        timed_out=False,
+    )
+
+    results, _, github, runner, _ = run_with_reviewer(tmp_path, [nits_only])
+
+    assert results[0].ok
+    assert len(runner.builder_prompts) == 1
+    body = github.created_prs[0][2]
+    assert "[Nit] `backend/apps/x/views.py:3` duplicated helper" in body
+    assert "[Pre-existing] `backend/apps/y.py` old bug" in body
+
+
+def test_strong_model_ticket_skips_the_reviewer(tmp_path):
+    results, _, github, runner, _ = run_with_reviewer(
+        tmp_path, [], labels=("ready-for-agent", "strong-model")
+    )
+
+    assert results[0].ok
+    assert runner.review_calls == []
+    assert "automated review skipped (strong-model ticket)" in github.created_prs[0][2]
+
+
+def test_an_unreadable_review_still_opens_the_pr_and_says_so(tmp_path):
+    garbage = AgentResult(exit_code=0, stdout="LGTM", stderr="", timed_out=False)
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [garbage])
+
+    assert results[0].ok
+    assert "automated review failed" in github.created_prs[0][2]
+    assert "read in full" in github.created_prs[0][2]
+
+
+def test_a_reviewer_that_changes_the_worktree_sends_the_ticket_to_stuck(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.fingerprints = ["before", "after"]
+
+    results, git, github, _, notifier = run_with_reviewer(tmp_path, [NO_FINDINGS], git=git)
+
+    assert not results[0].ok
+    assert git.pushed == []
+    assert notifier.stuck[0].failing_check == "reviewer modified the worktree"
+
+
+def test_reviewer_off_keeps_the_old_flow(tmp_path):
+    results, _, github, runner, _ = run_with_reviewer(tmp_path, [], pre_pr_review=False)
+
+    assert results[0].ok
+    assert runner.review_calls == []
+    assert "automated review off" in github.created_prs[0][2]
+
+
+def test_protected_paths_go_stuck_before_the_reviewer_runs(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.review_files = ["backend/apps/x.py", "opencode.jsonc"]
+
+    results, git, github, runner, notifier = run_with_reviewer(tmp_path, [], git=git)
+
+    assert not results[0].ok
+    assert runner.review_calls == []
+    assert notifier.stuck[0].failing_check == "protected path changed"
+
+
+def test_review_feedback_survives_a_failed_check_and_names_the_open_finding(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.check_script = [True, False, False]
+
+    results, git, github, runner, notifier = run_with_reviewer(
+        tmp_path, [IMPORTANT], git=git, attempts=3
+    )
+
+    assert not results[0].ok
+    assert "link and save are not atomic" in runner.builder_prompts[2]
+    assert notifier.stuck[0].failing_check == (
+        "check failed; review: backend/apps/x/use_case.py:12 link and save are not atomic"
+    )
+
+
+def test_an_open_finding_is_listed_when_the_next_review_fails(tmp_path):
+    garbage = AgentResult(exit_code=0, stdout="LGTM", stderr="", timed_out=False)
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [IMPORTANT, garbage])
+
+    body = github.created_prs[0][2]
+    assert "automated review failed" in body
+    assert "Open finding from an earlier round" in body
+    assert "link and save are not atomic" in body

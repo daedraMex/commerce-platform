@@ -99,3 +99,8 @@ def test_is_sensitive_path_covers_auth_permissions_and_settings():
 def test_is_sensitive_path_allows_ordinary_code():
     assert not is_sensitive_path("backend/apps/catalog/views.py")
     assert not is_sensitive_path("web/console/src/app/[store]/photos/page.tsx")
+
+
+def test_every_opencode_config_form_is_protected():
+    assert is_protected_path("opencode.jsonc")
+    assert is_protected_path("web/console/opencode.jsonc")

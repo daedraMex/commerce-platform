@@ -172,13 +172,25 @@ class AgentRunner:
         model: str,
         prompt: str,
         timeout_seconds: int,
+        config_path: str | None = None,
+        config_content: str | None = None,
     ) -> AgentResult:
+        """Run OpenCode once.
+
+        ``config_content`` (the reviewer's) is passed inline and project config is
+        disabled: an inline config ranks above the repo's ``opencode.json`` and
+        ``.opencode/``, which a ``OPENCODE_CONFIG`` file does not.
+        """
         env = build_agent_env(
             self.base_env,
-            config_path=str(worktree / OPENCODE_CONFIG_PATH),
+            config_path=config_path or str(worktree / OPENCODE_CONFIG_PATH),
             agent_user=self.agent_user,
             agent_home=self.agent_home,
         )
+        if config_content is not None:
+            del env["OPENCODE_CONFIG"]
+            env["OPENCODE_CONFIG_CONTENT"] = config_content
+            env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
         argv: list[str] = [OPENCODE_BIN, "run", "--model", model, prompt]
         if self.agent_user:
             argv = sudo_argv(self.agent_user, argv, env)

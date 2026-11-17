@@ -70,7 +70,7 @@ def is_protected_path(path: str) -> bool:
     if any(normalized.startswith(prefix) for prefix in PROTECTED_PREFIXES):
         return True
     name = PurePosixPath(normalized).name
-    return name.startswith("opencode") and name.endswith(".json")
+    return name.startswith("opencode") and name.endswith((".json", ".jsonc"))
 
 
 def is_sensitive_path(path: str) -> bool:

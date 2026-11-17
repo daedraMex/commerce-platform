@@ -20,7 +20,7 @@ from .github import GitHub, GitHubError
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
 from .metrics import MetricsGitHub, run_metrics
-from .models import select_model
+from .models import STRONG_MODEL_LABEL, select_model
 from .notify import (
     Notifier,
     NullNotifier,
@@ -39,6 +39,16 @@ from .pr_body import build_pr_body
 from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, compose_review_prompt, read_command_body
 from .review_attempts import ReviewAttemptLedger
+from .review_step import (
+    REVIEW_RULES,
+    REVIEWER_CONFIG_PATH,
+    Finding,
+    PrePrReview,
+    build_reviewer_feedback,
+    compose_reviewer_prompt,
+    parse_review,
+    stuck_reason,
+)
 from .reviews import ReviewFix
 from .runner import AgentRunner
 from .sudoers import verify_sudoers_logging
@@ -290,6 +300,8 @@ class Factory:
         decisions = ""
         feedback = ""
         failed_areas = ()
+        review_feedback = ""
+        previous_findings: tuple[Finding, ...] = ()
         for _step in range(1, self.settings.attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -311,6 +323,7 @@ class Factory:
                 overlay=self.overlay,
                 feedback=feedback,
                 failed_areas=failed_areas,
+                review_feedback=review_feedback,
             )
             result = self.runner.run(
                 worktree=worktree,
@@ -347,6 +360,31 @@ class Factory:
                 )
             check = self.git.check(worktree)
             if check.passed:
+                review = self._pre_pr_review(
+                    ticket,
+                    worktree=worktree,
+                    step=_step,
+                    previous=previous_findings,
+                    deadline=deadline,
+                )
+                stuck_check = review.stuck_check(last_step=_step >= self.settings.attempts)
+                if stuck_check is not None:
+                    return self._stuck(
+                        ticket,
+                        model=model,
+                        decisions=decisions,
+                        log_path=log_path,
+                        worktree=worktree,
+                        open_question=None,
+                        failing_check=stuck_check,
+                        attempts=made,
+                    )
+                if review.blocking:
+                    feedback = ""
+                    failed_areas = ()
+                    review_feedback = build_reviewer_feedback(review.findings)
+                    previous_findings = review.findings
+                    continue
                 return self._success(
                     ticket,
                     model=model,
@@ -357,7 +395,9 @@ class Factory:
                     attempts=made,
                     checked_areas=check.checked_areas,
                     skipped_areas=check.skipped_areas,
+                    review_lines=review.pr_lines(previous_findings),
                 )
+            # The open review findings stay in the next prompt until a review passes.
             feedback = check.output
             failed_areas = check.failed_areas
         return self._stuck(
@@ -367,7 +407,11 @@ class Factory:
             log_path=log_path,
             worktree=worktree,
             open_question=None,
-            failing_check=f"step budget exceeded ({self.settings.attempts} attempts)",
+            failing_check=(
+                f"check failed; {stuck_reason(open_findings[0])}"
+                if (open_findings := [f for f in previous_findings if f.tag == "Important"])
+                else f"step budget exceeded ({self.settings.attempts} attempts)"
+            ),
             attempts=made,
         )
 
@@ -560,6 +604,7 @@ class Factory:
         attempts: int,
         checked_areas: tuple[Area, ...] = (),
         skipped_areas: tuple[Area, ...] = (),
+        review_lines: tuple[str, ...] = (),
     ) -> TicketResult:
         # El valor de commit_all no decide nada: el agente pudo haber commiteado
         # por su cuenta (commit_all da False y el trabajo ya está en la rama).
@@ -598,6 +643,7 @@ class Factory:
             decisions=extract_decisions(decisions),
             checked_areas=checked_areas,
             skipped_areas=skipped_areas,
+            review_lines=review_lines,
             diff=diff,
             steps_used=attempts,
             step_budget=self.settings.attempts,
@@ -730,11 +776,14 @@ class Factory:
         self.settings.logs_dir.mkdir(parents=True, exist_ok=True)
         return self.settings.logs_dir / f"{ticket.number}.log"
 
-    def _write_log(self, ticket: Ticket, result, *, step: int, model: str) -> Path:
+    def _write_log(
+        self, ticket: Ticket, result, *, step: int, model: str, review: bool = False
+    ) -> Path:
         """Append one step's output under a header; step 1 starts a fresh file.
 
         The stuck comment shows the tail of this file, so a run must never show
-        output left over from an older run of the same ticket.
+        output left over from an older run of the same ticket. A review always
+        appends after the builder step it reviewed.
         """
         log_path = self._log_path(ticket)
         content = result.stdout or ""
@@ -742,10 +791,60 @@ class Factory:
             content += ("\n" if content else "") + result.stderr
         if content and not content.endswith("\n"):
             content += "\n"
-        header = f"=== step {step} (model {model}) ===\n"
-        with log_path.open("w" if step == 1 else "a") as log:
+        label = f"review after step {step}" if review else f"step {step}"
+        header = f"=== {label} (model {model}) ===\n"
+        with log_path.open("w" if step == 1 and not review else "a") as log:
             log.write(header + content)
         return log_path
+
+    def _pre_pr_review(
+        self,
+        ticket: Ticket,
+        *,
+        worktree: Path,
+        step: int,
+        previous: tuple[Finding, ...],
+        deadline: float,
+    ) -> PrePrReview:
+        """Run the read-only reviewer once; never let it change what gets published."""
+        reviewer = self.settings.factory_strong_model
+        if not self.settings.pre_pr_review:
+            return PrePrReview.off()
+        if STRONG_MODEL_LABEL in ticket.labels:
+            return PrePrReview.skipped()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return PrePrReview.failed(reviewer, "no time left in the ticket's budget")
+        try:
+            # The publish guard runs again later; running it here keeps the reviewer
+            # off any change to protected paths, OpenCode configs included.
+            if touches_protected_paths(self.git.review_changed_files(worktree)):
+                return PrePrReview.protected()
+            rules = self.git.read_ref_file(self.settings.repo_dir, "origin/main", REVIEW_RULES)
+            # Main's reviewer permissions, passed inline: they outrank the repo's own
+            # opencode.json and .opencode/, and the worktree copy is never read.
+            reviewer_config = self.git.read_ref_file(
+                self.settings.repo_dir, "origin/main", REVIEWER_CONFIG_PATH
+            )
+            diff = self.git.review_diff(worktree)
+            before = self.git.worktree_fingerprint(worktree)
+        except Exception as exc:
+            return PrePrReview.failed(reviewer, short_error(exc))
+        result = self.runner.run(
+            worktree=worktree,
+            model=reviewer,
+            prompt=compose_reviewer_prompt(
+                ticket, review_rules=rules, diff=diff, previous=previous
+            ),
+            timeout_seconds=int(remaining),
+            config_content=reviewer_config,
+        )
+        self._write_log(ticket, result, step=step, model=reviewer, review=True)
+        if self.git.worktree_fingerprint(worktree) != before:
+            return PrePrReview.tampered(reviewer)
+        if result.timed_out:
+            return PrePrReview.failed(reviewer, "the reviewer timed out")
+        return PrePrReview.done(reviewer, parse_review(result.stdout))
 
     def _pr_url(self, pr_number: int) -> str:
         return f"https://github.com/{self.settings.repo}/pull/{pr_number}"
