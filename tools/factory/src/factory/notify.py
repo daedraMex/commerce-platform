@@ -37,6 +37,8 @@ class Notifier(Protocol):
 
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None: ...
 
+    def send_metrics(self, text: str) -> None: ...
+
 
 @dataclass(frozen=True)
 class ReviewSkippedInfo:
@@ -396,6 +398,9 @@ class NullNotifier:
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
         return None
 
+    def send_metrics(self, text: str) -> None:
+        pass
+
 
 class TelegramNotifier:
     """Send messages to one fixed chat id via the Bot API."""
@@ -425,6 +430,9 @@ class TelegramNotifier:
 
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
         self._send(build_review_skipped_message(info), [])
+
+    def send_metrics(self, text: str) -> None:
+        self._send(_bound_message(text), [])
 
     def _send(self, text: str, keyboard: list[list[dict[str, str]]]) -> None:
         url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"

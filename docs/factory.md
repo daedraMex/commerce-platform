@@ -349,8 +349,11 @@ Run these once, as the admin user unless a step says `factory`.
     mkdir -p ~/.config/systemd/user
     cp /srv/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
     cp /srv/factory/repo/tools/factory/systemd/factory.timer  ~/.config/systemd/user/
+    cp /srv/factory/repo/tools/factory/systemd/factory-metrics.service ~/.config/systemd/user/
+    cp /srv/factory/repo/tools/factory/systemd/factory-metrics.timer  ~/.config/systemd/user/
     systemctl --user daemon-reload
     systemctl --user enable --now factory.timer
+    systemctl --user enable --now factory-metrics.timer
     loginctl enable-linger factory   # keep the timer alive when nobody is logged in
     ```
     The timer fires hourly. `factory.service` is `Type=oneshot`, so systemd
@@ -696,6 +699,22 @@ As `factory`:
 cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
 uv run factory
+```
+
+## Weekly metrics
+
+`factory metrics` sends one Telegram message with the review metrics for the
+factory's PRs (`xolo-bot`, `nf/*`) created in the last 7 and 28 days: PRs,
+merges, change-request rounds per PR, open-to-merge hours, the owner's wait
+(from ready for review to her first review, and from each "Addressed the
+review" comment to her next review), stuck tickets and reverts. It reads the
+GitHub REST API with a freshly minted installation token and changes nothing.
+`factory-metrics.timer` runs it on Mondays at 09:00 `America/Mexico_City`; a
+failure sends one `metrics failed: ...` message and exits non-zero. By hand:
+```bash
+cd /srv/factory/repo/tools/factory
+set -a; source ~/factory/secrets.env; set +a
+uv run factory metrics
 ```
 
 ## Stopping it
