@@ -27,6 +27,32 @@
   "Sections": {
     "comingSoon": "Esta sección estará disponible pronto."
   },
+  "Photos": {
+    "heading": "Fotos",
+    "subtitle": "Elige un producto para tomar su foto o crea una foto grupal.",
+    "filtersLabel": "Filtros de productos",
+    "searchLabel": "Buscar",
+    "searchPlaceholder": "Buscar por nombre",
+    "categoryLabel": "Categoría",
+    "allCategories": "Todas las categorías",
+    "onlyMissing": "Solo sin imagen principal",
+    "groupAction": "Foto grupal",
+    "groupHint": "Varios productos en una sola foto.",
+    "noImage": "Sin foto",
+    "hasMainImage": "Imagen principal",
+    "needsMainImage": "Falta la foto",
+    "loading": "Cargando productos…",
+    "error": "No pudimos cargar los productos.",
+    "retry": "Reintentar",
+    "empty": "No hay productos con estos filtros.",
+    "count": "{count, plural, =0 {Ningún producto} one {# producto} other {# productos}}",
+    "resultsLabel": "Productos",
+    "paginationLabel": "Páginas de productos",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "page": "Página {page}",
+    "individualHint": "Toca un producto para empezar su foto individual."
+  },
   "SignIn": {
     "title": "Iniciar sesión",
     "subtitle": "Entra con tu cuenta de personal.",
@@ -45,6 +71,8 @@
     "retry": "Reintentar",
     "signOut": "Salir",
     "noStoresTitle": "Sin tiendas",
-    "noStoresBody": "Tu cuenta no tiene ninguna tienda activa."
+    "noStoresBody": "Tu cuenta no tiene ninguna tienda activa.",
+    "noPermissionTitle": "Sin permiso",
+    "noPermissionBody": "No tienes permiso para ver esta sección."
   }
 }

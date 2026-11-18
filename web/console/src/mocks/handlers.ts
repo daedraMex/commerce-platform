@@ -1,6 +1,12 @@
 import { HttpResponse, http } from "msw";
 
-import type { Me, TokenPairResponse } from "@commerce-platform/api-client";
+import type {
+  Category,
+  Me,
+  ProductImage,
+  StaffProduct,
+  TokenPairResponse,
+} from "@commerce-platform/api-client";
 
 export const VALID_EMAIL = "ana@example.com";
 export const VALID_PASSWORD = "correct-horse";
@@ -20,6 +26,134 @@ const MEMBERSHIPS: Me["memberships"] = [
     permissions: ["catalog.manage", "inventory.adjust"],
   },
 ];
+
+const MAIN_IMAGE: ProductImage = {
+  alt_text: "Frazada térmica azul con estrellas",
+  url: "https://media.example.test/stores/1/media/frazada-termica.jpg",
+  thumbnail_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-termica-320w-v1.webp",
+  medium_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-termica-800w-v1.webp",
+  width: 1200,
+  height: 800,
+  role: "main",
+  position: 1,
+  variant: null,
+};
+
+const AUTUMN_IMAGE: ProductImage = {
+  ...MAIN_IMAGE,
+  alt_text: "Frazada de otoño en tonos tierra",
+  url: "https://media.example.test/stores/1/media/frazada-otono.jpg",
+  thumbnail_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-otono-320w-v1.webp",
+  medium_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-otono-800w-v1.webp",
+};
+
+export type MockPhotoProduct = Omit<StaffProduct, "main_image"> & {
+  main_image: ProductImage | null;
+};
+
+export const PHOTO_CATEGORIES: Category[] = [
+  {
+    name: "Almohada",
+    slug: "almohada",
+    sku_code: "ALM",
+    shape: "contour",
+    options: [],
+  },
+  {
+    name: "Frazada",
+    slug: "frazada",
+    sku_code: "FRZ",
+    shape: "rectangle",
+    options: [],
+  },
+];
+
+export const PHOTO_PRODUCTS: MockPhotoProduct[] = [
+  {
+    id: 12,
+    name: "Frazada Térmica",
+    slug: "frazada-termica",
+    category: { name: "Frazada", slug: "frazada" },
+    needs_main_image: false,
+    main_image: MAIN_IMAGE,
+  },
+  {
+    id: 13,
+    name: "Frazada Invierno",
+    slug: "frazada-invierno",
+    category: { name: "Frazada", slug: "frazada" },
+    needs_main_image: true,
+    main_image: null,
+  },
+  {
+    id: 14,
+    name: "Almohada Luna",
+    slug: "almohada-luna",
+    category: { name: "Almohada", slug: "almohada" },
+    needs_main_image: true,
+    main_image: null,
+  },
+  {
+    id: 15,
+    name: "Frazada Otoño",
+    slug: "frazada-otono",
+    category: { name: "Frazada", slug: "frazada" },
+    needs_main_image: false,
+    main_image: AUTUMN_IMAGE,
+  },
+];
+
+function normalize(text: string): string {
+  return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function photoProductsPage(request: Request) {
+  const url = new URL(request.url);
+  const search = url.searchParams.get("search")?.trim() ?? "";
+  const category = url.searchParams.get("category") ?? "";
+  const needsMainImage = url.searchParams.get("needs_main_image");
+  const page = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
+  const pageSize = Math.max(
+    1,
+    Math.min(100, Number(url.searchParams.get("page_size") ?? "20") || 20),
+  );
+
+  let items = PHOTO_PRODUCTS;
+  if (search) {
+    items = items.filter((product) =>
+      normalize(product.name).includes(normalize(search)),
+    );
+  }
+  if (category) {
+    items = items.filter((product) => product.category.slug === category);
+  }
+  if (needsMainImage === "true") {
+    items = items.filter((product) => product.needs_main_image);
+  } else if (needsMainImage === "false") {
+    items = items.filter((product) => !product.needs_main_image);
+  }
+
+  const start = (page - 1) * pageSize;
+  const results = items.slice(start, start + pageSize);
+  const hasNext = start + pageSize < items.length;
+  const hasPrevious = page > 1 && start < items.length;
+
+  return {
+    count: items.length,
+    next: hasNext ? `http://backend.test/api/v1/staff/products/?page=${page + 1}` : null,
+    previous: hasPrevious
+      ? `http://backend.test/api/v1/staff/products/?page=${page - 1}`
+      : null,
+    results,
+  };
+}
 
 function membershipsFor(email: string): Me["memberships"] {
   if (email !== LIMITED_EMAIL) {
@@ -182,5 +316,21 @@ export const handlers = [
     }
 
     return HttpResponse.json(body);
+  }),
+
+  http.get("*/api/v1/catalog/categories/", () => {
+    return HttpResponse.json(PHOTO_CATEGORIES);
+  }),
+
+  http.get("*/api/v1/staff/products/", ({ request }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    return HttpResponse.json(photoProductsPage(request));
   }),
 ];
