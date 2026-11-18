@@ -5,7 +5,7 @@ from django.db import transaction
 from apps.shared.domain.store import StoreReference
 from config.celery import app
 
-PROCESS_PHOTO_TASK = "apps.photos.tasks.process_photos"
+PROCESS_PHOTO_TASK = "apps.photos.tasks.process_photo"
 
 
 class CeleryPhotoProcessingQueue:
