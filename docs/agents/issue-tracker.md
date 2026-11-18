@@ -16,6 +16,10 @@ Scope every `gh` command to this repo: add `-R daedraMex/commerce-platform`, or 
 `gh api repos/daedraMex/commerce-platform/...`. Do not rely on inferring the repo
 from the clone.
 
+Where `gh` answers that GraphQL is not available (remote Claude Code sessions), use
+the REST endpoint for the same operation, for example
+`gh api repos/daedraMex/commerce-platform/issues -f title="..." -F body=@body.md`.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
