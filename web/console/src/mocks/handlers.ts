@@ -3,6 +3,7 @@ import { HttpResponse, http } from "msw";
 import type {
   Category,
   Me,
+  PhotoSubmission,
   ProductImage,
   StaffProduct,
   TokenPairResponse,
@@ -155,6 +156,118 @@ function photoProductsPage(request: Request) {
   };
 }
 
+type PhotoScenario = "ready" | "failed" | "conflict";
+
+type MockPreview = {
+  bytes: Uint8Array;
+  contentType: string;
+};
+
+type PhotoMockState = {
+  submissions: Map<number, PhotoSubmission>;
+  polls: Map<number, number>;
+  previews: Map<number, MockPreview>;
+  nextId: number;
+};
+
+function initialPhotoState(): PhotoMockState {
+  return {
+    submissions: new Map(),
+    polls: new Map(),
+    previews: new Map(),
+    nextId: 100,
+  };
+}
+
+let photoState = initialPhotoState();
+
+export function resetPhotoMockState(): void {
+  photoState = initialPhotoState();
+}
+
+const PREVIEW_PNG = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n3sAAAAASUVORK5CYII=",
+  ),
+  (character) => character.charCodeAt(0),
+);
+
+function photoScenario(targetProduct: number | null): PhotoScenario {
+  if (targetProduct === 14) {
+    return "failed";
+  }
+  if (targetProduct === 15) {
+    return "conflict";
+  }
+  return "ready";
+}
+
+function photoProblem(status: number, code: string, detail: string) {
+  return problem(status, code, detail);
+}
+
+function storedSubmission(id: number): PhotoSubmission | undefined {
+  return photoState.submissions.get(id);
+}
+
+function saveSubmission(submission: PhotoSubmission): PhotoSubmission {
+  photoState.submissions.set(submission.id, submission);
+  return submission;
+}
+
+function readyResult(id: number) {
+  return {
+    media_id: id + 1000,
+    url: `https://media.example.test/stores/1/media/photo-${id}.jpg`,
+    thumbnail_url: `https://media.example.test/stores/1/media/renditions/photo-${id}-320w-v1.webp`,
+    medium_url: `https://media.example.test/stores/1/media/renditions/photo-${id}-800w-v1.webp`,
+    width: 1200,
+    height: 1500,
+  };
+}
+
+function advanceSubmission(
+  submission: PhotoSubmission,
+  scenario: PhotoScenario,
+): PhotoSubmission {
+  if (submission.status !== "uploaded" && submission.status !== "processing") {
+    return submission;
+  }
+
+  const polls = photoState.polls.get(submission.id) ?? 0;
+  photoState.polls.set(submission.id, polls + 1);
+
+  if (polls === 0) {
+    return saveSubmission({
+      ...submission,
+      status: "processing",
+      attempts: Math.max(1, submission.attempts),
+      updated_at: new Date().toISOString(),
+      version: submission.version + 1,
+    });
+  }
+
+  if (scenario === "failed") {
+    return saveSubmission({
+      ...submission,
+      status: "failed",
+      failure_code: "quad_self_intersecting",
+      failure_message: "The corners cross each other; drag them into order.",
+      result: null,
+      updated_at: new Date().toISOString(),
+      version: submission.version + 1,
+    });
+  }
+
+  return saveSubmission({
+    ...submission,
+    status: "ready",
+    result: readyResult(submission.id),
+    updated_at: new Date().toISOString(),
+    version: submission.version + 1,
+  });
+}
+
 function membershipsFor(email: string): Me["memberships"] {
   if (email !== LIMITED_EMAIL) {
     return MEMBERSHIPS;
@@ -197,6 +310,7 @@ let state = initialState();
 
 export function resetMockState(): void {
   state = initialState();
+  resetPhotoMockState();
 }
 
 export function currentMockState(): Readonly<MockState> {
@@ -241,6 +355,350 @@ function authorized(request: Request): boolean {
 }
 
 export const handlers = [
+  http.post("*/api/v1/staff/photos/", async ({ request }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    let form: FormData;
+    try {
+      form = await request.formData();
+    } catch {
+      return problem(400, "validation_error", "The multipart body is malformed.");
+    }
+
+    const targetValue = form.get("target_product");
+    const targetProduct =
+      typeof targetValue === "string" && targetValue.length > 0
+        ? Number(targetValue)
+        : null;
+    const scenario = photoScenario(targetProduct);
+
+    if (scenario === "conflict") {
+      return problem(
+        409,
+        "idempotency_conflict",
+        "This idempotency key was already used with a different request.",
+      );
+    }
+
+    const parseJson = (value: FormDataEntryValue | null): unknown => {
+      if (typeof value !== "string" || value.length === 0) {
+        return null;
+      }
+      try {
+        return JSON.parse(value) as unknown;
+      } catch {
+        return null;
+      }
+    };
+
+    const now = new Date().toISOString();
+    const id = photoState.nextId;
+    photoState.nextId += 1;
+
+    const uploadedFile = form.get("file");
+    if (
+      uploadedFile &&
+      typeof uploadedFile === "object" &&
+      "arrayBuffer" in uploadedFile
+    ) {
+      const file = uploadedFile as File;
+      photoState.previews.set(id, {
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        contentType: file.type || "image/jpeg",
+      });
+    }
+
+    const submission: PhotoSubmission = {
+      id,
+      kind: String(form.get("kind") ?? "rectangle"),
+      status: "uploaded",
+      failure_code: "",
+      failure_message: "",
+      preview_url: `/api/v1/staff/photos/${id}/preview/`,
+      result: null,
+      linked_product_ids: [],
+      pipeline_version: "2026-11-11.2",
+      attempts: 0,
+      version: 1,
+      applied_at: null,
+      discarded_at: null,
+      target_product_id: targetProduct,
+      photographed_variant_id: null,
+      light_correction: form.get("light_correction") !== "false",
+      corners: parseJson(form.get("corners")),
+      crop: parseJson(form.get("crop")),
+      created_at: now,
+      updated_at: now,
+    };
+
+    saveSubmission(submission);
+    photoState.polls.set(id, 0);
+    return HttpResponse.json(submission, { status: 201 });
+  }),
+
+  http.get("*/api/v1/staff/photos/:id/preview/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission || submission.discarded_at) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+
+    const preview = photoState.previews.get(submission.id);
+    return new HttpResponse(preview?.bytes ?? PREVIEW_PNG, {
+      headers: { "content-type": preview?.contentType ?? "image/png" },
+    });
+  }),
+
+  http.post("*/api/v1/staff/photos/:id/apply/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+    if (
+      submission.status !== "ready" ||
+      submission.applied_at ||
+      submission.discarded_at
+    ) {
+      return photoProblem(
+        409,
+        "submission_cannot_apply",
+        "Only a ready photo can be applied.",
+      );
+    }
+
+    return HttpResponse.json(
+      saveSubmission({
+        ...submission,
+        applied_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        version: submission.version + 1,
+      }),
+    );
+  }),
+
+  http.post("*/api/v1/staff/photos/:id/remove/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+    if (!submission.applied_at) {
+      return photoProblem(
+        409,
+        "submission_cannot_remove",
+        "Only an applied photo can be removed from the carousel.",
+      );
+    }
+
+    return HttpResponse.json(
+      saveSubmission({
+        ...submission,
+        applied_at: null,
+        updated_at: new Date().toISOString(),
+        version: submission.version + 1,
+      }),
+    );
+  }),
+
+  http.post("*/api/v1/staff/photos/:id/redo/", async ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+    if (
+      submission.status !== "ready" ||
+      submission.applied_at ||
+      submission.discarded_at
+    ) {
+      return photoProblem(
+        409,
+        "submission_cannot_redo",
+        "Only a ready photo can be redone.",
+      );
+    }
+
+    let body: { corners?: unknown; crop?: unknown } = {};
+    try {
+      body = (await request.json()) as { corners?: unknown; crop?: unknown };
+    } catch {
+      body = {};
+    }
+
+    photoState.polls.set(submission.id, 0);
+    return HttpResponse.json(
+      saveSubmission({
+        ...submission,
+        status: "processing",
+        corners: body.corners ?? submission.corners,
+        crop: body.crop ?? submission.crop,
+        result: null,
+        updated_at: new Date().toISOString(),
+        version: submission.version + 1,
+      }),
+    );
+  }),
+
+  http.post("*/api/v1/staff/photos/:id/retry/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+    if (
+      submission.status !== "failed" ||
+      submission.applied_at ||
+      submission.discarded_at
+    ) {
+      return photoProblem(
+        409,
+        "submission_cannot_start_processing",
+        "Only a failed photo can be retried.",
+      );
+    }
+    if (submission.attempts >= 3) {
+      return photoProblem(
+        409,
+        "submission_attempts_exhausted",
+        "This submission already used its processing attempts.",
+      );
+    }
+
+    photoState.polls.set(submission.id, 0);
+    return HttpResponse.json(
+      saveSubmission({
+        ...submission,
+        status: "processing",
+        attempts: submission.attempts + 1,
+        failure_code: "",
+        failure_message: "",
+        result: null,
+        updated_at: new Date().toISOString(),
+        version: submission.version + 1,
+      }),
+    );
+  }),
+
+  http.post("*/api/v1/staff/photos/:id/discard/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+    if (submission.applied_at || submission.discarded_at) {
+      return photoProblem(
+        409,
+        "submission_cannot_discard",
+        "An applied or already discarded photo cannot be discarded.",
+      );
+    }
+
+    return HttpResponse.json(
+      saveSubmission({
+        ...submission,
+        discarded_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        version: submission.version + 1,
+      }),
+    );
+  }),
+
+  http.get("*/api/v1/staff/photos/:id/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+
+    return HttpResponse.json(
+      advanceSubmission(submission, photoScenario(submission.target_product_id)),
+    );
+  }),
+
   http.post("*/api/v1/auth/token/", async ({ request }) => {
     const body = (await request.json()) as {
       email?: string;
