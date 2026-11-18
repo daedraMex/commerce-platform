@@ -133,7 +133,7 @@ jobs:
       # A real Redis broker and an embedded worker, no eager mode: a task name the
       # producer and the worker disagree on fails here instead of in review (#149).
       - name: Celery tasks through Redis
-        run: uv run pytest -m real_broker
+        run: uv run pytest tests/broker -m real_broker
 
   console:
     name: Console

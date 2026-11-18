@@ -94,6 +94,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - cd backend && ./scripts/check.sh           # everything CI runs: ruff, import-linter, migrations, schema, pytest
 - cd backend && uv run ruff format .         # fix formatting
 - cd backend && uv run pytest tests/api/test_health.py   # one test file while iterating
+- cd backend && uv run pytest tests/broker -m real_broker   # a task through Redis and a real worker; skipped by default
 - cd backend && uv run pre-commit install --config ../.pre-commit-config.yaml
   # installs the ruff hooks that run on every commit
 - pnpm install                              # Node dependencies (Node from .nvmrc)
@@ -115,6 +116,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   backend/tests/integration/.
 - Architecture guards (layering, allowed imports between modules): AST tests in
   backend/tests/architecture/, a protected path.
+- Celery tasks end to end through a real Redis broker and worker: backend/tests/broker/,
+  marked `real_broker`, which the default run skips and CI runs in its own job.
 - Store-scoped features need a test proving one store's data never appears in another.
 
 ## Safety

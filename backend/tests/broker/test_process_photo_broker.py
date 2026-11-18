@@ -6,6 +6,7 @@ submission stays ``uploaded`` and the wait times out. Runs only with ``-m real_b
 """
 
 import time
+import uuid
 
 import pytest
 from celery.contrib.testing.worker import start_worker
@@ -20,8 +21,9 @@ from tests.api.test_staff_photos import upload
 pytestmark = [
     pytest.mark.real_broker,
     pytest.mark.no_celery_eager,
-    # Committed rows, so the worker thread's own connection sees them.
-    pytest.mark.django_db(transaction=True),
+    # Committed rows, so the worker thread's own connection sees them; serialized_rollback
+    # restores the seeded roles the flush would otherwise wipe for the next broker test.
+    pytest.mark.django_db(transaction=True, serialized_rollback=True),
 ]
 
 WAIT_SECONDS = 30
@@ -41,10 +43,18 @@ def private_storage(tmp_path, settings):
 
 
 @pytest.fixture
-def worker():
+def worker(monkeypatch):
     app.loader.import_default_modules()
+    # A queue of its own, so a docker-compose worker on the same Redis cannot take the
+    # message (it would look for the submission in the development database).
+    queue = f"broker-test-{uuid.uuid4().hex}"
+    monkeypatch.setattr(app.conf, "task_default_queue", queue)
+    monkeypatch.delattr(app.amqp, "queues", raising=False)
+    monkeypatch.delattr(app.amqp, "router", raising=False)
     # Results are ignored in this project, so the ping check (which waits for one) is off.
-    with start_worker(app, perform_ping_check=False, shutdown_timeout=30) as running:
+    with start_worker(
+        app, perform_ping_check=False, shutdown_timeout=30, queues=[queue]
+    ) as running:
         yield running
 
 

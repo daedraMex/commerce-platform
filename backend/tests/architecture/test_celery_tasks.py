@@ -1,6 +1,10 @@
 """Every Celery task has an explicit name and receives its store (AGENTS.md)."""
 
 import ast
+import json
+import os
+import subprocess
+import sys
 
 from tests.architecture.support import BACKEND_DIR, parse, relative, source_files
 
@@ -59,3 +63,25 @@ def test_every_task_receives_its_store():
     ]
 
     assert storeless == [], "Every task receives the store explicitly (store_id)."
+
+
+def test_the_worker_registers_every_task_in_the_code():
+    # A fresh process, as `celery -A config worker` starts: nothing imported by other tests.
+    script = (
+        "import django, json; django.setup()\n"
+        "from config.celery import app\n"
+        "app.loader.import_default_modules()\n"
+        "print(json.dumps(sorted(app.tasks)))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=BACKEND_DIR,
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "DJANGO_SETTINGS_MODULE": "config.settings"},
+    )
+    registered = set(json.loads(result.stdout.strip().splitlines()[-1]))
+    in_code = {_explicit_name(decorator) for _path, _node, decorator in tasks()}
+
+    assert in_code - registered == set(), "config/celery.py must discover every task module."
