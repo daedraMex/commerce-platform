@@ -15,7 +15,7 @@ from .cleanup import cleanup_old
 from .config import Settings
 from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
-from .diff import is_dependency_path, touches_protected_paths
+from .diff import DiffStats, is_dependency_path, non_dependency_change, touches_protected_paths
 from .git import Git, verify_git_version
 from .github import GitHub, GitHubError
 from .isolation import verify_isolation
@@ -278,6 +278,7 @@ class Factory:
             strong_model=self.settings.factory_strong_model,
         )
         branch = branch_name(ticket)
+        assert_push_target(branch, ticket)  # before any model spend
         worktree = worktree_path(self.settings.worktrees_dir, branch)
         # A remote branch left by a run whose PR was never opened would make the push
         # non-fast-forward forever. Stop here; deleting it stays a manual step.
@@ -586,9 +587,23 @@ class Factory:
                 failing_check="protected path changed",
                 attempts=attempts,
             )
+        violation = self._dependency_scope_violation(ticket, worktree, diff, base_sha)
+        if violation is not None:
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check=violation,
+                attempts=attempts,
+            )
         assert_push_target(fix.branch, ticket)
         token = self.token_provider.mint(self.settings.repo)
         self.git.push(worktree, fix.branch, token)
+        if any(is_dependency_path(f.path) for f in diff.files):
+            self.github.add_pr_label(fix.pr_number, DEPS_CHANGE_LABEL, token)
         sha = self.git.head_sha(worktree)
         self.github.comment(
             fix.pr_number,
@@ -651,6 +666,18 @@ class Factory:
                 attempts=attempts,
             )
         token = self.token_provider.mint(self.settings.repo)
+        violation = self._dependency_scope_violation(ticket, worktree, diff, "origin/main")
+        if violation is not None:
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check=violation,
+                attempts=attempts,
+            )
         assert_push_target(branch, ticket)
         self.git.push(worktree, branch, token)
         summary = extract_summary(decisions) or ticket.title
@@ -816,6 +843,28 @@ class Factory:
         with log_path.open("w" if step == 1 and not review else "a") as log:
             log.write(header + content)
         return log_path
+
+    def _dependency_scope_violation(
+        self, ticket: Ticket, worktree: Path, diff: DiffStats, base: str
+    ) -> str | None:
+        """On a deps-change ticket, the reason a manifest changed beyond dependencies."""
+        if not _allows_dependencies(ticket):
+            return None
+        for change in diff.files:
+            if not is_dependency_path(change.path):
+                continue
+            try:
+                old = self.git.read_ref_file(worktree, base, change.path)
+            except RuntimeError:
+                old = None
+            try:
+                new = self.git.read_file(worktree, change.path)
+            except (OSError, RuntimeError):
+                new = None  # deleted by the change
+            reason = non_dependency_change(change.path, old, new)
+            if reason is not None:
+                return f"dependency file changed beyond dependencies: {reason}"
+        return None
 
     def _builder_config(self) -> str:
         """Main's builder permissions, passed inline so the repo's opencode.json cannot
@@ -1042,9 +1091,9 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 def _allows_dependencies(ticket: Ticket) -> bool:
     return DEPS_CHANGE_LABEL in ticket.labels
+
+
+if __name__ == "__main__":
+    sys.exit(main())

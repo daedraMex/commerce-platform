@@ -151,5 +151,49 @@ def test_opencode_edit_denies_match_the_protected_lists():
         | {f"*{name}" for name in PROTECTED_NAMES}
         | {"*opencode*.json", "*opencode*.jsonc"}
     )
-    missing = sorted(pattern for pattern in expected if edit.get(pattern) != "deny")
-    assert missing == []
+    # Denies the guard does not mirror on purpose: env files and ADRs.
+    deny_only = {"*.env", "*.env.*", "docs/adr/*"}
+    denied = {pattern for pattern, rule in edit.items() if rule == "deny"}
+    assert denied - deny_only == expected
+
+
+def test_a_lockfile_change_is_always_dependency_only():
+    from factory.diff import non_dependency_change
+
+    assert non_dependency_change("backend/uv.lock", "a", "b") is None
+
+
+def test_package_json_may_change_only_its_dependency_sections():
+    from factory.diff import non_dependency_change
+
+    old = '{"name": "c", "scripts": {"lint": "eslint ."}, "dependencies": {"a": "1"}}'
+    deps = '{"name": "c", "scripts": {"lint": "eslint ."}, "dependencies": {"a": "2", "b": "1"}}'
+    scripts = '{"name": "c", "scripts": {"lint": "true"}, "dependencies": {"a": "1"}}'
+
+    assert non_dependency_change("web/console/package.json", old, deps) is None
+    reason = non_dependency_change("web/console/package.json", old, scripts)
+    assert "scripts" in reason
+
+
+def test_pyproject_may_change_only_its_dependency_tables():
+    from factory.diff import non_dependency_change
+
+    def pyproject(dependencies, addopts):
+        return (
+            f'[project]\nname = "b"\ndependencies = {dependencies}\n\n'
+            f'[tool.pytest.ini_options]\naddopts = "{addopts}"\n'
+        )
+
+    old = pyproject('["django"]', "")
+    deps = pyproject('["django", "hypothesis"]', "")
+    tool = pyproject('["django"]', "--collect-only")
+
+    assert non_dependency_change("backend/pyproject.toml", old, deps) is None
+    assert "tool" in non_dependency_change("backend/pyproject.toml", old, tool)
+
+
+def test_a_new_or_unreadable_dependency_manifest_is_not_dependency_only():
+    from factory.diff import non_dependency_change
+
+    assert non_dependency_change("web/new/package.json", None, "{}") is not None
+    assert non_dependency_change("web/console/package.json", "{}", "{not json") is not None

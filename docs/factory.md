@@ -653,9 +653,14 @@ unreachable" as before.
   or any `conftest.py`, the ticket goes to `_stuck` with `protected path
   changed`; nothing is pushed and no PR is opened. Dependency manifests and
   lockfiles (`package.json`, `pnpm-lock.yaml`, `pyproject.toml`, `uv.lock`) are
-  protected the same way unless the ticket is labeled `deps-change`; then the PR
-  gets the `deps-change` label and lists them under **Risk** (the factory's own
-  lockfiles under `tools/factory/` stay protected). `opencode.factory.json`
+  protected the same way unless the ticket is labeled `deps-change`. Even then a
+  manifest may change only its dependency sections (`dependencies`,
+  `devDependencies`, `optionalDependencies`, `peerDependencies`, `pnpm`;
+  `[project].dependencies`, `optional-dependencies`, `[dependency-groups]`,
+  `[tool.uv].sources`): a change to `scripts` or `[tool.*]` goes stuck as
+  `dependency file changed beyond dependencies`. The PR (or the review fix's PR)
+  gets the `deps-change` label and lists the files under **Risk**; the factory's
+  own lockfiles under `tools/factory/` stay protected. `opencode.factory.json`
   denies edits to the same paths (a test keeps the two lists in sync), and every
   push is checked to target the ticket's own `nf/<number>-<slug>` branch.
 - **Stuck handoff.** A stuck ticket keeps its worktree; the Telegram message

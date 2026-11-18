@@ -120,3 +120,15 @@ def test_push_target_must_be_the_ticket_s_own_factory_branch():
     for branch in ("main", "nf/8-widget-endpoint", "nf/7", "feature/7-x", "nf/7-x/../main"):
         with pytest.raises(PushTargetError):
             assert_push_target(branch, ticket)
+
+
+def test_every_branch_the_factory_derives_passes_its_own_push_guard():
+    from factory.tickets import assert_push_target
+
+    words = "add the console product list page with filters and the bulk edit form now".split()
+    titles = [" ".join(words[:n]) for n in range(1, len(words) + 1)]
+    titles += ["x" * n + " y" for n in range(55, 72)]
+    titles += ["Ñandú über café", "日本語のタイトル", "", "---"]
+    for title in titles:
+        ticket = Ticket(number=7, title=title, body="", labels=frozenset())
+        assert_push_target(branch_name(ticket), ticket)

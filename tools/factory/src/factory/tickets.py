@@ -46,7 +46,8 @@ def assert_push_target(branch: str, ticket: Ticket) -> None:
     ADR-0025: the factory derives the branch from the ticket and never pushes any
     other branch.
     """
-    if not re.fullmatch(rf"nf/{ticket.number}-[a-z0-9]+(?:-[a-z0-9]+)*", branch):
+    # The slug is cut at 60 characters after stripping, so it can end in "-".
+    if not re.fullmatch(rf"nf/{ticket.number}-[a-z0-9][a-z0-9-]*", branch):
         raise PushTargetError(
             f"refusing push target {branch!r}: not ticket #{ticket.number}'s factory branch"
         )

@@ -74,6 +74,8 @@ class FakeGit:
         self.builder_config = '{"permission": {"edit": {"AGENTS.md": "deny"}}}'
         self.worktree_reviewer_config = None
         self.review_files = ["backend/apps/x.py"]
+        self.dependency_old = {}
+        self.dependency_new = {}
         self.check_script = []
         self.removed_worktrees = []
         self.deleted_branches = []
@@ -144,6 +146,8 @@ class FakeGit:
         return None
 
     def read_file(self, worktree, relpath):
+        if relpath in self.dependency_new:
+            return self.dependency_new[relpath]
         if relpath == "DECISIONS.md":
             return self.decisions
         if relpath == ".opencode/commands/implement.md":
@@ -156,6 +160,11 @@ class FakeGit:
 
     def read_ref_file(self, repo_dir, ref, path):
         self.ref_reads.append((str(repo_dir), ref, path))
+        if path in self.dependency_old:
+            old = self.dependency_old[path]
+            if old is None:
+                raise RuntimeError(f"git show {ref}:{path} failed: does not exist")
+            return old
         if path == "tools/factory/opencode.reviewer.json":
             return self.reviewer_config
         if path == "tools/factory/opencode.factory.json":
@@ -2159,3 +2168,44 @@ def test_a_review_fix_never_pushes_a_branch_that_is_not_the_ticket_s(tmp_path):
     with pytest.raises(RunFailed, match="push target"):
         factory.run()
     assert git.pushed == []
+
+
+def test_a_deps_change_ticket_that_rewrites_package_scripts_goes_stuck(tmp_path):
+    git = FakeGit(
+        check_passed=True,
+        decisions=DECISIONS_DOC,
+        diff=DiffStats(files=(FileChange("web/console/package.json", 1, 1),)),
+    )
+    git.dependency_old["web/console/package.json"] = '{"scripts": {"lint": "eslint ."}}'
+    git.dependency_new["web/console/package.json"] = '{"scripts": {"lint": "true"}}'
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent", "deps-change"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    factory.run()
+
+    assert git.pushed == []
+    assert notifier.stuck[0].failing_check.startswith(
+        "dependency file changed beyond dependencies: web/console/package.json"
+    )
+
+
+def test_a_review_fix_that_changes_dependencies_labels_the_pr(tmp_path):
+    git = FakeGit(
+        check_passed=True,
+        decisions=DECISIONS_DOC,
+        diff=DiffStats(files=(FileChange("backend/uv.lock", 3, 1),)),
+    )
+    fix = make_review_fix()
+    labelled = replace(fix, ticket=replace(fix.ticket, labels=frozenset({"deps-change"})))
+    github = FakeGitHub(review_fixes=[labelled])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert results[0].ok
+    assert (fix.pr_number, "deps-change") in [(n, label) for n, label, _ in github.pr_labels]
