@@ -76,7 +76,7 @@ Do NOT close or modify any parent issue.
 
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
 
-**Contracts:** `Defines <module>.<name>; changes <module>.<name>; consumes <module>.<name>.` (only the verbs that apply), or "None".
+**Contracts:** Defines `<module>.<name>`; changes `<module>.<name>`; consumes `<module>.<name>` (only the verbs that apply), or "None".
 
 **Status:** waiting for the owner's `ready-for-agent`
 

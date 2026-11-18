@@ -434,7 +434,19 @@ To upgrade an existing machine to this version:
   or **AFK** (away-from-keyboard). Only **AFK** tickets may later get the
   `ready-for-agent` triage label.
 - A ticket is **agent-ready** when it has `ready-for-agent`, all its blocking
-  edges are closed, it has no open PR, and it is not labeled `needs-decision`.
+  edges are closed, it has no open PR, it is not labeled `needs-decision`, and
+  no open PR holds one of its contracts (ADR-0031). The factory reads each
+  ticket's **Contracts** section (backticked ids after Defines, Changes or
+  Consumes) and the same section of every ticket an open PR, by any author,
+  closes. A ticket waits when it defines or changes a contract the open PR's
+  ticket touches, or consumes one that ticket defines or changes; two tickets
+  that only consume a contract never wait for each other. Each id takes the
+  nearest verb before it; an id with no verb counts as changed. If an open PR's
+  ticket cannot be read, every ticket that declares contracts waits (`contracts
+  of #<ticket> unreadable`) and the rest of the run goes on. Each run logs
+  `#<n> skipped: <contract> held by PR #<pr> (#<ticket>)` for a ticket that
+  would otherwise be ready, and one run never takes two tickets that conflict
+  on a contract.
 - Add `strong-model` to a ticket that touches security, money, migrations or
   otherwise tricky logic; it runs with `FACTORY_STRONG_MODEL` instead of the
   default. The builder model is never the reviewer of its own work.
