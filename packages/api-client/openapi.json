@@ -366,6 +366,52 @@
         ],
         "type": "object"
       },
+      "PhotoCrop": {
+        "description": "The crop rectangle, from a JSON object or its multipart string.",
+        "properties": {
+          "height": {
+            "format": "double",
+            "type": "number"
+          },
+          "width": {
+            "format": "double",
+            "type": "number"
+          },
+          "x": {
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "height",
+          "width",
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
+      "PhotoPoint": {
+        "description": "One `{x, y}` corner of the photographed area.",
+        "properties": {
+          "x": {
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
+      },
       "PhotoResultMedia": {
         "description": "The public Media a ready submission produced, with its derived renditions.",
         "properties": {
@@ -769,10 +815,15 @@
         "description": "The new corners or crop of a redo; an omitted field keeps its stored value.",
         "properties": {
           "corners": {
-            "nullable": true
+            "items": {
+              "$ref": "#/components/schemas/PhotoPoint"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
           },
           "crop": {
-            "nullable": true
+            "$ref": "#/components/schemas/PhotoCrop"
           }
         },
         "type": "object"
@@ -877,10 +928,15 @@
         "description": "The multipart body of one photo upload; the key travels in a header.",
         "properties": {
           "corners": {
-            "nullable": true
+            "items": {
+              "$ref": "#/components/schemas/PhotoPoint"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
           },
           "crop": {
-            "nullable": true
+            "$ref": "#/components/schemas/PhotoCrop"
           },
           "file": {
             "format": "uri",

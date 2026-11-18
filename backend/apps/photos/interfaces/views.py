@@ -19,6 +19,8 @@ from apps.photos.application.redo_photo import RedoPhoto
 from apps.photos.application.remove_photo import RemovePhoto
 from apps.photos.application.retry_photo import RetryPhoto
 from apps.photos.application.upload_photo import UploadPhoto, UploadPhotoCommand
+from apps.photos.domain.errors import ImageTooLarge
+from apps.photos.domain.limits import MAX_UPLOAD_BYTES
 from apps.photos.interfaces.serializers import (
     GroupPhotoApplySerializer,
     GroupPhotoLinksSerializer,
@@ -27,6 +29,7 @@ from apps.photos.interfaces.serializers import (
     UploadPhotoSerializer,
 )
 from apps.shared.domain.exceptions import NotFoundError
+from apps.shared.domain.permissions import MANAGE_CATALOG
 from apps.shared.interfaces.views import StoreScopedMixin
 from config.dependencies import (
     get_authorizer,
@@ -183,7 +186,9 @@ FIELDS_WITH_ALIASES = (
 
 
 def _upload_payload(request):
-    payload = request.data.copy()
+    # A plain dict avoids DRF's HTML-form parsing and the upload copy of a large file.
+    data = request.data
+    payload = data.dict() if hasattr(data, "dict") else dict(data)
     for alias, canonical in FIELDS_WITH_ALIASES:
         if alias in payload and canonical not in payload:
             payload[canonical] = payload[alias]
@@ -224,12 +229,18 @@ class StaffPhotoUploadView(StoreScopedMixin, APIView):
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
+        idempotency_key = _idempotency_key(request)
+        get_authorizer().require(request.user.id, request.store, MANAGE_CATALOG)
+        uploaded_file = data["file"]
+        if uploaded_file.size > MAX_UPLOAD_BYTES:
+            raise ImageTooLarge("The photo is larger than 25 MB.")
+
         command = UploadPhotoCommand(
             store=request.store,
             user_id=request.user.id,
             kind=data["kind"],
-            content=data["file"].read(),
-            idempotency_key=_idempotency_key(request),
+            content=uploaded_file.read(),
+            idempotency_key=idempotency_key,
             target_product_id=data.get("target_product"),
             photographed_variant_id=data.get("photographed_variant"),
             corners=data.get("corners"),
@@ -311,7 +322,10 @@ class StaffPhotoPreviewView(StoreScopedMixin, APIView):
             preview = get_private_media_reader().open(request.store, submission.preview_key)
         except OSError as error:
             raise NotFoundError("The preview file is not available.") from error
-        return FileResponse(preview, content_type="image/jpeg")
+        response = FileResponse(preview, content_type="image/jpeg")
+        response["Cache-Control"] = "private, no-store"
+        response["X-Content-Type-Options"] = "nosniff"
+        return response
 
 
 ACTION_ERRORS = {

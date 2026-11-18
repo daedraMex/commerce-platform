@@ -37,6 +37,20 @@ def command(**overrides):
     return UploadPhotoCommand(**values)
 
 
+class LostRaceRepository(FakePhotoSubmissionRepository):
+    """Hide the row on the first lookup so the upload reaches the unique constraint."""
+
+    def __init__(self, rows=()):
+        super().__init__(rows)
+        self.hiding = True
+
+    def get_by_idempotency_key(self, store, created_by, key):
+        if self.hiding:
+            self.hiding = False
+            return None
+        return super().get_by_idempotency_key(store, created_by, key)
+
+
 @pytest.fixture
 def repository():
     return FakePhotoSubmissionRepository()
@@ -155,6 +169,32 @@ def test_the_same_key_and_payload_returns_the_original_without_uploading_again(
     assert second.submission.id == first.submission.id
     assert len(uploader.calls) == 1
     assert len(repository.rows) == 1
+
+
+def test_a_lost_idempotency_race_deletes_the_new_files_and_returns_the_replay(
+    upload_photo, repository, catalog, authorizer
+):
+    first = upload_photo(command())
+    racing_repository = LostRaceRepository(repository.rows.values())
+    loser_uploader = FakeMediaUploader()
+    loser_queue = FakeProcessingQueue()
+    use_case = UploadPhoto(
+        repository=racing_repository,
+        uploader=loser_uploader,
+        catalog=catalog,
+        authorizer=authorizer,
+        queue=loser_queue,
+    )
+
+    second = use_case(command())
+
+    assert second.created is False
+    assert second.submission.id == first.submission.id
+    assert loser_uploader.deleted == [
+        (HOME, "stores/1/photos/originals/test.jpg"),
+        (HOME, "stores/1/photos/previews/test.jpg"),
+    ]
+    assert loser_queue.calls == []
 
 
 def test_the_same_payload_twice_has_the_same_fingerprint(upload_photo):
