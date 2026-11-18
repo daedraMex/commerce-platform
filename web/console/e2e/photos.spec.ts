@@ -121,3 +121,101 @@ test("starts the group flow from the product list", async ({
 
   await attachScreenshot(page, testInfo, "photos-group-flow.png");
 });
+
+test("edits one photo with pointer corners, uploads it and approves it", async ({
+  page,
+}, testInfo) => {
+  await signIn(page);
+  await page.goto("/anime/photos/new?product=13");
+
+  await expect(page.getByTestId("photo-page-heading")).toHaveText(
+    "Frazada Invierno",
+  );
+
+  const imageBase64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 600;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return "";
+    }
+    context.fillStyle = "#f4efe3";
+    context.fillRect(0, 0, 800, 600);
+    context.fillStyle = "#4f46e5";
+    context.fillRect(80, 70, 640, 460);
+    context.fillStyle = "#ffffff";
+    context.font = "48px sans-serif";
+    context.fillText("Frazada", 250, 320);
+    return canvas.toDataURL("image/png").split(",")[1] ?? "";
+  });
+
+  await page.getByLabel("Tomar foto").setInputFiles({
+    name: "frazada-invierno.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(imageBase64, "base64"),
+  });
+
+  await expect(page.getByTestId("photo-editor")).toBeVisible();
+  await expect(
+    page.getByRole("group", { name: "Corrección de luz" }),
+  ).toBeVisible();
+
+  const canvas = page.getByTestId("corner-canvas");
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error("The corner canvas has no bounding box");
+  }
+
+  const start = {
+    x: box.x + box.width * 0.1,
+    y: box.y + box.height * 0.1,
+  };
+  const target = {
+    x: box.x + box.width * 0.3,
+    y: box.y + box.height * 0.35,
+  };
+
+  await page.mouse.move(start.x, start.y);
+  await page.mouse.down();
+  await expect(page.getByTestId("corner-loupe")).toBeVisible();
+  await attachScreenshot(page, testInfo, "photo-corner-loupe.png");
+  await page.mouse.move(target.x, target.y, { steps: 8 });
+  await page.mouse.up();
+
+  const uploadResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.status() === 201 &&
+      response.url().includes("/api/backend/api/v1/staff/photos"),
+  );
+
+  await page.getByRole("button", { name: "Enviar foto" }).click();
+  const created = (await (await uploadResponse).json()) as {
+    corners: Array<{ x: number; y: number }>;
+  };
+  expect(created.corners[0]?.x).toBeCloseTo(0.3, 1);
+  expect(created.corners[0]?.y).toBeCloseTo(0.35, 1);
+
+  await expect(page.getByTestId("photo-state-label")).toHaveText("En espera", {
+    timeout: 15_000,
+  });
+  await attachScreenshot(page, testInfo, "photo-ready-pending.png");
+
+  await page.getByRole("button", { name: "Aprobar" }).click();
+  await expect(page.getByTestId("photo-state-label")).toHaveText(
+    "En el carrusel",
+  );
+  await expect(page).toHaveURL(/\/anime\/photos\/new\?product=13$/);
+
+  const card = page.getByTestId("photo-submission-card");
+  await expect(card).toHaveAttribute("data-state", "approved");
+  await expect(card).toHaveClass(/border-accent/);
+  await attachScreenshot(page, testInfo, "photo-approved.png");
+
+  await page.getByRole("button", { name: "Quitar del carrusel" }).click();
+  await expect(page.getByTestId("photo-state-label")).toHaveText("En espera");
+  await expect(page).toHaveURL(/\/anime\/photos\/new\?product=13$/);
+  await expect(card).toHaveAttribute("data-state", "pending");
+  await expect(card).not.toHaveClass(/border-accent/);
+});

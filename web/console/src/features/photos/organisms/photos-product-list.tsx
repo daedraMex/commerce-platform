@@ -7,14 +7,16 @@ import { keepPreviousData } from "@tanstack/react-query";
 import { Camera, Users } from "lucide-react";
 
 import {
-  getApiV1CatalogCategoriesListQueryKey,
-  getApiV1StaffProductsListQueryKey,
   useApiV1CatalogCategoriesList,
   useApiV1StaffProductsList,
 } from "@commerce-platform/api-client";
 
 import { Button } from "@/components/atoms/button";
 import { useDebouncedValue } from "../hooks/use-debounced-value";
+import {
+  photoCategoriesQueryKey,
+  photoProductsQueryKey,
+} from "../lib/queries";
 import { groupPhotoHref } from "../lib/routes";
 import { ProductCard } from "../molecules/product-card";
 import { toPhotoProduct } from "../types";
@@ -46,12 +48,12 @@ export function PhotosProductList({ store }: PhotosProductListProps) {
 
   const categories = useApiV1CatalogCategoriesList({
     query: {
-      queryKey: [...getApiV1CatalogCategoriesListQueryKey(), store],
+      queryKey: photoCategoriesQueryKey(store),
     },
   });
   const products = useApiV1StaffProductsList(params, {
     query: {
-      queryKey: [...getApiV1StaffProductsListQueryKey(params), store],
+      queryKey: photoProductsQueryKey(store, params),
       placeholderData: keepPreviousData,
     },
   });
