@@ -224,7 +224,7 @@ export function PhotoEditor({
         data-testid="corner-canvas"
         className="relative touch-none select-none overflow-hidden rounded-lg border border-border bg-foreground/5"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- a blob URL (local file or private preview), which next/image cannot load #185 */}
         <img
           src={imageUrl}
           alt={t("previewAlt")}

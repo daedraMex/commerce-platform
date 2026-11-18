@@ -8,6 +8,7 @@ export function useObjectUrl(blob: Blob | null | undefined): string | null {
     [blob],
   );
 
+  // eslint-disable-next-line no-restricted-syntax -- revokes the blob URL, a browser resource outside React #185
   React.useEffect(() => {
     return () => {
       if (url) {

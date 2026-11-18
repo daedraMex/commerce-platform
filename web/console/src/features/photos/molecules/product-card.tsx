@@ -23,7 +23,7 @@ export function ProductCard({ store, product }: ProductCardProps) {
     >
       <div className="relative size-20 shrink-0 overflow-hidden rounded-md bg-foreground/5">
         {image ? (
-          // eslint-disable-next-line @next/next/no-img-element
+          // eslint-disable-next-line @next/next/no-img-element -- the thumbnail is already sized by the media pipeline and its bucket host is not a next/image remote pattern #185
           <img
             src={image.thumbnail_url}
             alt={image.alt_text || product.name}

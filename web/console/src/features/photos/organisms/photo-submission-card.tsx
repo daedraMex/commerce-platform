@@ -116,7 +116,7 @@ export function PhotoSubmissionCard({
 
       <div className="overflow-hidden rounded-md border border-foreground/10 bg-foreground/5">
         {imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
+          // eslint-disable-next-line @next/next/no-img-element -- a local or private-preview blob URL, which next/image cannot load #185
           <img
             src={imageUrl}
             alt={t("resultAlt")}
