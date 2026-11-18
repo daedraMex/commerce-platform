@@ -548,7 +548,11 @@ class Factory:
         attempts: int,
     ) -> TicketResult:
         ticket = fix.ticket
-        if not self.git.commit_all(worktree, f"fix: address review on #{fix.pr_number}"):
+        # commit_all's result decides nothing: the agent may have committed on its own
+        # (commit_all then has nothing left). The diff since the fix's base decides (#137).
+        self.git.commit_all(worktree, f"fix: address review on #{fix.pr_number}")
+        diff = self.git.diff_stats(worktree, since=base_sha)
+        if not diff.files:
             return self._stuck(
                 ticket,
                 model=model,
@@ -559,7 +563,6 @@ class Factory:
                 failing_check="no changes made for the review",
                 attempts=attempts,
             )
-        diff = self.git.diff_stats(worktree, since=base_sha)
         if touches_protected_paths(f.path for f in diff.files):
             return self._stuck(
                 ticket,
@@ -606,9 +609,8 @@ class Factory:
         skipped_areas: tuple[Area, ...] = (),
         review_lines: tuple[str, ...] = (),
     ) -> TicketResult:
-        # El valor de commit_all no decide nada: el agente pudo haber commiteado
-        # por su cuenta (commit_all da False y el trabajo ya está en la rama).
-        # La decisión la toma el diff contra origin/main.
+        # commit_all's result decides nothing: the agent may have committed on its own
+        # (commit_all then has nothing left). The diff against origin/main decides.
         self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})")
         diff = self.git.diff_stats(worktree)
         if not diff.files:
