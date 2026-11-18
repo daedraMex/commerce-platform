@@ -56,9 +56,10 @@ MAX_CLEANUP_PASSES = 3
 def ensure_agent_cleanup(run: RunCommand, agent_user: str | None) -> None:
     """Kill every agent process, repeating while pkill still finds some.
 
-    pkill exits 0 when it killed something and 1 when nothing matched. Anything
-    else, or sudo refusing (which also exits 1), means the cleanup cannot be
-    trusted and raises, so a broken sudoers rule fails loudly instead of silently.
+    pkill exits 1 when nothing matched; 0 or a SIGKILL of its sudo wrapper means it
+    killed something (``KILLED_SOMETHING``), so it runs again. Anything else, or sudo
+    refusing (which also exits 1), means the cleanup cannot be trusted and raises, so
+    a broken sudoers rule fails loudly instead of silently.
     """
     if not agent_user:
         return
@@ -69,13 +70,19 @@ def ensure_agent_cleanup(run: RunCommand, agent_user: str | None) -> None:
             raise AgentSandboxError(f"agent cleanup refused by sudo: {refusal}")
         if result.exit_code == 1:
             return
-        if result.exit_code != 0:
+        if result.exit_code not in KILLED_SOMETHING:
             raise AgentSandboxError(
                 f"agent cleanup failed: {result.stderr.strip() or result.exit_code}"
             )
     raise AgentSandboxError(
         f"agent processes still running after {MAX_CLEANUP_PASSES} pkill passes"
     )
+
+
+# pkill exits 0 when it killed processes. While killing live agent processes it can
+# also take down the sudo running it, which then reports SIGKILL: -9 from Python,
+# 137 from a shell. Both mean "killed something; check again" (seen on the machine).
+KILLED_SOMETHING = frozenset({0, -9, 137})
 
 
 # sudo warnings that do not stop the command it runs.

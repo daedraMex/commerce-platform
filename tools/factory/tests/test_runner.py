@@ -494,3 +494,25 @@ def test_a_harmless_sudo_warning_is_not_a_cleanup_failure():
     )
 
     ensure_agent_cleanup(run, "factory-agent")
+
+
+def test_cleanup_whose_sudo_wrapper_is_killed_checks_again():
+    # pkill -KILL -u factory-agent can take down the sudo process running it while it
+    # kills live agent processes; sudo then reports -9. That means "killed something".
+    from factory.runner import ensure_agent_cleanup
+
+    answers = iter([-9, 1])
+    run = ScriptedRun(lambda argv: CommandResult(next(answers), "", ""))
+
+    ensure_agent_cleanup(run, "factory-agent")
+
+    assert len(run.calls) == 2
+
+
+def test_cleanup_that_is_killed_on_every_pass_fails_loudly():
+    from factory.runner import AgentSandboxError, ensure_agent_cleanup
+
+    run = ScriptedRun(lambda argv: CommandResult(137, "", ""))
+
+    with pytest.raises(AgentSandboxError, match="still running"):
+        ensure_agent_cleanup(run, "factory-agent")
