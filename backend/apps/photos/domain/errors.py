@@ -109,6 +109,18 @@ class InvalidImage(PhotoSubmissionError):
     code = "invalid_image"
 
 
+class OriginalMissing(PhotoSubmissionError):
+    """A submission's private original file is gone, so it can never be processed."""
+
+    code = "photo_original_missing"
+
+
+class InvalidCrop(PhotoSubmissionError):
+    """A contour photo's crop rectangle is missing or malformed."""
+
+    code = "crop_invalid"
+
+
 class ImageTooLarge(PhotoSubmissionError):
     """An upload is larger than the accepted number of bytes."""
 

@@ -17,6 +17,8 @@ from apps.catalog.models import (
     ProductVariant,
     Supplier,
 )
+from apps.photos.infrastructure import processing_queue
+from apps.photos.infrastructure.processing_queue import PROCESS_PHOTO_TASK
 from apps.photos.models import PhotoSubmission
 from apps.shared.domain.exceptions import PermissionDeniedError
 from apps.stores.models import Store
@@ -187,6 +189,26 @@ def test_upload_creates_an_uploaded_submission(client, home, user, private_stora
     assert submission.store_id == home.id
     assert submission.original_key.startswith(f"stores/{home.id}/photos/originals/")
     assert submission.preview_key.startswith(f"stores/{home.id}/photos/previews/")
+
+
+def test_upload_enqueues_processing_after_the_transaction_commits(
+    client, home, user, private_storage, monkeypatch, django_capture_on_commit_callbacks
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    sent = []
+    monkeypatch.setattr(
+        processing_queue.app,
+        "send_task",
+        lambda name, kwargs: sent.append((name, kwargs)),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True) as callbacks:
+        response = upload(client, user)
+
+    assert response.status_code == 201
+    submission_id = response.json()["id"]
+    assert len(callbacks) == 1
+    assert sent == [(PROCESS_PHOTO_TASK, {"store_id": home.id, "submission_id": submission_id})]
 
 
 def test_double_tap_returns_one_submission(client, home, user, private_storage):

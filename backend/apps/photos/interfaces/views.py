@@ -241,6 +241,7 @@ class StaffPhotoUploadView(StoreScopedMixin, APIView):
             uploader=get_media_uploader(),
             catalog=get_catalog_service(),
             authorizer=get_authorizer(),
+            queue=get_photo_processing_queue(),
         )(command)
 
         body = PhotoSubmissionSerializer(

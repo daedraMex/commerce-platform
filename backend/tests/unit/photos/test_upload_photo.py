@@ -11,6 +11,7 @@ from tests.unit.photos.fakes import (
     FakeCatalog,
     FakeMediaUploader,
     FakePhotoSubmissionRepository,
+    FakeProcessingQueue,
     make_product,
     make_variant,
 )
@@ -59,12 +60,18 @@ def authorizer():
 
 
 @pytest.fixture
-def upload_photo(repository, uploader, catalog, authorizer):
+def queue():
+    return FakeProcessingQueue()
+
+
+@pytest.fixture
+def upload_photo(repository, uploader, catalog, authorizer, queue):
     return UploadPhoto(
         repository=repository,
         uploader=uploader,
         catalog=catalog,
         authorizer=authorizer,
+        queue=queue,
     )
 
 
@@ -81,6 +88,7 @@ def test_upload_rejects_a_user_without_catalog_manage(repository, uploader, cata
         uploader=uploader,
         catalog=catalog,
         authorizer=authorizer,
+        queue=FakeProcessingQueue(),
     )
 
     with pytest.raises(PermissionDeniedError):
@@ -122,6 +130,19 @@ def test_upload_creates_an_uploaded_submission_with_the_private_keys(
     assert len(submission.request_fingerprint) == 64
     assert uploader.calls == [(HOME, b"photo-bytes")]
     assert repository.rows[submission.id] == submission
+
+
+def test_upload_enqueues_the_new_submission_for_processing(upload_photo, queue):
+    result = upload_photo(command())
+
+    assert queue.calls == [(HOME, result.submission.id)]
+
+
+def test_a_replay_does_not_enqueue_again(upload_photo, queue):
+    upload_photo(command())
+    upload_photo(command())
+
+    assert len(queue.calls) == 1
 
 
 def test_the_same_key_and_payload_returns_the_original_without_uploading_again(
@@ -191,6 +212,7 @@ def test_the_target_product_must_belong_to_the_store(repository, uploader, autho
         uploader=uploader,
         catalog=catalog,
         authorizer=authorizer,
+        queue=FakeProcessingQueue(),
     )
 
     with pytest.raises(InvalidSubmissionTarget):
@@ -210,6 +232,7 @@ def test_the_photographed_variant_must_belong_to_the_target_product(
         uploader=uploader,
         catalog=catalog,
         authorizer=authorizer,
+        queue=FakeProcessingQueue(),
     )
 
     with pytest.raises(InvalidSubmissionTarget):
