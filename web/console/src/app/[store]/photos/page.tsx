@@ -1,6 +1,5 @@
-import { getTranslations } from "next-intl/server";
-
-import { SectionPlaceholder } from "@/components/templates/section-placeholder";
+import { PermissionGate } from "@/features/auth/organisms/permission-gate";
+import { PhotosProductList } from "@/features/photos/organisms/photos-product-list";
 
 export default async function PhotosPage({
   params,
@@ -8,14 +7,10 @@ export default async function PhotosPage({
   params: Promise<{ store: string }>;
 }) {
   const { store } = await params;
-  const navigation = await getTranslations("Navigation");
-  const t = await getTranslations("Sections");
 
   return (
-    <SectionPlaceholder
-      store={store}
-      title={navigation("photos")}
-      body={t("comingSoon")}
-    />
+    <PermissionGate store={store} permission="catalog.manage">
+      <PhotosProductList store={store} />
+    </PermissionGate>
   );
 }
