@@ -2109,3 +2109,53 @@ def test_a_blank_builder_config_on_main_fails_the_run_closed(tmp_path):
     with pytest.raises(RunFailed, match="opencode.factory.json"):
         factory.run()
     assert runner.calls == []
+
+
+def test_a_dependency_change_without_the_label_goes_stuck(tmp_path):
+    git = FakeGit(
+        check_passed=True,
+        decisions=DECISIONS_DOC,
+        diff=DiffStats(files=(FileChange("backend/uv.lock", 3, 1),)),
+    )
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    factory.run()
+
+    assert git.pushed == []
+    assert notifier.stuck[0].failing_check == "protected path changed"
+
+
+def test_a_deps_change_ticket_publishes_and_labels_the_pr(tmp_path):
+    git = FakeGit(
+        check_passed=True,
+        decisions=DECISIONS_DOC,
+        diff=DiffStats(files=(FileChange("backend/uv.lock", 3, 1),)),
+    )
+    github = FakeGitHub(
+        tickets=[make_ticket(7, labels={"ready-for-agent", "deps-change"})], pr_number=101
+    )
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    results = factory.run()
+
+    assert results[0].ok
+    assert (101, "deps-change") in [(n, label) for n, label, _ in github.pr_labels]
+
+
+def test_a_review_fix_never_pushes_a_branch_that_is_not_the_ticket_s(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    fix = make_review_fix()
+    github = FakeGitHub(review_fixes=[replace(fix, branch="main")])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    with pytest.raises(RunFailed, match="push target"):
+        factory.run()
+    assert git.pushed == []

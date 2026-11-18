@@ -646,11 +646,18 @@ unreachable" as before.
   worktrees directory contains entries that are not live git worktrees, and
   creates an agent-owned directory with group `factory-agent` and mode `0770`
   inside the throwaway worktree to prove the same cleanup removes it.
-- **Protected paths.** Before pushing, the factory inspects the diff. If it
-  touches `.github/`, `tools/factory/`, `backend/scripts/`, `AGENTS.md`,
-  `CLAUDE.md`, `opencode*.json`, `.opencode/` or `.pre-commit-config.yaml`, the
-  ticket goes to `_stuck` with `protected path changed`; nothing is pushed and
-  no PR is opened.
+- **Protected paths.** Before the pre-PR review and again before pushing, the
+  factory inspects the diff. If it touches `.github/`, `tools/factory/`,
+  `backend/scripts/`, `web/console/scripts/`, `.opencode/`, `AGENTS.md`,
+  `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`, any `opencode*.json[c]`
+  or any `conftest.py`, the ticket goes to `_stuck` with `protected path
+  changed`; nothing is pushed and no PR is opened. Dependency manifests and
+  lockfiles (`package.json`, `pnpm-lock.yaml`, `pyproject.toml`, `uv.lock`) are
+  protected the same way unless the ticket is labeled `deps-change`; then the PR
+  gets the `deps-change` label and lists them under **Risk** (the factory's own
+  lockfiles under `tools/factory/` stay protected). `opencode.factory.json`
+  denies edits to the same paths (a test keeps the two lists in sync), and every
+  push is checked to target the ticket's own `nf/<number>-<slug>` branch.
 - **Stuck handoff.** A stuck ticket keeps its worktree; the Telegram message
   includes the `ssh` + `cd` command to enter it.
 

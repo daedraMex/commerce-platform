@@ -34,6 +34,24 @@ def branch_name(ticket: Ticket) -> str:
     return f"nf/{ticket.number}-{_slug(ticket.title)}"
 
 
+class PushTargetError(RuntimeError):
+    """The factory was about to push a branch that is not the ticket's own."""
+
+
+def assert_push_target(branch: str, ticket: Ticket) -> None:
+    """Allow a push only to the ticket's own factory branch, ``nf/<number>-<slug>``.
+
+    New tickets push ``branch_name(ticket)``; review fixes push the PR's head, which
+    the factory created for the same ticket (the slug may come from an older title).
+    ADR-0025: the factory derives the branch from the ticket and never pushes any
+    other branch.
+    """
+    if not re.fullmatch(rf"nf/{ticket.number}-[a-z0-9]+(?:-[a-z0-9]+)*", branch):
+        raise PushTargetError(
+            f"refusing push target {branch!r}: not ticket #{ticket.number}'s factory branch"
+        )
+
+
 def worktree_dir_name(branch: str) -> str:
     """A flat directory name for a branch.
 

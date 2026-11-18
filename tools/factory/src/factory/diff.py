@@ -9,6 +9,7 @@ PROTECTED_PREFIXES = (
     ".github/",
     "tools/factory/",
     "backend/scripts/",
+    "web/console/scripts/",
     ".opencode/",
 )
 PROTECTED_FILES = frozenset(
@@ -19,6 +20,11 @@ PROTECTED_FILES = frozenset(
         ".pre-commit-config.yaml",
     }
 )
+# Protected wherever they live: test fixtures run with every check.
+PROTECTED_NAMES = frozenset({"conftest.py"})
+# Dependency manifests and lockfiles: protected unless the ticket is labeled
+# ``deps-change``, so a new dependency is always a decision the owner made.
+DEPENDENCY_NAMES = frozenset({"package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"})
 
 # Paths whose changes the PR body flags under Risk so the owner reads them in full:
 # authentication, store permissions and credentials, the shared ports (Authorizer,
@@ -62,14 +68,27 @@ def is_test_path(path: str) -> bool:
     return "tests/" in path and path.endswith(".py")
 
 
-def is_protected_path(path: str) -> bool:
-    """Paths the agent must never change on an unattended run."""
+def is_dependency_path(path: str) -> bool:
+    """A dependency manifest or lockfile, anywhere in the repo."""
+    return PurePosixPath(path.replace("\\", "/")).name in DEPENDENCY_NAMES
+
+
+def is_protected_path(path: str, *, allow_dependencies: bool = False) -> bool:
+    """Paths the agent must never change on an unattended run.
+
+    ``allow_dependencies`` (a ``deps-change`` ticket) unlocks only dependency
+    files outside the protected prefixes; the factory's own lockfiles stay locked.
+    """
     normalized = path.replace("\\", "/")
     if normalized in PROTECTED_FILES:
         return True
     if any(normalized.startswith(prefix) for prefix in PROTECTED_PREFIXES):
         return True
     name = PurePosixPath(normalized).name
+    if name in PROTECTED_NAMES:
+        return True
+    if name in DEPENDENCY_NAMES and not allow_dependencies:
+        return True
     return name.startswith("opencode") and name.endswith((".json", ".jsonc"))
 
 
@@ -79,8 +98,8 @@ def is_sensitive_path(path: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in SENSITIVE_PREFIXES)
 
 
-def touches_protected_paths(paths) -> bool:
-    return any(is_protected_path(path) for path in paths)
+def touches_protected_paths(paths, *, allow_dependencies: bool = False) -> bool:
+    return any(is_protected_path(path, allow_dependencies=allow_dependencies) for path in paths)
 
 
 def build_diff_stats(numstat: str, new_files: list[str]) -> DiffStats:

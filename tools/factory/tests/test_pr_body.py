@@ -93,3 +93,12 @@ def test_pr_body_lists_areas_whose_script_was_missing():
 
     assert "- `backend/scripts/check.sh` passed" in body
     assert "- `web/console/scripts/check.sh` skipped (script not found)" in body
+
+
+def test_pr_body_flags_changed_dependencies_as_risk():
+    diff = DiffStats(files=(FileChange("backend/uv.lock", 40, 2),))
+
+    body = _body(diff=diff)
+
+    assert "Dependencies changed" in body
+    assert "`backend/uv.lock`" in body

@@ -1,5 +1,7 @@
 from pathlib import PurePosixPath
 
+import pytest
+
 from factory.tickets import (
     Ticket,
     branch_from_worktree_dir_name,
@@ -106,3 +108,15 @@ def test_branch_from_worktree_dir_name_recovers_factory_branches():
 
 def test_is_ready_requires_ready_label():
     assert not is_ready(_ticket(1, labels={"needs-triage"}))
+
+
+def test_push_target_must_be_the_ticket_s_own_factory_branch():
+    from factory.tickets import PushTargetError, assert_push_target
+
+    ticket = Ticket(number=7, title="Widget endpoint", body="", labels=frozenset())
+
+    assert_push_target(branch_name(ticket), ticket)
+    assert_push_target("nf/7-an-older-title", ticket)
+    for branch in ("main", "nf/8-widget-endpoint", "nf/7", "feature/7-x", "nf/7-x/../main"):
+        with pytest.raises(PushTargetError):
+            assert_push_target(branch, ticket)

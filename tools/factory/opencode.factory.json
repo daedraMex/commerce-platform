@@ -20,7 +20,14 @@
       "opencode.factory.json": "deny",
       ".github/*": "deny",
       "tools/factory/*": "deny",
-      "docs/adr/*": "deny"
+      "docs/adr/*": "deny",
+      ".pre-commit-config.yaml": "deny",
+      "backend/scripts/*": "deny",
+      "web/console/scripts/*": "deny",
+      ".opencode/*": "deny",
+      "*conftest.py": "deny",
+      "*opencode*.json": "deny",
+      "*opencode*.jsonc": "deny"
     },
     "read": {
       "*": "allow",
@@ -28,8 +35,12 @@
       "*.env.*": "deny",
       ".env.example": "allow"
     },
-    "external_directory": { "*": "deny" },
-    "task": { "*": "deny" },
+    "external_directory": {
+      "*": "deny"
+    },
+    "task": {
+      "*": "deny"
+    },
     "question": "deny",
     "webfetch": "deny"
   }
