@@ -11,6 +11,7 @@ pnpm exec playwright install chromium
 
 pnpm run generate
 pnpm run lint
+node scripts/check-silencers.mjs
 pnpm run typecheck
 pnpm run test:unit
 pnpm run test:e2e
