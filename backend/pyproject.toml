@@ -64,8 +64,11 @@ ban-relative-imports = "all"
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 testpaths = ["tests"]
+# real_broker tests need a Redis broker and start a worker; CI runs them in their own job.
+addopts = ["-m", "not real_broker"]
 markers = [
     "no_celery_eager: keep Celery in its non-eager default for this test",
+    "real_broker: runs a Celery task through a real Redis broker and worker (pytest -m real_broker)",
 ]
 
 [tool.importlinter]

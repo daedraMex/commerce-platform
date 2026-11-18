@@ -78,6 +78,63 @@ jobs:
       - name: Check
         run: ./scripts/check.sh
 
+  broker:
+    name: Celery broker
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: shop
+          POSTGRES_USER: shop
+          POSTGRES_PASSWORD: shop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shop -d shop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      SECRET_KEY: ci-not-a-secret-change-me-0123456789
+      DEBUG: "False"
+      ALLOWED_HOSTS: localhost,127.0.0.1
+      DATABASE_URL: postgres://shop:shop@localhost:5432/shop
+      REDIS_URL: redis://localhost:6379/0
+      PYTEST_ADDOPTS: "-p no:cacheprovider"
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # A real Redis broker and an embedded worker, no eager mode: a task name the
+      # producer and the worker disagree on fails here instead of in review (#149).
+      - name: Celery tasks through Redis
+        run: uv run pytest tests/broker -m real_broker
+
   console:
     name: Console
     runs-on: ubuntu-latest
