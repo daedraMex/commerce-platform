@@ -1,7 +1,9 @@
 #!/usr/bin/env node
-// Every eslint-disable comment names its rules, a reason and a ticket (#166):
+// Every comment that turns a lint rule off names the rule, a reason and a ticket (#166):
 //   // eslint-disable-next-line <rule> -- <reason> #<ticket>
+//   /* eslint <rule>: "off" -- <reason> #<ticket> */
 // so a workaround stays visible in review instead of hiding behind a bare disable.
+// @ts-expect-error is checked by ESLint's ban-ts-comment, with the same reason and ticket.
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +11,9 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const DIRECTIVE_RE = /^\s*eslint-disable(?:-next-line|-line)?\b(?<rest>.*)$/s;
+// An inline rule config (`eslint <rule>: ...`), which can switch a rule off for a file.
+// `eslint-env` and `global` comments change no rule, so they stay free.
+const CONFIG_RE = /^\s*eslint(?<rest>\s+\S.*)$/s;
 const RULES_AND_REASON_RE = /^\s+\S.*?\s--\s+\S/s;
 const TICKET_RE = /#\d+/;
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"]);
@@ -39,7 +44,11 @@ function comments(source, fileName) {
 /** Bare disable comments in one file: no rule, no `-- reason` or no ticket. */
 export function findBareSilencers(source, fileName) {
   return comments(source, fileName)
-    .map(({ line, body }) => ({ line, body, match: DIRECTIVE_RE.exec(body) }))
+    .map(({ line, body }) => ({
+      line,
+      body,
+      match: DIRECTIVE_RE.exec(body) ?? CONFIG_RE.exec(body),
+    }))
     .filter(({ match }) => match !== null)
     .filter(({ match }) => {
       const rest = match.groups.rest;
@@ -64,7 +73,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     findBareSilencers(readFileSync(file, "utf-8"), path.relative(root, file)),
   );
   if (bare.length > 0) {
-    console.error("Write `// eslint-disable-next-line <rule> -- <reason> #<ticket>`:");
+    console.error(
+      "Write `// eslint-disable-next-line <rule> -- <reason> #<ticket>` " +
+        "(or `/* eslint <rule>: ... -- <reason> #<ticket> */`):",
+    );
     for (const line of bare) console.error(`  ${line}`);
     process.exit(1);
   }

@@ -43,6 +43,18 @@ function serverPrefersDark(): boolean {
   return false;
 }
 
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function onClient(): boolean {
+  return true;
+}
+
+function onServer(): boolean {
+  return false;
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPreferenceState] = React.useState<ThemePreference>(() =>
     typeof window === "undefined" ? "system" : readPreference(),
@@ -53,12 +65,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     serverPrefersDark,
   );
 
+  // False during hydration, while prefersDark still holds the server snapshot.
+  const hydrated = React.useSyncExternalStore(subscribeToNothing, onClient, onServer);
   const resolved = resolveTheme(preference, prefersDark);
 
-  // eslint-disable-next-line no-restricted-properties -- writes the theme to <html>, outside React #166
+  // eslint-disable-next-line no-restricted-syntax -- writes the theme to <html>, outside React #166
   React.useEffect(() => {
-    applyThemeToDocument(resolved);
-  }, [resolved]);
+    // The inline script already themed <html>; applying the server snapshot would flash.
+    if (hydrated) {
+      applyThemeToDocument(resolved);
+    }
+  }, [hydrated, resolved]);
 
   const setPreference = React.useCallback((next: ThemePreference) => {
     setPreferenceState(next);

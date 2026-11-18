@@ -9,8 +9,8 @@ const consoleRoot = fileURLToPath(new URL("../..", import.meta.url));
 const filePath = path.join(consoleRoot, "src/features/photos/planted.tsx");
 const eslint = new ESLint({ cwd: consoleRoot });
 
-const ruleIds = async (source: string) => {
-  const [result] = await eslint.lintText(source, { filePath });
+const ruleIds = async (source: string, file = filePath) => {
+  const [result] = await eslint.lintText(source, { filePath: file });
   return result.messages.map((message) => message.ruleId ?? message.message);
 };
 
@@ -32,7 +32,7 @@ describe("useEffect is banned (#166)", () => {
       'import * as React from "react";\nReact.useEffect(() => {}, []);\nconst { useEffect } = React;\nuseEffect(() => {});\n';
     const ids = await ruleIds(source);
 
-    expect(ids.filter((id) => id === "no-restricted-properties")).toHaveLength(2);
+    expect(ids.filter((id) => id === "no-restricted-syntax")).toHaveLength(2);
   });
 
   it("allows useSyncExternalStore and useMemo", async () => {
@@ -80,5 +80,34 @@ describe("@ts-expect-error names a ticket (#166)", () => {
     );
 
     expect(ids).toContain("@typescript-eslint/ban-ts-comment");
+  });
+});
+
+
+describe("ways around the effect ban (#166 review)", () => {
+  it.each([
+    ["a re-export", 'export { useEffect } from "react";\n'],
+    ["another namespace name", 'import * as R from "react";\nR.useEffect(() => {}, []);\n'],
+    ["a computed member", 'import * as React from "react";\nReact["useEffect"](() => {});\n'],
+    ["useInsertionEffect", 'import { useInsertionEffect } from "react";\nuseInsertionEffect(() => {});\n'],
+  ])("rejects %s", async (_case, source) => {
+    expect(await ruleIds(source)).toContain("no-restricted-syntax");
+  });
+
+  it.each([
+    ["e2e-level2/planted.ts", "// @ts-ignore\nexport const a: number = 1;\n"],
+    ["vitest.planted.mts", "// @ts-ignore\nexport const a: number = 1;\n"],
+  ])("lints %s", async (file, source) => {
+    expect(await ruleIds(source, path.join(consoleRoot, file))).toContain(
+      "@typescript-eslint/ban-ts-comment",
+    );
+  });
+
+  it("accepts the -- form of @ts-expect-error too", async () => {
+    const ids = await ruleIds(
+      "// @ts-expect-error -- the generated type lags the schema #166\nexport const a: number = '1';\n",
+    );
+
+    expect(ids).not.toContain("@typescript-eslint/ban-ts-comment");
   });
 });

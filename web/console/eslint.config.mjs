@@ -1,11 +1,17 @@
 import next from "eslint-config-next/core-web-vitals";
 import boundaries from "eslint-plugin-boundaries";
 
+// Next registers the TypeScript plugin and parser only for some extensions; reuse them so
+// the bans below also reach `.mts` files.
+const nextTypescript = next.find((entry) => entry.plugins?.["@typescript-eslint"]);
+
+const EFFECT_NAME = "/^use(Layout|Insertion)?Effect$/";
+
 const EFFECT_MESSAGE =
   "Effects are for syncing with an external system only. Derive state while rendering, " +
   "handle events in their handlers, fetch with the generated query hooks, and subscribe " +
   "with useSyncExternalStore. If none fits, disable this line with the rule, a reason " +
-  "and a ticket: `// eslint-disable-next-line <rule> -- <reason> #<ticket>` (#166).";
+  "and a ticket: `// eslint-disable-next-line no-restricted-syntax -- <reason> #<ticket>` (#166).";
 
 const config = [
   {
@@ -69,21 +75,21 @@ const config = [
   },
   {
     // Agent mistakes become guards (#165, #166): effects and TypeScript silencers.
-    files: ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "*.ts"],
+    files: ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "e2e-level2/**/*.ts", "*.ts", "*.mts"],
+    plugins: { "@typescript-eslint": nextTypescript.plugins["@typescript-eslint"] },
+    languageOptions: { parser: nextTypescript.languageOptions.parser },
     rules: {
-      // A selector, not no-restricted-imports: that rule also rejects `import * as React`.
+      // Selectors, not no-restricted-imports or no-restricted-properties: those reject
+      // `import * as React` and only match an object named React.
       "no-restricted-syntax": [
         "error",
-        {
-          selector:
-            "ImportDeclaration[source.value='react'] > ImportSpecifier[imported.name=/^use(Layout)?Effect$/]",
-          message: EFFECT_MESSAGE,
-        },
-      ],
-      "no-restricted-properties": [
-        "error",
-        { object: "React", property: "useEffect", message: EFFECT_MESSAGE },
-        { object: "React", property: "useLayoutEffect", message: EFFECT_MESSAGE },
+        ...[
+          `ImportDeclaration[source.value='react'] > ImportSpecifier[imported.name=${EFFECT_NAME}]`,
+          `ExportNamedDeclaration[source.value='react'] > ExportSpecifier[local.name=${EFFECT_NAME}]`,
+          `MemberExpression[property.name=${EFFECT_NAME}]`,
+          `MemberExpression[property.value=${EFFECT_NAME}]`,
+          `VariableDeclarator[init.name='React'] > ObjectPattern > Property[key.name=${EFFECT_NAME}]`,
+        ].map((selector) => ({ selector, message: EFFECT_MESSAGE })),
       ],
       "@typescript-eslint/ban-ts-comment": [
         "error",
@@ -91,8 +97,7 @@ const config = [
           "ts-ignore": true,
           "ts-nocheck": true,
           "ts-check": false,
-          "ts-expect-error": { descriptionFormat: "^: .+ #\\d+$" },
-          minimumDescriptionLength: 10,
+          "ts-expect-error": { descriptionFormat: "^(:| --) .+ #\\d+$" },
         },
       ],
     },
