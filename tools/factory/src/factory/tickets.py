@@ -26,6 +26,56 @@ REQUIRED_LABELS = frozenset(
 )
 
 _BLOCKED_BY_RE = re.compile(r"^\s*Blocked by:\s*(.+?)\s*$", re.IGNORECASE)
+_CONTRACTS_HEADING_RE = re.compile(r"^#{2,3}\s*Contracts\s*$", re.IGNORECASE | re.MULTILINE)
+_NEXT_HEADING_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
+_CONTRACTS_LINE_RE = re.compile(r"^\s*\**Contracts:\**\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
+# Only backticked ids count, so a path such as `docs/contracts/photos.md` is never an id.
+_CONTRACT_ID_RE = re.compile(r"`([a-z][a-z0-9_]*\.[a-z0-9][a-z0-9_-]*)`")
+_VERBS = {"defines": "held", "changes": "held", "consumes": "consumed"}
+
+
+@dataclass(frozen=True)
+class Contracts:
+    """The contract ids a ticket declares (ADR-0031).
+
+    ``held`` are the ones it defines or changes; ``consumed`` the ones it relies on.
+    """
+
+    held: frozenset[str] = frozenset()
+    consumed: frozenset[str] = frozenset()
+
+    def conflicts_with(self, other: Contracts) -> frozenset[str]:
+        """Shared ids where at least one side defines or changes the contract."""
+        return (self.held & (other.held | other.consumed)) | (self.consumed & other.held)
+
+
+def parse_contracts(body: str) -> Contracts:
+    """Read a ticket's Contracts section (or ``Contracts:`` line), by verb.
+
+    An id in a clause with no verb counts as held, so an unclear section blocks
+    rather than lets two tickets race on one contract.
+    """
+    text = _contracts_text(body)
+    held: set[str] = set()
+    consumed: set[str] = set()
+    verb = "held"
+    for clause in text.split(";"):
+        words = clause.strip().lstrip("*_").split(maxsplit=1)
+        if words and words[0].lower() in _VERBS:
+            verb = _VERBS[words[0].lower()]
+        target = held if verb == "held" else consumed
+        target.update(_CONTRACT_ID_RE.findall(clause))
+    return Contracts(held=frozenset(held), consumed=frozenset(consumed - held))
+
+
+def _contracts_text(body: str) -> str:
+    heading = _CONTRACTS_HEADING_RE.search(body)
+    if heading is not None:
+        rest = body[heading.end() :]
+        following = _NEXT_HEADING_RE.search(rest)
+        return rest if following is None else rest[: following.start()]
+    line = _CONTRACTS_LINE_RE.search(body)
+    return "" if line is None else line.group(1)
 
 
 @dataclass(frozen=True)
@@ -38,6 +88,8 @@ class Ticket:
     labels: frozenset[str] = field(default_factory=frozenset)
     blocked_by: tuple[int, ...] = ()
     has_open_pr: bool = False
+    # One line per contract an open pull request holds against this ticket (#144).
+    contract_conflicts: tuple[str, ...] = ()
 
 
 def branch_name(ticket: Ticket) -> str:
@@ -99,12 +151,22 @@ def is_ready(ticket: Ticket) -> bool:
         return False
     if ticket.blocked_by:
         return False
+    if ticket.contract_conflicts:
+        return False
     return True
 
 
 def select_tickets(tickets: list[Ticket], *, max_tickets: int) -> list[Ticket]:
-    ready = sorted((t for t in tickets if is_ready(t)), key=lambda t: t.number)
-    return ready[:max_tickets]
+    """The oldest ready tickets, never two that conflict on a contract (ADR-0031)."""
+    selected: list[Ticket] = []
+    for ticket in sorted((t for t in tickets if is_ready(t)), key=lambda t: t.number):
+        if len(selected) >= max_tickets:
+            break
+        contracts = parse_contracts(ticket.body)
+        if any(contracts.conflicts_with(parse_contracts(s.body)) for s in selected):
+            continue
+        selected.append(ticket)
+    return selected
 
 
 def parse_blocked_by(body: str) -> tuple[int, ...]:

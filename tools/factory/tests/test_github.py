@@ -682,3 +682,95 @@ def test_list_label_names_raises_when_gh_fails():
 
     with pytest.raises(GitHubError, match="HTTP 401"):
         GitHub(REPO, run=gh).list_label_names("tok")
+
+
+class ContractGh:
+    """Ready tickets, open PRs and issue bodies for the contract-hold tests (#144)."""
+
+    def __init__(self, *, ready, prs, bodies, failing_issue=None):
+        self.ready = ready
+        self.prs = prs
+        self.bodies = bodies
+        self.failing_issue = failing_issue
+        self.viewed = []
+
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        if argv[:3] == ["gh", "issue", "list"]:
+            return CommandResult(0, json.dumps(self.ready), "")
+        if argv[:3] == ["gh", "pr", "list"]:
+            return CommandResult(0, json.dumps(self.prs), "")
+        if argv[:3] == ["gh", "issue", "view"]:
+            number = int(argv[3])
+            fields = argv[argv.index("--json") + 1]
+            if fields == "state":
+                return CommandResult(0, '{"state":"CLOSED"}', "")
+            self.viewed.append(number)
+            if number == self.failing_issue:
+                return CommandResult(1, "", "HTTP 502")
+            return CommandResult(0, json.dumps({"body": self.bodies.get(number, "")}), "")
+        return CommandResult(0, "[]", "")
+
+
+CHANGES = "## Contracts\n\nChanges `photos.submission-states`.\n\n## Acceptance criteria\n"
+CONSUMES = "## Contracts\n\nConsumes `photos.submission-states`.\n\n## Acceptance criteria\n"
+CONSUMES_QUEUE = "## Contracts\n\nConsumes `photos.processing-queue`.\n"
+
+
+def _ready(number, body):
+    return {
+        "number": number,
+        "title": f"T{number}",
+        "body": body,
+        "labels": [{"name": "ready-for-agent"}],
+    }
+
+
+def test_a_ticket_whose_contract_an_open_pr_changes_carries_the_conflict():
+    gh = ContractGh(
+        ready=[_ready(170, CHANGES), _ready(100, CONSUMES), _ready(171, CONSUMES_QUEUE)],
+        prs=[{"number": 175, "body": "Closes #156. Part of #79."}],
+        bodies={156: CHANGES, 79: "Parent."},
+    )
+
+    tickets = {t.number: t for t in GitHub(REPO, run=gh).list_tickets("TOKEN")}
+
+    assert tickets[170].contract_conflicts == ("photos.submission-states held by PR #175 (#156)",)
+    assert tickets[100].contract_conflicts == ("photos.submission-states held by PR #175 (#156)",)
+    assert tickets[171].contract_conflicts == ()
+
+
+def test_two_consumers_never_conflict():
+    gh = ContractGh(
+        ready=[_ready(100, CONSUMES)],
+        prs=[{"number": 175, "body": "Closes #134."}],
+        bodies={134: CONSUMES},
+    )
+
+    (ticket,) = GitHub(REPO, run=gh).list_tickets("TOKEN")
+
+    assert ticket.contract_conflicts == ()
+
+
+def test_no_issue_body_is_read_when_no_ready_ticket_declares_contracts():
+    gh = ContractGh(
+        ready=[_ready(99, "## What to build\n\nA page.\n")],
+        prs=[{"number": 175, "body": "Closes #156."}],
+        bodies={156: CHANGES},
+    )
+
+    (ticket,) = GitHub(REPO, run=gh).list_tickets("TOKEN")
+
+    assert ticket.contract_conflicts == ()
+    assert gh.viewed == []
+
+
+def test_an_unreadable_pr_ticket_fails_the_listing_instead_of_letting_tickets_race():
+    gh = ContractGh(
+        ready=[_ready(170, CHANGES)],
+        prs=[{"number": 175, "body": "Closes #156."}],
+        bodies={},
+        failing_issue=156,
+    )
+
+    with pytest.raises(GitHubError, match="HTTP 502"):
+        GitHub(REPO, run=gh).list_tickets("TOKEN")

@@ -2345,3 +2345,26 @@ def test_a_review_fix_whose_pr_label_fails_pushes_nothing(tmp_path):
 
     assert git.pushed == []
     assert github.comments == []
+
+
+def test_a_ticket_held_by_a_contract_is_skipped_and_logged_once(tmp_path, capsys):
+    held = replace(
+        make_ticket(7, labels={"ready-for-agent"}),
+        contract_conflicts=("photos.submission-states held by PR #175 (#156)",),
+    )
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path,
+        git=FakeGit(check_passed=True),
+        github=FakeGitHub(tickets=[held]),
+        runner=runner,
+        notifier=RecordingNotifier(),
+    )
+
+    results = factory.run()
+
+    assert results == []
+    assert runner.calls == []
+    err = capsys.readouterr().err
+    assert err.count("#7 skipped") == 1
+    assert "photos.submission-states held by PR #175 (#156)" in err

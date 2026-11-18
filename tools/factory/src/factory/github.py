@@ -8,7 +8,7 @@ from datetime import datetime
 
 from .reviews import CHANGES_REQUESTED, ReviewComment, ReviewFix
 from .shell import CommandResult, RunCommand, run_command
-from .tickets import Ticket, parse_blocked_by
+from .tickets import Contracts, Ticket, parse_blocked_by, parse_contracts
 
 _CLOSES_RE = re.compile(r"(?:Closes|Part of)\s+#(\d+)", re.IGNORECASE)
 
@@ -492,8 +492,10 @@ class GitHub:
         )
 
     def _resolve(self, tickets: list[Ticket], token: str | None) -> list[Ticket]:
-        """Resolve open blockers and existing PRs; keep only the resolved tickets."""
-        open_pr_numbers = self._open_pr_ticket_numbers(token)
+        """Resolve open blockers, existing PRs and contract holds (#144)."""
+        pr_tickets = self._open_pr_tickets(token)
+        open_pr_numbers = {n for _pr, numbers in pr_tickets for n in numbers}
+        holds = self._contract_holds(tickets, pr_tickets, token)
         resolved: list[Ticket] = []
         for ticket in tickets:
             blocked_by = tuple(
@@ -507,9 +509,49 @@ class GitHub:
                     labels=ticket.labels,
                     blocked_by=blocked_by,
                     has_open_pr=ticket.number in open_pr_numbers,
+                    contract_conflicts=_conflicts(ticket, holds),
                 )
             )
         return resolved
+
+    def _contract_holds(
+        self,
+        tickets: list[Ticket],
+        pr_tickets: list[tuple[int | None, list[int]]],
+        token: str | None,
+    ) -> list[tuple[int | None, int, Contracts]]:
+        """(PR, ticket, contracts) for every open PR's ticket that declares contracts.
+
+        Bodies are read only when a listed ticket declares contracts. An unreadable
+        body raises: guessing "no contracts" would let two tickets race on one.
+        """
+        if not any(_declares(parse_contracts(t.body)) for t in tickets):
+            return []
+        bodies: dict[int, str] = {}
+        holds = []
+        for pr_number, numbers in pr_tickets:
+            for number in numbers:
+                if number not in bodies:
+                    bodies[number] = self._issue_body(number, token)
+                contracts = parse_contracts(bodies[number])
+                if _declares(contracts):
+                    holds.append((pr_number, number, contracts))
+        return holds
+
+    def _issue_body(self, number: int, token: str | None) -> str:
+        result = self._run(
+            ["gh", "issue", "view", str(number), "--repo", self.repo, "--json", "body"],
+            cwd="/",
+            timeout=120,
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or f"exit {result.exit_code}"
+            raise GitHubError(f"gh issue view #{number} failed: {reason}")
+        try:
+            return str(json.loads(result.stdout).get("body") or "")
+        except (json.JSONDecodeError, AttributeError) as exc:
+            raise GitHubError(f"gh issue view #{number} returned invalid JSON") from exc
 
     def _open_blockers(self, body: str) -> list[int]:
         # Native dependencies are the live gate; the "Blocked by:" line is the fallback.
@@ -530,6 +572,10 @@ class GitHub:
             return True
 
     def _open_pr_ticket_numbers(self, token: str | None) -> set[int]:
+        return {n for _pr, numbers in self._open_pr_tickets(token) for n in numbers}
+
+    def _open_pr_tickets(self, token: str | None) -> list[tuple[int | None, list[int]]]:
+        """Every open PR (any author), mapped to the issues its body closes or is part of."""
         result = self._run(
             [
                 "gh",
@@ -542,7 +588,7 @@ class GitHub:
                 "--limit",
                 "1000",
                 "--json",
-                "body",
+                "number,body",
             ],
             cwd="/",
             timeout=120,
@@ -556,11 +602,28 @@ class GitHub:
             raise GitHubError("gh pr list returned invalid JSON") from exc
         if not isinstance(prs, list):
             raise GitHubError("gh pr list returned an unexpected JSON shape")
-        numbers: set[int] = set()
+        tickets: list[tuple[int | None, list[int]]] = []
         for obj in prs:
-            for match in _CLOSES_RE.findall(obj.get("body", "") or ""):
-                numbers.add(int(match))
-        return numbers
+            numbers = [int(match) for match in _CLOSES_RE.findall(obj.get("body", "") or "")]
+            pr_number = obj.get("number")
+            tickets.append((None if pr_number is None else int(pr_number), numbers))
+        return tickets
+
+
+def _declares(contracts: Contracts) -> bool:
+    return bool(contracts.held or contracts.consumed)
+
+
+def _conflicts(ticket: Ticket, holds: list[tuple[int | None, int, Contracts]]) -> tuple[str, ...]:
+    mine = parse_contracts(ticket.body)
+    lines = []
+    for pr_number, number, theirs in holds:
+        if number == ticket.number:
+            continue
+        for contract in sorted(mine.conflicts_with(theirs)):
+            pr = "an open PR" if pr_number is None else f"PR #{pr_number}"
+            lines.append(f"{contract} held by {pr} (#{number})")
+    return tuple(lines)
 
 
 def _gh_env(token: str | None) -> dict[str, str] | None:

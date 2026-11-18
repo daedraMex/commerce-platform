@@ -3,11 +3,13 @@ from pathlib import PurePosixPath
 import pytest
 
 from factory.tickets import (
+    Contracts,
     Ticket,
     branch_from_worktree_dir_name,
     branch_name,
     is_ready,
     parse_blocked_by,
+    parse_contracts,
     select_tickets,
     worktree_path,
 )
@@ -132,3 +134,94 @@ def test_every_branch_the_factory_derives_passes_its_own_push_guard():
     for title in titles:
         ticket = Ticket(number=7, title=title, body="", labels=frozenset())
         assert_push_target(branch_name(ticket), ticket)
+
+
+CHANGES_STATES = """## Mode
+
+AFK
+
+## Contracts
+
+Changes `photos.submission-states`: remove on a group photo is refused.
+
+## Acceptance criteria
+"""
+
+
+def test_parse_contracts_reads_the_section_by_verb():
+    body = (
+        "## Contracts\n\n"
+        "Defines `orders.place-order-task`; changes `photos.submission-states`; "
+        "consumes `photos.catalog-port` (cover rules) and `photos.processing-queue`.\n\n"
+        "## Blocked by\n\n- #12\n"
+    )
+
+    contracts = parse_contracts(body)
+
+    assert contracts.held == {"orders.place-order-task", "photos.submission-states"}
+    assert contracts.consumed == {"photos.catalog-port", "photos.processing-queue"}
+
+
+def test_parse_contracts_ignores_paths_and_text_outside_the_section():
+    body = (
+        "Touches `photos.submission-states` in passing.\n\n"
+        "## Contracts\n\n"
+        "Consumes `photos.submission-states`; see `docs/contracts/photos.md`.\n\n"
+        "## Acceptance criteria\n\n- [ ] Update `docs/contracts/photos.md`.\n"
+    )
+
+    contracts = parse_contracts(body)
+
+    assert contracts.held == frozenset()
+    assert contracts.consumed == {"photos.submission-states"}
+
+
+def test_parse_contracts_reads_a_plain_line_too():
+    body = "**Contracts:** Changes `photos.submission-states`.\n\nMore text.\n"
+
+    assert parse_contracts(body).held == {"photos.submission-states"}
+
+
+def test_a_ticket_without_contracts_or_with_none_holds_nothing():
+    for body in ("## What to build\n\nA page.\n", "## Contracts\n\nNone.\n\n## Mode\n"):
+        contracts = parse_contracts(body)
+        assert not contracts.held and not contracts.consumed
+
+
+def test_an_id_without_a_verb_is_held_to_stay_on_the_safe_side():
+    body = "## Contracts\n\n`photos.submission-states` (group remove).\n"
+
+    assert parse_contracts(body).held == {"photos.submission-states"}
+
+
+@pytest.mark.parametrize(
+    ("mine", "theirs", "conflict"),
+    [
+        (Contracts(held=frozenset({"a.x"})), Contracts(held=frozenset({"a.x"})), {"a.x"}),
+        (Contracts(held=frozenset({"a.x"})), Contracts(consumed=frozenset({"a.x"})), {"a.x"}),
+        (Contracts(consumed=frozenset({"a.x"})), Contracts(held=frozenset({"a.x"})), {"a.x"}),
+        (Contracts(consumed=frozenset({"a.x"})), Contracts(consumed=frozenset({"a.x"})), set()),
+        (Contracts(held=frozenset({"a.x"})), Contracts(held=frozenset({"a.y"})), set()),
+    ],
+)
+def test_contracts_conflict_unless_both_only_consume(mine, theirs, conflict):
+    assert mine.conflicts_with(theirs) == conflict
+
+
+def test_a_ticket_whose_contract_an_open_pr_holds_is_not_ready():
+    ticket = Ticket(
+        number=7,
+        title="t",
+        labels=frozenset({"ready-for-agent"}),
+        contract_conflicts=("photos.submission-states held by PR #175 (#156)",),
+    )
+
+    assert not is_ready(ticket)
+
+
+def test_select_skips_a_ticket_that_conflicts_with_one_already_selected():
+    first = Ticket(number=7, title="a", body=CHANGES_STATES, labels=frozenset({"ready-for-agent"}))
+    second = Ticket(number=8, title="b", body=CHANGES_STATES, labels=frozenset({"ready-for-agent"}))
+    other = Ticket(number=9, title="c", labels=frozenset({"ready-for-agent"}))
+
+    assert select_tickets([first, second, other], max_tickets=2) == [first, other]

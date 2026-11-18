@@ -148,6 +148,7 @@ class Factory:
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
         tickets = self.run_preflight(token=token)
         held = self._retry_held_labels(token)
+        _log_contract_skips(tickets)
         if review_fix is not None:
             self.review_attempts.record_attempted(review_fix.review_id)
             return [
@@ -1120,6 +1121,14 @@ def main(argv: list[str] | None = None) -> int:
         outcome = "ok" if result.ok else "stuck"
         print(f"#{result.ticket.number}: {outcome}")
     return 0
+
+
+def _log_contract_skips(tickets: list[Ticket]) -> None:
+    """Say once per run which ticket waits for which open PR's contract (#144)."""
+    for ticket in tickets:
+        if ticket.contract_conflicts:
+            reasons = "; ".join(ticket.contract_conflicts)
+            print(f"#{ticket.number} skipped: {reasons}", file=sys.stderr)
 
 
 def _allows_dependencies(ticket: Ticket) -> bool:
