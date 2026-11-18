@@ -8,6 +8,7 @@ import {
   pixelsToCrop,
   pointerToNormalized,
   resizeCrop,
+  resizeCropToAspect,
   setCorner,
   type CropHandle,
   type NormalizedCrop,
@@ -16,7 +17,7 @@ import {
   type PixelCrop,
 } from "../lib/geometry";
 
-type PhotoShape = "rectangle" | "contour";
+type PhotoShape = "rectangle" | "contour" | "group";
 
 type PhotoEditorProps = {
   imageUrl: string;
@@ -25,6 +26,7 @@ type PhotoEditorProps = {
   crop: NormalizedCrop;
   lightCorrection: boolean;
   initialPixelCrop?: PixelCrop | null;
+  cropAspectScale?: number;
   onCornersChange: (corners: NormalizedQuad) => void;
   onCropChange: (crop: NormalizedCrop) => void;
   onLightCorrectionChange: (enabled: boolean) => void;
@@ -75,6 +77,7 @@ export function PhotoEditor({
   crop,
   lightCorrection,
   initialPixelCrop,
+  cropAspectScale,
   onCornersChange,
   onCropChange,
   onLightCorrectionChange,
@@ -197,7 +200,15 @@ export function PhotoEditor({
     onCropChange(
       cropDrag.mode === "move"
         ? moveCrop(cropDrag.startCrop, dx, dy)
-        : resizeCrop(cropDrag.startCrop, cropDrag.handle, dx, dy),
+        : cropAspectScale
+          ? resizeCropToAspect(
+              cropDrag.startCrop,
+              cropDrag.handle,
+              dx,
+              dy,
+              cropAspectScale,
+            )
+          : resizeCrop(cropDrag.startCrop, cropDrag.handle, dx, dy),
     );
   };
 
@@ -305,6 +316,11 @@ export function PhotoEditor({
         ) : (
           <div
             data-testid="crop-frame"
+            data-shape={shape}
+            data-crop-x={crop.x.toFixed(4)}
+            data-crop-y={crop.y.toFixed(4)}
+            data-crop-width={crop.width.toFixed(4)}
+            data-crop-height={crop.height.toFixed(4)}
             onPointerDown={cropPointerDownMove}
             onPointerMove={cropPointerMove}
             onPointerUp={cropPointerUp}

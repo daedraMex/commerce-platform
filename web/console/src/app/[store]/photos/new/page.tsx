@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 
 import { Button } from "@/components/atoms/button";
 import { PermissionGate } from "@/features/auth/organisms/permission-gate";
+import { GroupPhotoFlow } from "@/features/photos/organisms/group-photo-flow";
 import { IndividualPhotoFlow } from "@/features/photos/organisms/individual-photo-flow";
 import { storeHref } from "@/lib/store-path";
 
@@ -28,21 +29,7 @@ export default async function NewPhotoPage({
   let content: React.ReactNode;
 
   if (kind === "group") {
-    content = (
-      <main data-store={store} className="mx-auto w-full max-w-md p-3 sm:p-4">
-        <h2 className="text-xl font-semibold tracking-tight">
-          {t("groupHeading")}
-        </h2>
-        <p className="mt-2 rounded-lg border border-dashed border-border p-4 text-sm text-foreground/60">
-          {t("groupComingSoon")}
-        </p>
-        <Button variant="outline" size="sm" className="mt-3" asChild>
-          <Link href={storeHref(store, "photos")}>
-            {t("backToPhotos")}
-          </Link>
-        </Button>
-      </main>
-    );
+    content = <GroupPhotoFlow store={store} />;
   } else if (Number.isInteger(productId) && productId > 0) {
     content = <IndividualPhotoFlow store={store} productId={productId} />;
   } else {

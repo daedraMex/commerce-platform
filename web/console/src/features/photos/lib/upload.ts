@@ -9,7 +9,7 @@ import type { NormalizedQuad, PixelCrop } from "./geometry";
 export type PhotoUploadRequest = {
   file: File;
   kind: KindEnum;
-  targetProductId: number;
+  targetProductId?: number | null;
   idempotencyKey: string;
   lightCorrection: boolean;
   corners?: NormalizedQuad;
@@ -26,7 +26,9 @@ export function buildPhotoUploadForm(input: PhotoUploadRequest): FormData {
   const body = new FormData();
   body.append("file", input.file);
   body.append("kind", input.kind);
-  body.append("target_product", String(input.targetProductId));
+  if (input.targetProductId !== undefined && input.targetProductId !== null) {
+    body.append("target_product", String(input.targetProductId));
+  }
   body.append("light_correction", String(input.lightCorrection));
   if (input.corners) {
     body.append("corners", JSON.stringify(input.corners));

@@ -116,3 +116,118 @@ describe("photo MSW scenarios", () => {
     });
   });
 });
+describe("group photo MSW scenarios", () => {
+  async function uploadGroup(access: string) {
+    const body = new FormData();
+    body.append(
+      "file",
+      new File([new Uint8Array([255, 216, 255, 217])], "group.jpg", {
+        type: "image/jpeg",
+      }),
+    );
+    body.append("kind", "group");
+    body.append(
+      "crop",
+      JSON.stringify({ x: 480, y: 0, width: 960, height: 1200 }),
+    );
+    return fetch(`${BACKEND}/api/v1/staff/photos/`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${access}`,
+        "X-Store": "anime",
+        "Idempotency-Key": "group-test",
+      },
+      body,
+    });
+  }
+
+  it("applies the submitted products in sorted order and keeps it when links change", async () => {
+    const access = await signIn();
+    const created = await uploadGroup(access);
+    expect(created.status).toBe(201);
+    const start = (await created.json()) as PhotoSubmission;
+    expect(start.kind).toBe("group");
+    expect(start.target_product_id).toBeNull();
+
+    await detail(access, start.id);
+    const ready = await detail(access, start.id);
+    expect(ready.body.status).toBe("ready");
+
+    const applied = await fetch(
+      `${BACKEND}/api/v1/staff/photos/${start.id}/apply/`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${access}`,
+          "content-type": "application/json",
+          "X-Store": "anime",
+        },
+        body: JSON.stringify({ product_ids: [13, 12] }),
+      },
+    );
+    expect(applied.status).toBe(200);
+    const appliedBody = (await applied.json()) as PhotoSubmission;
+    expect(appliedBody.applied_at).not.toBeNull();
+    expect(appliedBody.linked_product_ids).toEqual([12, 13]);
+
+    const linked = await fetch(
+      `${BACKEND}/api/v1/staff/photos/${start.id}/links/`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${access}`,
+          "content-type": "application/json",
+          "X-Store": "anime",
+        },
+        body: JSON.stringify({ product_ids: [12, 13, 14] }),
+      },
+    );
+    expect(linked.status).toBe(200);
+    expect(((await linked.json()) as PhotoSubmission).linked_product_ids).toEqual([
+      12, 13, 14,
+    ]);
+
+    const emptied = await fetch(
+      `${BACKEND}/api/v1/staff/photos/${start.id}/links/`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${access}`,
+          "content-type": "application/json",
+          "X-Store": "anime",
+        },
+        body: JSON.stringify({ product_ids: [] }),
+      },
+    );
+    expect(emptied.status).toBe(200);
+    expect(((await emptied.json()) as PhotoSubmission).linked_product_ids).toEqual(
+      [],
+    );
+  });
+
+  it("refuses links for a group photo that was not applied yet", async () => {
+    const access = await signIn();
+    const created = await uploadGroup(access);
+    const start = (await created.json()) as PhotoSubmission;
+    await detail(access, start.id);
+    await detail(access, start.id);
+
+    const response = await fetch(
+      `${BACKEND}/api/v1/staff/photos/${start.id}/links/`,
+      {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${access}`,
+          "content-type": "application/json",
+          "X-Store": "anime",
+        },
+        body: JSON.stringify({ product_ids: [12] }),
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "submission_cannot_change_links",
+    });
+  });
+});
