@@ -21,6 +21,7 @@
       "docs/adr/*": "deny",
       ".pre-commit-config.yaml": "deny",
       "backend/scripts/*": "deny",
+      "backend/tests/architecture/*": "deny",
       "web/console/scripts/*": "deny",
       ".opencode/*": "deny",
       "*conftest.py": "deny",

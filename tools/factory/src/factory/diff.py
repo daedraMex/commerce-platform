@@ -12,6 +12,8 @@ PROTECTED_PREFIXES = (
     ".github/",
     "tools/factory/",
     "backend/scripts/",
+    # Architecture tests are guards written from agent mistakes (#165).
+    "backend/tests/architecture/",
     "web/console/scripts/",
     ".opencode/",
 )

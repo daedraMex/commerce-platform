@@ -97,6 +97,9 @@ rule whose trigger matches the diff; skip the rest.
   sequence → wrong result). A finding without a failure case is a question; ask it as one.
 - Important findings come as checkbox acceptance criteria, including the tests that prove
   the fix and `./scripts/check.sh` for each touched area.
+- When a finding is a mistake a lint rule, architecture check or test could catch, name
+  that guard and open a follow-up issue for it, so the next agent fails the check instead
+  of repeating the mistake.
 - State the scope: what this pull request must fix, and what is tracked elsewhere (issue
   number).
 - At most three Nits per review.

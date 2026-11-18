@@ -28,6 +28,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Commit before /code-review, because it diffs `main...HEAD`.
 - Every pull request review, by an agent or with /code-review, applies REVIEW.md as read
   from `main`.
+- An agent's mistake becomes a guard (lint rule, architecture check or test), not a new
+  line in this file; /retro and REVIEW.md say how.
 - Before rewording a phrase in the docs, search the whole repo for it and change
   every copy at once.
 - The backend has no typechecker: for backend work, skip /implement's typechecking step

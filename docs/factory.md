@@ -650,7 +650,7 @@ unreachable" as before.
   inside the throwaway worktree to prove the same cleanup removes it.
 - **Protected paths.** Before the pre-PR review and again before pushing, the
   factory inspects the diff. If it touches `.github/`, `tools/factory/`,
-  `backend/scripts/`, `web/console/scripts/`, `.opencode/`, `AGENTS.md`,
+  `backend/scripts/`, `backend/tests/architecture/`, `web/console/scripts/`, `.opencode/`, `AGENTS.md`,
   `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`, any `opencode*.json[c]`,
   any `conftest.py`, or any backend check configuration that outranks
   `pyproject.toml` (`pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini`,
