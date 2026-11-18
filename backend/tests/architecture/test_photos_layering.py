@@ -1,3 +1,4 @@
+# Overlaps the import-linter contracts in pyproject.toml; kept as a second guard for photos.
 import ast
 from pathlib import Path
 

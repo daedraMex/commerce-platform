@@ -91,7 +91,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - docker compose up -d                      # PostgreSQL, Redis, RustFS buckets and the worker
 - cd backend && uv sync                     # Python dependencies from uv.lock
 - uv run python manage.py runserver
-- cd backend && ./scripts/check.sh           # everything CI runs: ruff, migrations, schema, pytest
+- cd backend && ./scripts/check.sh           # everything CI runs: ruff, import-linter, migrations, schema, pytest
 - cd backend && uv run ruff format .         # fix formatting
 - cd backend && uv run pytest tests/api/test_health.py   # one test file while iterating
 - cd backend && uv run pre-commit install --config ../.pre-commit-config.yaml

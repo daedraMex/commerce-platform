@@ -26,6 +26,8 @@ dev = [
     "pytest",
     "pytest-django",
     "ruff>=0.17.2",
+    "import-linter>=2.16",
+    "hypothesis>=6.170.15",
 ]
 
 [tool.uv]
@@ -38,11 +40,60 @@ extend-exclude = ["*/migrations/*"]
 force-exclude = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "DJ"]
+select = ["E", "F", "I", "UP", "B", "DJ", "TID251", "TID252"]
+
+# Modules with business rules keep DRF thin (AGENTS.md): serializers validate shape and
+# use cases enforce rules. The CRUD-only modules below may use the generic DRF classes.
+[tool.ruff.lint.flake8-tidy-imports]
+# Absolute imports only, so the architecture tests and import-linter see every import.
+ban-relative-imports = "all"
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"rest_framework.viewsets.ModelViewSet".msg = "Business modules expose use cases through thin views, not ModelViewSet."
+"rest_framework.serializers.ModelSerializer".msg = "Business modules validate shape with plain serializers; use cases save."
+"rest_framework.serializers.HyperlinkedModelSerializer".msg = "Business modules validate shape with plain serializers; use cases save."
+
+[tool.ruff.lint.per-file-ignores]
+# CRUD-only modules (AGENTS.md). A new business module is covered by default.
+"apps/accounts/**" = ["TID251"]
+"apps/catalog/**" = ["TID251"]
+"apps/stores/**" = ["TID251"]
+"apps/health/**" = ["TID251"]
+"tests/**" = ["TID251"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"
 testpaths = ["tests"]
 markers = [
     "no_celery_eager: keep Celery in its non-eager default for this test",
+]
+
+[tool.importlinter]
+root_packages = ["apps"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain layers import no framework or infrastructure"
+type = "forbidden"
+source_modules = ["apps.*.domain"]
+forbidden_modules = [
+    "django",
+    "rest_framework",
+    "celery",
+    "config",
+    "apps.*.infrastructure",
+    "apps.*.interfaces",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application layers import no Django, DRF, Celery or infrastructure"
+type = "forbidden"
+source_modules = ["apps.*.application"]
+forbidden_modules = [
+    "django",
+    "rest_framework",
+    "celery",
+    "config",
+    "apps.*.infrastructure",
+    "apps.*.interfaces",
 ]
