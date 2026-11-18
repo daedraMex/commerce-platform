@@ -2,7 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-BACKEND_DIR = Path(__file__).resolve().parents[3]
+BACKEND_DIR = Path(__file__).resolve().parents[2]
 
 # Imports every apps.shared module in a fresh interpreter that refuses to load a forbidden module.
 PROBE = """

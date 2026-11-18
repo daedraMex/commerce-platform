@@ -650,14 +650,15 @@ unreachable" as before.
   inside the throwaway worktree to prove the same cleanup removes it.
 - **Protected paths.** Before the pre-PR review and again before pushing, the
   factory inspects the diff. If it touches `.github/`, `tools/factory/`,
-  `backend/scripts/`, `backend/tests/architecture/`, `web/console/scripts/`, `.opencode/`, `AGENTS.md`,
-  `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`, any `opencode*.json[c]`,
-  any `conftest.py`, or any backend check configuration that outranks
-  `pyproject.toml` (`pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini`,
-  `setup.cfg`, `tox.ini`, `ruff.toml`, `.ruff.toml`; no label unlocks these),
-  or any lint configuration (`eslint.config.*`, `.eslintrc*`: lint rules are
-  where an agent's recurring mistake becomes a guard), the ticket goes to `_stuck` with
-  `protected path changed`; nothing is pushed and no PR is opened. Dependency manifests and
+  `backend/scripts/`, `backend/tests/architecture/`, `web/console/scripts/`,
+  `.opencode/`, `AGENTS.md`, `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`,
+  any `opencode*.json[c]`, any `conftest.py`, any backend check configuration
+  that outranks `pyproject.toml` (`pytest.toml`, `.pytest.toml`, `pytest.ini`,
+  `.pytest.ini`, `setup.cfg`, `tox.ini`, `ruff.toml`, `.ruff.toml`), or any guard
+  configuration (`eslint.config.*`, `.eslintrc*`, `.importlinter`: lint rules and
+  architecture tests are where an agent's recurring mistake becomes a guard; no
+  label unlocks any of these), the ticket goes to `_stuck` with `protected path
+  changed`; nothing is pushed and no PR is opened. Dependency manifests and
   lockfiles (`package.json`, `pnpm-lock.yaml`, `pyproject.toml`, `uv.lock`) are
   protected the same way unless the ticket is labeled `deps-change`. Even then a
   manifest may change only its dependency sections (`dependencies`,

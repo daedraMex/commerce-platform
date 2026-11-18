@@ -25,6 +25,7 @@
       "web/console/scripts/*": "deny",
       ".opencode/*": "deny",
       "*conftest.py": "deny",
+      "*.importlinter": "deny",
       "*eslint.config.*": "deny",
       "*.eslintrc*": "deny",
       "*pytest.toml": "deny",
