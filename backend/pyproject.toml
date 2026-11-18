@@ -40,7 +40,7 @@ extend-exclude = ["*/migrations/*"]
 force-exclude = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "DJ", "TID251", "TID252"]
+select = ["E", "F", "I", "UP", "B", "DJ", "TID251", "TID252", "PGH004", "RUF100"]
 
 # Modules with business rules keep DRF thin (AGENTS.md): serializers validate shape and
 # use cases enforce rules. The CRUD-only modules below may use the generic DRF classes.

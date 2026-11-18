@@ -27,33 +27,55 @@ function readPreference(): ThemePreference {
   }
 }
 
+const DARK_QUERY = "(prefers-color-scheme: dark)";
+
+function subscribeToSystemTheme(onChange: () => void): () => void {
+  const media = window.matchMedia(DARK_QUERY);
+  media.addEventListener("change", onChange);
+  return () => media.removeEventListener("change", onChange);
+}
+
 function systemPrefersDark(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-color-scheme: dark)").matches
-  );
+  return window.matchMedia(DARK_QUERY).matches;
+}
+
+function serverPrefersDark(): boolean {
+  return false;
+}
+
+function subscribeToNothing(): () => void {
+  return () => {};
+}
+
+function onClient(): boolean {
+  return true;
+}
+
+function onServer(): boolean {
+  return false;
 }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [preference, setPreferenceState] = React.useState<ThemePreference>(() =>
     typeof window === "undefined" ? "system" : readPreference(),
   );
-  const [prefersDark, setPrefersDark] = React.useState(systemPrefersDark);
+  const prefersDark = React.useSyncExternalStore(
+    subscribeToSystemTheme,
+    systemPrefersDark,
+    serverPrefersDark,
+  );
 
+  // False during hydration, while prefersDark still holds the server snapshot.
+  const hydrated = React.useSyncExternalStore(subscribeToNothing, onClient, onServer);
   const resolved = resolveTheme(preference, prefersDark);
 
+  // eslint-disable-next-line no-restricted-syntax -- writes the theme to <html>, outside React #166
   React.useEffect(() => {
-    applyThemeToDocument(resolved);
-  }, [resolved]);
-
-  React.useEffect(() => {
-    const media = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = (event: MediaQueryListEvent) =>
-      setPrefersDark(event.matches);
-
-    media.addEventListener("change", onChange);
-    return () => media.removeEventListener("change", onChange);
-  }, []);
+    // The inline script already themed <html>; applying the server snapshot would flash.
+    if (hydrated) {
+      applyThemeToDocument(resolved);
+    }
+  }, [hydrated, resolved]);
 
   const setPreference = React.useCallback((next: ThemePreference) => {
     setPreferenceState(next);

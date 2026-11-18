@@ -94,6 +94,8 @@ rule whose trigger matches the diff; skip the rest.
   needs fixing, say so plainly.
 - Tag each finding **Important**, **Nit** or **Pre-existing**. Only Important findings
   block. Pre-existing bugs go to a follow-up issue, not to the author.
+- A comment that justifies a workaround instead of fixing its cause is **Important**, even
+  when a disable comment names its rule and a ticket (#166).
 - Every finding names the file and line, and gives the concrete failure case (inputs or
   sequence → wrong result). A finding without a failure case is a question; ask it as one.
 - Important findings come as checkbox acceptance criteria, including the tests that prove

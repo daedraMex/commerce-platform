@@ -40,12 +40,14 @@ export function SessionGate({ store, children }: SessionGateProps) {
   const unauthorized = statusOf(error) === 401 || statusOf(error) === 403;
   const unknownStore = data !== undefined && memberships.length > 0 && !membership;
 
+  // eslint-disable-next-line no-restricted-syntax -- redirects run after the session query; moving them to render is #180
   React.useEffect(() => {
     if (unauthorized && !signingOutRef.current) {
       router.replace(`/sign-in?next=${encodeURIComponent(`/${store}`)}`);
     }
   }, [router, store, unauthorized]);
 
+  // eslint-disable-next-line no-restricted-syntax -- redirects run after the session query; moving them to render is #180
   React.useEffect(() => {
     if (unknownStore && memberships[0]) {
       router.replace(`/${memberships[0].store.slug}`);
