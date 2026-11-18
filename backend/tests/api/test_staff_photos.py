@@ -191,6 +191,39 @@ def test_upload_creates_an_uploaded_submission(client, home, user, private_stora
     assert submission.preview_key.startswith(f"stores/{home.id}/photos/previews/")
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("corners", [{"x": 0.1, "y": 0.1}, {"x": 0.9, "y": 0.1}]),
+        ("corners", [{"x": 0.1, "y": 0.1}, {"x": 0.9, "y": 0.1}, {"x": 0.9, "y": 0.9}, {}]),
+        (
+            "corners",
+            [
+                {"x": "0.1", "y": 0.1},
+                {"x": 0.9, "y": 0.1},
+                {"x": 0.9, "y": 0.9},
+                {"x": 0.1, "y": 0.9},
+            ],
+        ),
+        ("corners", {point["y"]: point for point in CORNERS}),
+        ("crop", {"x": 1, "y": 1, "width": 8}),
+        ("crop", {"x": 1, "y": 1, "width": "8", "height": 10}),
+        ("crop", [1, 1, 8, 10]),
+    ],
+)
+def test_upload_validates_the_shape_of_corners_and_crop(
+    client, home, user, private_storage, field, value
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+
+    response = upload(client, user, **{field: json.dumps(value)})
+
+    body = assert_problem_details(response, status=400, code="validation_error")
+    assert body["errors"][0]["field"].startswith(field)
+    assert PhotoSubmission.objects.filter(store=home).count() == 0
+    assert [path for path in private_storage.rglob("*") if path.is_file()] == []
+
+
 def test_upload_enqueues_processing_after_the_transaction_commits(
     client, home, user, private_storage, monkeypatch, django_capture_on_commit_callbacks
 ):
@@ -245,6 +278,33 @@ def test_upload_requires_the_idempotency_key(client, home, user, private_storage
 
     body = assert_problem_details(response, status=400, code="validation_error")
     assert body["errors"][0]["field"] == "Idempotency-Key"
+    assert [path for path in private_storage.rglob("*") if path.is_file()] == []
+
+
+def test_upload_rejects_an_overlong_idempotency_key(client, home, user, private_storage):
+    grant_membership(user=user, store=home, role_name="content_editor")
+
+    response = client.post(
+        UPLOAD_URL,
+        {"file": SimpleUploadedFile("photo.jpg", image_bytes()), "kind": "group"},
+        HTTP_AUTHORIZATION=bearer(user),
+        HTTP_X_STORE="home",
+        HTTP_IDEMPOTENCY_KEY="k" * 256,
+    )
+
+    body = assert_problem_details(response, status=400, code="validation_error")
+    assert body["errors"][0]["field"] == "Idempotency-Key"
+    assert [path for path in private_storage.rglob("*") if path.is_file()] == []
+
+
+def test_upload_rejects_a_file_larger_than_25_mb(client, home, user, private_storage):
+    grant_membership(user=user, store=home, role_name="content_editor")
+
+    response = upload(client, user, content=b"x" * (25 * 1024 * 1024 + 1))
+
+    assert_problem_details(response, status=400, code="too_large")
+    assert PhotoSubmission.objects.filter(store=home).count() == 0
+    assert [path for path in private_storage.rglob("*") if path.is_file()] == []
 
 
 def test_upload_requires_authentication(client, home):
@@ -273,6 +333,7 @@ def test_upload_requires_catalog_manage(client, home, user, private_storage):
 
     assert_problem_details(response, status=403, code="permission_denied")
     assert PhotoSubmission.objects.filter(store=home).count() == 0
+    assert [path for path in private_storage.rglob("*") if path.is_file()] == []
 
 
 def test_upload_goes_through_the_authorizer(
@@ -391,6 +452,8 @@ def test_preview_streams_the_private_file_after_authorization(client, home, user
 
     assert response.status_code == 200
     assert response["Content-Type"] == "image/jpeg"
+    assert response["Cache-Control"] == "private, no-store"
+    assert response["X-Content-Type-Options"] == "nosniff"
     content = b"".join(response.streaming_content)
     assert content.startswith(b"\xff\xd8")
 
@@ -455,6 +518,7 @@ def test_schema_documents_the_photo_upload_and_status_api(client):
         component["properties"]
     )
     assert "light_correction" in component["properties"]
+    _assert_adjustment_shapes(schema, component)
     assert {example["value"]["code"] for example in _codes(upload, 409)} == {"idempotency_conflict"}
 
     detail = schema["paths"][DETAIL_URL.format(id="{id}")]["get"]
@@ -472,6 +536,28 @@ def test_schema_documents_the_photo_upload_and_status_api(client):
 def _codes(operation, status):
     media = operation["responses"][str(status)]["content"]["application/problem+json"]
     return media["examples"].values()
+
+
+def _resolved(schema, value):
+    if "$ref" not in value:
+        return value
+    name = value["$ref"].rsplit("/", 1)[-1]
+    return schema["components"]["schemas"][name]
+
+
+def _assert_adjustment_shapes(schema, component):
+    corners = _resolved(schema, component["properties"]["corners"])
+    assert corners["type"] == "array"
+    assert corners["minItems"] == 4
+    assert corners["maxItems"] == 4
+    point = _resolved(schema, corners["items"])
+    assert set(point["properties"]) == {"x", "y"}
+    assert point["properties"]["x"]["type"] == "number"
+    assert point["properties"]["y"]["type"] == "number"
+
+    crop = _resolved(schema, component["properties"]["crop"])
+    assert set(crop["properties"]) == {"x", "y", "width", "height"}
+    assert {value["type"] for value in crop["properties"].values()} == {"number"}
 
 
 def make_submission(
@@ -760,6 +846,39 @@ def test_redo_reuses_the_engine_with_new_corners_and_keeps_the_old_media(
     assert Media.objects.filter(pk=old_media.pk).exists()
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("corners", [{"x": 0.1, "y": 0.1}, {"x": 0.9, "y": 0.1}]),
+        ("corners", [{"x": 0.1, "y": 0.1}, {"x": 0.9, "y": 0.1}, {"x": 0.9, "y": 0.9}, None]),
+        ("corners", None),
+        ("crop", {"x": 1, "y": 1, "width": 8}),
+        ("crop", {"x": 1, "y": True, "width": 8, "height": 10}),
+        ("crop", None),
+    ],
+)
+def test_redo_validates_the_shape_of_corners_and_crop(client, home, user, field, value):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        idempotency_key="redo-shape-key",
+        corners=CORNERS,
+        crop=CROP,
+    )
+
+    response = post_action(client, user, "redo", submission.pk, data={field: value})
+
+    body = assert_problem_details(response, status=400, code="validation_error")
+    assert body["errors"][0]["field"].startswith(field)
+    submission.refresh_from_db()
+    assert submission.status == PhotoSubmission.Status.READY
+    assert submission.corners == CORNERS
+    assert submission.crop == CROP
+
+
 def test_redo_refuses_a_photo_that_is_not_ready(client, home, user):
     grant_membership(user=user, store=home, role_name="content_editor")
     product = make_product(home)
@@ -915,6 +1034,7 @@ def test_schema_documents_the_photo_actions(client):
     request_schema = redo["requestBody"]["content"]["application/json"]["schema"]
     component = schema["components"]["schemas"][request_schema["$ref"].rsplit("/", 1)[-1]]
     assert {"corners", "crop"} <= set(component["properties"])
+    _assert_adjustment_shapes(schema, component)
 
 
 def test_group_apply_links_the_result_media_to_each_selected_product(client, home, user):

@@ -114,20 +114,36 @@ timestamps that are not states: **applied** (`applied_at`) and **discarded**
 
 **Upload:**
 
-- Refusals: `validation_error` (for example a missing `Idempotency-Key`),
-  `submission_invalid_target`, `idempotency_conflict`, `invalid_image`, `too_large`,
-  `too_many_pixels`.
+- Refusals: `validation_error` (a missing or over-long `Idempotency-Key`, or malformed
+  `corners` or `crop`), `submission_invalid_target`, `idempotency_conflict`,
+  `invalid_image`, `too_large`, `too_many_pixels`.
+- The `Idempotency-Key` and the declared file size are checked before the file content is
+  read; a file over 25 MB is refused with `too_large`. Authorization also runs before the
+  content is read, so a user without `catalog.manage` gets 403 without the file reaching
+  private storage.
 - A replay with the same key and payload returns 200 with the original submission and does
-  not enqueue again.
+  not enqueue again. When a concurrent upload loses the unique-key race after storing its
+  files, both are deleted through the `MediaUploader` port before the original is replayed.
 
 **Corners and crop:**
 
-- They are not validated on upload or redo.
-- Bad ones arrive later, from the worker, as `failed` with a `quad_*`, `crop_invalid` or
+- Upload and redo share one serializer and validate their shape at the API edge.
+- `corners`, when sent, must be a list of exactly four `{x, y}` points whose coordinates
+  are finite numbers. A string, a different length, missing coordinates, booleans or
+  non-numeric values return 400 `validation_error`.
+- `crop`, when sent, must be an object with numeric `x`, `y`, `width` and `height`;
+  anything else returns 400 `validation_error`.
+- Only the shape is checked at the edge. Pixel-dependent geometry (corners inside the
+  photo, a convex non-crossing quad, a positive crop inside the image) stays in the
+  processing pipeline and fails later as `failed` with a `quad_*`, `crop_invalid` or
   `crop_missing_source` code.
-- A redo field left out keeps its stored value.
+- A redo field left out keeps its stored value; a field sent as `null` is malformed.
 - A failed redo cannot be redone (it is not `ready`), and retry reuses the same corners and
   crop. Discard is then the only way out.
+
+**Preview:** the private preview response carries `Cache-Control: private, no-store` and
+`X-Content-Type-Options: nosniff`. A reader refuses a key outside `stores/{store.id}/`,
+failing closed as not found.
 
 **Redo** clears `result_media_id`: the previous Media is kept, but the submission no longer
 points to it.

@@ -8,6 +8,7 @@ from apps.photos.application.ports import (
     PhotoCatalog,
     PhotoProcessingQueue,
     PhotoSubmissionRepository,
+    UploadedPhoto,
 )
 from apps.photos.domain.errors import DuplicateIdempotencyKey, InvalidSubmissionTarget
 from apps.photos.domain.submission import (
@@ -105,6 +106,7 @@ class UploadPhoto:
         try:
             saved = self._repository.add(submission)
         except DuplicateIdempotencyKey:
+            self._delete_uploaded(command.store, uploaded)
             existing = self._repository.get_by_idempotency_key(
                 command.store, command.user_id, command.idempotency_key
             )
@@ -114,6 +116,10 @@ class UploadPhoto:
             return UploadPhotoResult(submission=replay, created=False)
         self._queue.enqueue(command.store, saved.id)
         return UploadPhotoResult(submission=saved, created=True)
+
+    def _delete_uploaded(self, store: StoreReference, uploaded: UploadedPhoto) -> None:
+        self._uploader.delete(store, uploaded.original_key)
+        self._uploader.delete(store, uploaded.preview_key)
 
     def _validate_target(self, command: UploadPhotoCommand) -> None:
         if command.kind not in INDIVIDUAL_KINDS:

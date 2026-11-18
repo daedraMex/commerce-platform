@@ -1,5 +1,9 @@
 """DRF serializers for the staff photo upload and status API."""
 
+import json
+import math
+from collections.abc import Mapping
+
 from django.urls import reverse
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -9,23 +13,110 @@ from apps.photos.application.get_photo_submission import PhotoSubmissionView
 from apps.photos.domain.submission import SubmissionKind
 
 
-class UploadPhotoSerializer(serializers.Serializer):
+def _json_value(value, message):
+    """Accept both a JSON body value and the JSON string a multipart field carries."""
+    if isinstance(value, (str, bytes)):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError) as error:
+            raise serializers.ValidationError(message) from error
+    return value
+
+
+class FiniteNumberField(serializers.FloatField):
+    """A JSON number, rejecting booleans, strings, NaN and infinity."""
+
+    default_error_messages = {"invalid": "The value must be a finite number."}
+
+    def to_internal_value(self, data):
+        if isinstance(data, bool) or not isinstance(data, (int, float)):
+            self.fail("invalid")
+        try:
+            is_finite = math.isfinite(data)
+        except OverflowError:
+            is_finite = False
+        if not is_finite:
+            self.fail("invalid")
+        return data
+
+
+class PhotoPointSerializer(serializers.Serializer):
+    """One `{x, y}` corner of the photographed area."""
+
+    x = FiniteNumberField()
+    y = FiniteNumberField()
+
+    def to_internal_value(self, data):
+        if not isinstance(data, Mapping) or set(data) != {"x", "y"}:
+            raise serializers.ValidationError(
+                "Every corner must be an object with only 'x' and 'y'."
+            )
+        return super().to_internal_value(data)
+
+
+class PhotoCornersField(serializers.ListField):
+    """Exactly four `{x, y}` points, from a JSON list or its multipart string."""
+
+    default_error_messages = {
+        "not_a_list": "The corners must be a list of four points.",
+        "min_length": "A photo needs exactly four corners.",
+        "max_length": "A photo needs exactly four corners.",
+    }
+
+    def __init__(self, **kwargs):
+        super().__init__(
+            child=PhotoPointSerializer(),
+            min_length=4,
+            max_length=4,
+            **kwargs,
+        )
+
+    def to_internal_value(self, data):
+        data = _json_value(data, "The corners must be a JSON list of four points.")
+        if not isinstance(data, list):
+            self.fail("not_a_list")
+        return super().to_internal_value(data)
+
+
+class PhotoCropSerializer(serializers.Serializer):
+    """The crop rectangle, from a JSON object or its multipart string."""
+
+    x = FiniteNumberField()
+    y = FiniteNumberField()
+    width = FiniteNumberField()
+    height = FiniteNumberField()
+
+    def to_internal_value(self, data):
+        data = _json_value(
+            data,
+            "The crop must be a JSON object with numeric x, y, width and height.",
+        )
+        if not isinstance(data, Mapping):
+            raise serializers.ValidationError(
+                "The crop must be an object with numeric x, y, width and height."
+            )
+        return super().to_internal_value(data)
+
+
+class PhotoAdjustmentSerializer(serializers.Serializer):
+    """The optional corners and crop shared by upload and redo, validated for shape."""
+
+    corners = PhotoCornersField(required=False)
+    crop = PhotoCropSerializer(required=False)
+
+
+class UploadPhotoSerializer(PhotoAdjustmentSerializer):
     """The multipart body of one photo upload; the key travels in a header."""
 
     file = serializers.FileField()
     kind = serializers.ChoiceField(choices=[kind.value for kind in SubmissionKind])
     target_product = serializers.IntegerField(required=False, allow_null=True)
     photographed_variant = serializers.IntegerField(required=False, allow_null=True)
-    corners = serializers.JSONField(required=False, allow_null=True)
-    crop = serializers.JSONField(required=False, allow_null=True)
     light_correction = serializers.BooleanField(required=False, default=True)
 
 
-class RedoPhotoSerializer(serializers.Serializer):
+class RedoPhotoSerializer(PhotoAdjustmentSerializer):
     """The new corners or crop of a redo; an omitted field keeps its stored value."""
-
-    corners = serializers.JSONField(required=False, allow_null=True)
-    crop = serializers.JSONField(required=False, allow_null=True)
 
 
 class GroupPhotoApplySerializer(serializers.Serializer):

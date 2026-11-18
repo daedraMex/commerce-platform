@@ -12,11 +12,11 @@ from pillow_heif import register_heif_opener
 
 from apps.photos.application.ports import UploadedPhoto
 from apps.photos.domain.errors import ImageTooLarge, InvalidImage, TooManyPixels
+from apps.photos.domain.limits import MAX_UPLOAD_BYTES
 from apps.shared.domain.store import StoreReference
 
 register_heif_opener()
 
-MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 MAX_PIXELS = 50_000_000
 PREVIEW_LONG_SIDE = 1600
 JPEG_QUALITY = 90
