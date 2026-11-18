@@ -23,7 +23,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - Before /implement, check the ticket's blocking edges; if any blocker is open, stop and
   report. Never stack branches.
 - When /implement invokes TDD, the ticket's acceptance criteria are the agreed seams.
-- A ticket's `Contracts:` line names sections of docs/contracts/<module>.md (ADR-0031):
+- A ticket's **Contracts** section names sections of docs/contracts/<module>.md (ADR-0031):
   read them before /implement, and update them in the same pull request when the
   contract changes.
 - Pin every GitHub Actions dependency to a commit SHA after verifying the tagged

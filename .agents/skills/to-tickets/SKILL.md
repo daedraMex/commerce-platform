@@ -76,12 +76,13 @@ Do NOT close or modify any parent issue.
 
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
 
-**Contracts:** `defines <module>.<name>; consumes <module>.<name>`, or "none".
+**Contracts:** `Defines <module>.<name>; consumes <module>.<name>.`, or "None".
 
 **Status:** ready-for-agent
 
 - [ ] Acceptance criterion 1
 - [ ] Acceptance criterion 2
+- [ ] (When the ticket defines or changes a contract) `docs/contracts/<module>.md` records it as merged code implements it.
 
 </local-ticket-template>
 
@@ -101,7 +102,9 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 - [ ] Criterion 2
 - [ ] (When the ticket defines or changes a contract) `docs/contracts/<module>.md` records it as merged code implements it.
 
-Contracts: defines <module>.<name>; consumes <module>.<name> (or "Contracts: none")
+## Contracts
+
+Defines `<module>.<name>`; consumes `<module>.<name>`. Or "None".
 
 ## Blocked by
 
