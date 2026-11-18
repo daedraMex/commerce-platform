@@ -204,3 +204,9 @@ _Avoid_: Job, call, invocation
 **Handoff**:
 Passing a conversation from an agent to a human, after which the agent stays silent.
 _Avoid_: Escalation, transfer (that word is taken by inventory)
+
+### Development
+
+**Contract**:
+An agreement more than one ticket or module depends on: a Celery task's name and kwargs, a port signature shared across modules, or an entity state machine. It has one owner and one written source in `docs/contracts/` (ADR-0031).
+_Avoid_: Interface (as the name of the thing), API (for internal agreements)
