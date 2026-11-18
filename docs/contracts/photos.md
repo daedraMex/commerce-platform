@@ -30,7 +30,7 @@ while reading or processing the original (`photo_original_missing`, `invalid_ima
 never links Media to a product (ADR-0030).
 
 **Retries exhausted:** nothing records a failure, so the submission stays `processing`.
-Retry and redo refuse it, and discard is the only way out (follow-up issue).
+Retry and redo refuse it, and discard is the only way out (#171).
 
 ## photos.processing-queue
 
@@ -46,7 +46,7 @@ class PhotoProcessingQueue(Protocol):
   save never reaches the worker. Outside one, it is sent at once.
 - Callers: upload, retry and redo, each after saving the submission. Retry and redo save
   and enqueue outside one unit of work, so a broker refusal after the save leaves the
-  submission `processing` (follow-up issue).
+  submission `processing` (#172).
 
 ## photos.catalog-port
 
