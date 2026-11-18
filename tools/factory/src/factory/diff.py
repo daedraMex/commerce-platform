@@ -24,11 +24,22 @@ PROTECTED_FILES = frozenset(
     }
 )
 # Protected wherever they live: test fixtures run with every check, and backend check
-# configuration that outranks pyproject.toml (pytest.ini, setup.cfg and tox.ini over
-# [tool.pytest]; a ruff.toml over [tool.ruff] for its directory). No ticket needs them,
-# so no label unlocks them (#160).
+# configuration that outranks pyproject.toml (pytest 9 reads pytest.toml, .pytest.toml,
+# pytest.ini, .pytest.ini, tox.ini and setup.cfg before [tool.pytest]; a ruff.toml
+# overrides [tool.ruff] for its directory). No ticket needs them, so no label unlocks
+# them (#160).
 PROTECTED_NAMES = frozenset(
-    {"conftest.py", "pytest.ini", "setup.cfg", "tox.ini", "ruff.toml", ".ruff.toml"}
+    {
+        "conftest.py",
+        "pytest.toml",
+        ".pytest.toml",
+        "pytest.ini",
+        ".pytest.ini",
+        "setup.cfg",
+        "tox.ini",
+        "ruff.toml",
+        ".ruff.toml",
+    }
 )
 # Dependency manifests and lockfiles: protected unless the ticket is labeled
 # ``deps-change``, so a new dependency is always a decision the owner made.

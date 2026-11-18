@@ -388,8 +388,8 @@ def test_preflight_stops_with_the_create_commands_when_a_label_is_missing(tmp_pa
     assert caught.value.step == "verify labels"
     assert "create_worktree" not in [event[0] for event in events]
     reason = notifier.run_failed[0].reason
-    assert "gh label create deps-change --repo daedraMex/commerce-platform" in reason
-    assert "gh label create needs-decision --repo daedraMex/commerce-platform" in reason
+    assert "missing labels deps-change, needs-decision" in reason
+    assert "gh label create <name> --repo daedraMex/commerce-platform" in reason
 
 
 def test_preflight_stops_when_the_labels_cannot_be_listed(tmp_path):
@@ -409,3 +409,16 @@ def test_required_labels_cover_every_label_the_factory_reads_or_writes():
         "migration",
         "deps-change",
     }
+
+
+def test_preflight_names_every_missing_label_within_the_message_limit(tmp_path):
+    notifier = RecordingNotifier()
+    github = FakeGitHub(labels=())
+
+    with pytest.raises(PreflightError):
+        build_preflight(tmp_path, github=github, notifier=notifier).run()
+
+    reason = notifier.run_failed[0].reason
+    assert not reason.endswith("…")
+    for name in REQUIRED_LABELS:
+        assert name in reason

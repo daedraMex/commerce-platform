@@ -201,6 +201,9 @@ def test_a_new_or_unreadable_dependency_manifest_is_not_dependency_only():
 
 BACKEND_CHECK_CONFIG = (
     "backend/pytest.ini",
+    "backend/.pytest.ini",
+    "backend/pytest.toml",
+    "backend/.pytest.toml",
     "backend/setup.cfg",
     "backend/tox.ini",
     "backend/ruff.toml",

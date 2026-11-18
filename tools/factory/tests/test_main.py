@@ -2322,3 +2322,26 @@ def test_a_failed_pr_label_leaves_the_pr_a_draft_without_auto_merge(tmp_path):
     assert github.created_prs != []
     assert github.ready_prs == []
     assert github.auto_merges == []
+
+
+def test_a_review_fix_whose_pr_label_fails_pushes_nothing(tmp_path):
+    git = FakeGit(
+        check_passed=True,
+        decisions=DECISIONS_DOC,
+        diff=DiffStats(files=(FileChange("backend/uv.lock", 3, 1),)),
+    )
+    fix = make_review_fix()
+    labelled = replace(fix, ticket=replace(fix.ticket, labels=frozenset({"deps-change"})))
+    github = FakeGitHub(
+        review_fixes=[labelled],
+        pr_label_error=GitHubError("could not add label deps-change to pr #101: not found"),
+    )
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    with pytest.raises(RunFailed, match="deps-change"):
+        factory.run()
+
+    assert git.pushed == []
+    assert github.comments == []

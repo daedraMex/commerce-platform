@@ -153,10 +153,11 @@ class Preflight:
         """Fail before any model spend when a label the factory writes is missing."""
         missing = sorted(REQUIRED_LABELS - self.github.list_label_names(token))
         if missing:
-            commands = "; ".join(
-                f"gh label create {name} --repo {self.settings.repo}" for name in missing
+            # Short enough that MAX_ERROR_CHARS keeps every name, even with all missing.
+            raise RuntimeError(
+                f"missing labels {', '.join(missing)}; create each with "
+                f"gh label create <name> --repo {self.settings.repo}"
             )
-            raise RuntimeError(f"missing labels; run: {commands}")
 
     def _write_check_log(self, log_path, output: str) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -653,8 +653,8 @@ unreachable" as before.
   `backend/scripts/`, `web/console/scripts/`, `.opencode/`, `AGENTS.md`,
   `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`, any `opencode*.json[c]`,
   any `conftest.py`, or any backend check configuration that outranks
-  `pyproject.toml` (`pytest.ini`, `setup.cfg`, `tox.ini`, `ruff.toml`,
-  `.ruff.toml`; no label unlocks these), the ticket goes to `_stuck` with
+  `pyproject.toml` (`pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini`,
+  `setup.cfg`, `tox.ini`, `ruff.toml`, `.ruff.toml`; no label unlocks these), the ticket goes to `_stuck` with
   `protected path changed`; nothing is pushed and no PR is opened. Dependency manifests and
   lockfiles (`package.json`, `pnpm-lock.yaml`, `pyproject.toml`, `uv.lock`) are
   protected the same way unless the ticket is labeled `deps-change`. Even then a
@@ -763,8 +763,12 @@ If the label cannot be added (the label is missing, or GitHub fails), the
 Telegram message says so and the factory holds the ticket in
 `label-holds.log` in its state directory. Every run retries the label before
 picking tickets and drops the hold once it lands; a held ticket is never run.
-Labeling a pull request (`migration`, `deps-change`) raises the same way: the
-run fails loudly and the PR stays a draft without auto-merge.
+If the issue comment failed instead, the run fails loudly and the retried label
+arrives without a comment: read the log before removing `needs-decision`. To
+release a hold by hand, delete the ticket's `#<number>` line from that file.
+Labeling a pull request (`migration`, `deps-change`) raises the same way: a new
+PR stays a draft without auto-merge, and a review fix is labeled before its
+push, so a failure pushes nothing.
 
 ## Preflight
 

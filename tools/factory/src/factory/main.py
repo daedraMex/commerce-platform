@@ -620,9 +620,11 @@ class Factory:
             )
         assert_push_target(fix.branch, ticket)
         token = self.token_provider.mint(self.settings.repo)
-        self.git.push(worktree, fix.branch, token)
+        # Labeled before the push: auto-merge is already on for this PR, so a failed
+        # label must leave nothing pushed (#160).
         if any(is_dependency_path(f.path) for f in diff.files):
             self.github.add_pr_label(fix.pr_number, DEPS_CHANGE_LABEL, token)
+        self.git.push(worktree, fix.branch, token)
         sha = self.git.head_sha(worktree)
         self.github.comment(
             fix.pr_number,
