@@ -18,6 +18,7 @@ from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_questio
 from .diff import DiffStats, is_dependency_path, non_dependency_change, touches_protected_paths
 from .git import Git, verify_git_version
 from .github import GitHub, GitHubError
+from .holds import LabelHolds
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
 from .metrics import MetricsGitHub, run_metrics
@@ -54,6 +55,9 @@ from .reviews import ReviewFix
 from .runner import OPENCODE_CONFIG_PATH, AgentRunner
 from .sudoers import verify_sudoers_logging
 from .tickets import (
+    DEPS_CHANGE_LABEL,
+    MIGRATION_LABEL,
+    NEEDS_DECISION_LABEL,
     Ticket,
     assert_push_target,
     branch_from_worktree_dir_name,
@@ -64,11 +68,6 @@ from .tickets import (
 
 DECISIONS_FILE = "DECISIONS.md"
 IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
-NEEDS_DECISION_LABEL = "needs-decision"
-# A ticket the owner allowed to change dependency manifests and lockfiles; the PR
-# gets the same label so the owner sees it in the list.
-DEPS_CHANGE_LABEL = "deps-change"
-MIGRATION_LABEL = "migration"
 LOG_TAIL_LINES = 30
 FACTORY_BOT_LOGIN = "xolo-bot"
 FACTORY_BRANCH_PREFIX = "nf/"
@@ -113,6 +112,7 @@ class Factory:
         ledger: AttemptLedger | None = None,
         review_attempts: ReviewAttemptLedger | None = None,
         pause_state: PauseState | None = None,
+        label_holds: LabelHolds | None = None,
     ):
         self.settings = settings
         self.github = github
@@ -128,6 +128,7 @@ class Factory:
         self.ledger = ledger or AttemptLedger(settings.state_dir)
         self.review_attempts = review_attempts or ReviewAttemptLedger(settings.state_dir)
         self.pause_state = pause_state or PauseState(settings.state_dir)
+        self.label_holds = label_holds or LabelHolds(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
         token, open_prs, paused_for = self._run_limits()
@@ -146,6 +147,7 @@ class Factory:
         )
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
         tickets = self.run_preflight(token=token)
+        held = self._retry_held_labels(token)
         if review_fix is not None:
             self.review_attempts.record_attempted(review_fix.review_id)
             return [
@@ -156,7 +158,8 @@ class Factory:
                 )
             ]
         results: list[TicketResult] = []
-        for ticket in select_tickets(tickets, max_tickets=self.settings.max_tickets):
+        eligible = [t for t in tickets if t.number not in held]
+        for ticket in select_tickets(eligible, max_tickets=self.settings.max_tickets):
             result = self._execute(
                 ticket,
                 lambda t=ticket: self._run_ticket(t, token),
@@ -166,6 +169,22 @@ class Factory:
             if not result.ok:
                 break
         return results
+
+    def _retry_held_labels(self, token: str | None) -> frozenset[int]:
+        """Retry needs-decision on held tickets; return every ticket held at the start.
+
+        A ticket released here is still skipped this run: the listing was read
+        before its label landed.
+        """
+        held = self.label_holds.numbers()
+        for number in sorted(held):
+            try:
+                self.github.add_issue_label(number, NEEDS_DECISION_LABEL, token)
+            except Exception as exc:
+                print(f"#{number} stays held: {short_error(exc)}", file=sys.stderr)
+                continue
+            self.label_holds.remove(number)
+        return held
 
     def _run_limits(self) -> tuple[str | None, int, str | None]:
         """Mint a token, read the open-PR count and check the daily cap.
@@ -601,9 +620,11 @@ class Factory:
             )
         assert_push_target(fix.branch, ticket)
         token = self.token_provider.mint(self.settings.repo)
-        self.git.push(worktree, fix.branch, token)
+        # Labeled before the push: auto-merge is already on for this PR, so a failed
+        # label must leave nothing pushed (#160).
         if any(is_dependency_path(f.path) for f in diff.files):
             self.github.add_pr_label(fix.pr_number, DEPS_CHANGE_LABEL, token)
+        self.git.push(worktree, fix.branch, token)
         sha = self.git.head_sha(worktree)
         self.github.comment(
             fix.pr_number,
@@ -755,9 +776,18 @@ class Factory:
             attempts=attempts,
             failing_check=failing_check,
         )
+        # Held before any GitHub call: if the comment or the label fails, the ticket
+        # still looks ready and must not be picked again (#160).
+        self.label_holds.add(ticket.number)
         token = self.token_provider.mint(self.settings.repo)
         comment_url = self.github.comment(ticket.number, comment, token)
-        self.github.add_issue_label(ticket.number, NEEDS_DECISION_LABEL, token)
+        label_error = None
+        try:
+            self.github.add_issue_label(ticket.number, NEEDS_DECISION_LABEL, token)
+        except Exception as exc:
+            label_error = short_error(exc)
+        else:
+            self.label_holds.remove(ticket.number)
         info = StuckInfo(
             ticket_number=ticket.number,
             ticket_title=ticket.title,
@@ -768,6 +798,7 @@ class Factory:
             comment_url=comment_url,
             ticket_url=self._ticket_url(ticket.number),
             log_path=str(log_path),
+            label_error=label_error,
             worktree=None if worktree is None else str(worktree),
             handoff_command=(
                 None

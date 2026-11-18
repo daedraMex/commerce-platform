@@ -86,6 +86,8 @@ class StuckInfo:
     log_path: str
     worktree: str | None
     handoff_command: str | None
+    # Set when needs-decision could not be added; the ticket is then held (#160).
+    label_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -254,6 +256,12 @@ def build_stuck_message(info: StuckInfo) -> str:
     ]
     if info.open_question:
         lines += ["", f"Open question: {escape_html(info.open_question)}"]
+    if info.label_error is not None:
+        lines += [
+            "",
+            f"needs-decision was not added: {escape_html(info.label_error)}",
+            f"The factory holds #{info.ticket_number} and retries the label each run.",
+        ]
     lines += ["", f"Log: {escape_html(info.log_path)}"]
     if info.worktree is not None and info.handoff_command is not None:
         lines += [

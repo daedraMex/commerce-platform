@@ -296,3 +296,17 @@ def test_telegram_alerts_still_swallow_delivery_failures(capsys):
     TelegramNotifier("t", "c", post=failing_post).send_run_failed(RunFailedInfo(reason="x"))
 
     assert "Telegram notification failed" in capsys.readouterr().err
+
+
+def test_stuck_message_says_the_ticket_is_held_when_the_label_failed():
+    message = build_stuck_message(
+        _stuck(label_error="could not add label needs-decision to issue #7: <not found>")
+    )
+
+    assert "needs-decision was not added" in message
+    assert "&lt;not found&gt;" in message
+    assert "holds #7" in message
+
+
+def test_stuck_message_says_nothing_about_labels_when_the_label_landed():
+    assert "needs-decision" not in build_stuck_message(_stuck())

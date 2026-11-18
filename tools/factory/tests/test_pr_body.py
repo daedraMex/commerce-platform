@@ -102,3 +102,19 @@ def test_pr_body_flags_changed_dependencies_as_risk():
 
     assert "Dependencies changed" in body
     assert "`backend/uv.lock`" in body
+
+
+def test_pr_body_flags_check_configuration_as_risk():
+    diff = DiffStats(
+        files=(
+            FileChange("web/console/vitest.config.mts", 1, 1),
+            FileChange("web/console/src/app/page.tsx", 3, 0),
+        ),
+    )
+
+    body = _body(diff=diff)
+
+    risk = body.split("## Risk", 1)[1].split("## How to revert", 1)[0]
+    assert "Check configuration changed" in risk
+    assert "`web/console/vitest.config.mts`" in risk
+    assert "page.tsx" not in risk

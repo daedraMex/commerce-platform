@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import tomllib
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
 PROTECTED_PREFIXES = (
@@ -22,8 +23,27 @@ PROTECTED_FILES = frozenset(
         ".pre-commit-config.yaml",
     }
 )
-# Protected wherever they live: test fixtures run with every check.
-PROTECTED_NAMES = frozenset({"conftest.py"})
+# Protected wherever they live: test fixtures run with every check, and backend check
+# configuration that outranks pyproject.toml (pytest 9 reads pytest.toml, .pytest.toml,
+# pytest.ini, .pytest.ini, tox.ini and setup.cfg before [tool.pytest]; a ruff.toml
+# overrides [tool.ruff] for its directory). No ticket needs them, so no label unlocks
+# them (#160).
+PROTECTED_NAMES = frozenset(
+    {
+        "conftest.py",
+        "pytest.toml",
+        ".pytest.toml",
+        "pytest.ini",
+        ".pytest.ini",
+        "setup.cfg",
+        "tox.ini",
+        "ruff.toml",
+        ".ruff.toml",
+    }
+)
+# Lint configuration, protected wherever it lives: lint rules are where an agent's
+# recurring mistake becomes a guard, so only the owner may change them (#160).
+PROTECTED_NAME_PATTERNS = ("eslint.config.*", ".eslintrc*")
 # Dependency manifests and lockfiles: protected unless the ticket is labeled
 # ``deps-change``, so a new dependency is always a decision the owner made.
 DEPENDENCY_NAMES = frozenset({"package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"})
@@ -37,6 +57,15 @@ SENSITIVE_PREFIXES = (
     "backend/apps/shared/",
     "backend/config/",
     "web/console/src/lib/auth/",
+)
+
+# Console check configuration: a ticket may change it (a new test folder, a path alias),
+# but it decides which files the checks see, so the PR body flags it under Risk (#160).
+CHECK_CONFIG_NAME_PATTERNS = (
+    "vitest.config.*",
+    "vitest.workspace.*",
+    "playwright*.config.*",
+    "tsconfig*.json",
 )
 
 
@@ -146,9 +175,17 @@ def is_protected_path(path: str, *, allow_dependencies: bool = False) -> bool:
     name = PurePosixPath(normalized).name
     if name in PROTECTED_NAMES:
         return True
+    if any(fnmatchcase(name, pattern) for pattern in PROTECTED_NAME_PATTERNS):
+        return True
     if name in DEPENDENCY_NAMES and not allow_dependencies:
         return True
     return name.startswith("opencode") and name.endswith((".json", ".jsonc"))
+
+
+def is_check_config_path(path: str) -> bool:
+    """Console check configuration, anywhere in the repo: flagged, never protected."""
+    name = PurePosixPath(path.replace("\\", "/")).name
+    return any(fnmatchcase(name, pattern) for pattern in CHECK_CONFIG_NAME_PATTERNS)
 
 
 def is_sensitive_path(path: str) -> bool:

@@ -11,6 +11,7 @@ from factory.config import Settings
 from factory.diff import DiffStats, FileChange
 from factory.git import CheckResult
 from factory.github import GitHubError
+from factory.holds import LabelHolds
 from factory.ledger import AttemptLedger
 from factory.main import Factory, RunFailed
 from factory.preflight import PreflightError
@@ -18,7 +19,7 @@ from factory.review_attempts import ReviewAttemptLedger
 from factory.reviews import ReviewComment, ReviewFix
 from factory.runner import AgentResult
 from factory.shell import CommandResult
-from factory.tickets import Ticket, worktree_path
+from factory.tickets import REQUIRED_LABELS, Ticket, worktree_path
 
 MEXICO_CITY = ZoneInfo("America/Mexico_City")
 
@@ -226,8 +227,14 @@ class FakeGitHub:
         review_fixes_error=None,
         pr_error=None,
         open_pr_branches=(),
+        issue_label_errors=0,
+        pr_label_error=None,
     ):
         self.tickets = tickets or []
+        # How many add_issue_label calls fail before one succeeds.
+        self.issue_label_errors = issue_label_errors
+        self.pr_label_error = pr_label_error
+        self.issue_label_attempts = []
         self.pr_number = pr_number
         self.open_factory_prs = open_factory_prs
         self.open_factory_prs_error = open_factory_prs_error
@@ -297,10 +304,19 @@ class FakeGitHub:
         )
 
     def add_pr_label(self, number, label, token):
+        if self.pr_label_error is not None:
+            raise self.pr_label_error
         self.pr_labels.append((number, label, token))
 
     def add_issue_label(self, number, label, token):
+        self.issue_label_attempts.append((number, label))
+        if self.issue_label_errors > 0:
+            self.issue_label_errors -= 1
+            raise GitHubError(f"could not add label {label} to issue #{number}: not found")
         self.issue_labels.append((number, label, token))
+
+    def list_label_names(self, token=None):
+        return REQUIRED_LABELS
 
     def comment(self, number, body, token):
         self.comments.append((number, body, token))
@@ -2209,3 +2225,123 @@ def test_a_review_fix_that_changes_dependencies_labels_the_pr(tmp_path):
 
     assert results[0].ok
     assert (fix.pr_number, "deps-change") in [(n, label) for n, label, _ in github.pr_labels]
+
+
+def test_a_stuck_ticket_whose_label_fails_is_held_out_of_the_next_run(tmp_path):
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], issue_label_errors=2)
+    notifier = RecordingNotifier()
+    runner = FakeRunner()
+    factory = build_factory(tmp_path, git=git, github=github, runner=runner, notifier=notifier)
+
+    first = factory.run()
+
+    assert not first[0].ok
+    assert "needs-decision" in notifier.stuck[0].label_error
+    assert "not found" in notifier.stuck[0].label_error
+    assert LabelHolds(make_settings(tmp_path).state_dir).numbers() == {7}
+    agent_runs = len(runner.calls)
+
+    # The listing still shows #7 as ready, because the label never landed.
+    second = factory.run()
+
+    assert second == []
+    assert len(runner.calls) == agent_runs
+    assert github.issue_labels == []
+
+
+def test_a_held_ticket_is_released_once_its_label_lands(tmp_path):
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], issue_label_errors=1)
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+    factory.run()
+
+    # Next run: the retry adds the label, so the hold goes and the ticket is not run.
+    results = factory.run()
+
+    assert results == []
+    assert github.issue_labels == [(7, "needs-decision", "TOKEN")]
+    assert LabelHolds(make_settings(tmp_path).state_dir).numbers() == frozenset()
+
+
+def test_the_hold_is_written_before_any_github_call_of_the_stuck_flow(tmp_path):
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    holds = LabelHolds(make_settings(tmp_path).state_dir)
+    seen = []
+
+    def comment(number, body, token):
+        seen.append(holds.numbers())
+        raise RuntimeError("gh api: HTTP 502")
+
+    github.comment = comment
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    with pytest.raises(RunFailed):
+        factory.run()
+
+    assert seen == [{7}]
+    assert holds.numbers() == {7}
+
+
+def test_a_stuck_ticket_whose_label_lands_is_not_held(tmp_path):
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    factory.run()
+
+    assert notifier.stuck[0].label_error is None
+    assert LabelHolds(make_settings(tmp_path).state_dir).numbers() == frozenset()
+
+
+def test_a_failed_pr_label_leaves_the_pr_a_draft_without_auto_merge(tmp_path):
+    diff = DiffStats(
+        files=(FileChange(path="backend/apps/orders/migrations/0002_x.py", added=1, deleted=0),),
+        migrations_changed=True,
+    )
+    git = FakeGit(check_passed=True, diff=diff)
+    github = FakeGitHub(
+        tickets=[make_ticket(7, labels={"ready-for-agent"})],
+        pr_label_error=GitHubError("could not add label migration to pr #101: not found"),
+    )
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    with pytest.raises(RunFailed, match="migration"):
+        factory.run()
+
+    assert github.created_prs != []
+    assert github.ready_prs == []
+    assert github.auto_merges == []
+
+
+def test_a_review_fix_whose_pr_label_fails_pushes_nothing(tmp_path):
+    git = FakeGit(
+        check_passed=True,
+        decisions=DECISIONS_DOC,
+        diff=DiffStats(files=(FileChange("backend/uv.lock", 3, 1),)),
+    )
+    fix = make_review_fix()
+    labelled = replace(fix, ticket=replace(fix.ticket, labels=frozenset({"deps-change"})))
+    github = FakeGitHub(
+        review_fixes=[labelled],
+        pr_label_error=GitHubError("could not add label deps-change to pr #101: not found"),
+    )
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    with pytest.raises(RunFailed, match="deps-change"):
+        factory.run()
+
+    assert git.pushed == []
+    assert github.comments == []

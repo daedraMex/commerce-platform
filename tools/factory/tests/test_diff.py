@@ -141,7 +141,12 @@ def test_opencode_edit_denies_match_the_protected_lists():
     import json
     from pathlib import Path
 
-    from factory.diff import PROTECTED_FILES, PROTECTED_NAMES, PROTECTED_PREFIXES
+    from factory.diff import (
+        PROTECTED_FILES,
+        PROTECTED_NAME_PATTERNS,
+        PROTECTED_NAMES,
+        PROTECTED_PREFIXES,
+    )
 
     config = json.loads((Path(__file__).resolve().parents[1] / "opencode.factory.json").read_text())
     edit = config["permission"]["edit"]
@@ -149,6 +154,7 @@ def test_opencode_edit_denies_match_the_protected_lists():
         set(PROTECTED_FILES)
         | {f"{prefix}*" for prefix in PROTECTED_PREFIXES}
         | {f"*{name}" for name in PROTECTED_NAMES}
+        | {f"*{pattern}" for pattern in PROTECTED_NAME_PATTERNS}
         | {"*opencode*.json", "*opencode*.jsonc"}
     )
     # Denies the guard does not mirror on purpose: env files and ADRs.
@@ -197,3 +203,62 @@ def test_a_new_or_unreadable_dependency_manifest_is_not_dependency_only():
 
     assert non_dependency_change("web/new/package.json", None, "{}") is not None
     assert non_dependency_change("web/console/package.json", "{}", "{not json") is not None
+
+
+BACKEND_CHECK_CONFIG = (
+    "backend/pytest.ini",
+    "backend/.pytest.ini",
+    "backend/pytest.toml",
+    "backend/.pytest.toml",
+    "backend/setup.cfg",
+    "backend/tox.ini",
+    "backend/ruff.toml",
+    "backend/.ruff.toml",
+    ".ruff.toml",
+    "backend/apps/orders/ruff.toml",
+)
+
+
+def test_backend_check_configuration_is_protected_even_on_a_deps_change_ticket():
+    # pytest.ini, setup.cfg and tox.ini outrank [tool.pytest]; a nested ruff.toml
+    # overrides [tool.ruff] for its directory. The config lives in pyproject.toml.
+    for path in BACKEND_CHECK_CONFIG:
+        assert is_protected_path(path), path
+        assert is_protected_path(path, allow_dependencies=True), path
+
+
+CONSOLE_CHECK_CONFIG = (
+    "web/console/vitest.config.mts",
+    "web/console/vitest.workspace.ts",
+    "web/console/playwright.config.ts",
+    "web/console/playwright.level2.config.ts",
+    "web/console/tsconfig.json",
+    "web/console/tsconfig.build.json",
+    "packages/api-client/tsconfig.json",
+)
+
+
+def test_console_check_configuration_is_flagged_not_protected():
+    from factory.diff import is_check_config_path
+
+    for path in CONSOLE_CHECK_CONFIG:
+        assert is_check_config_path(path), path
+        assert not is_protected_path(path), path
+
+
+def test_ordinary_files_are_not_check_configuration():
+    from factory.diff import is_check_config_path
+
+    for path in (
+        "web/console/src/app/page.tsx",
+        "web/console/src/lib/config.ts",
+        "web/console/tests/e2e/login.spec.ts",
+        "backend/apps/orders/config.py",
+    ):
+        assert not is_check_config_path(path), path
+
+
+def test_lint_configuration_is_protected_so_a_ticket_cannot_loosen_the_rules():
+    for path in ("web/console/eslint.config.mjs", "web/console/.eslintrc.json"):
+        assert is_protected_path(path), path
+        assert is_protected_path(path, allow_dependencies=True), path
