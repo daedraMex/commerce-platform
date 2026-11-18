@@ -31,7 +31,8 @@ rule whose trigger matches the diff; skip the rest.
 ### 2. Contracts match across open pull requests
 - **Trigger**: the diff defines or consumes a Celery task name, a port signature, an
   entity state transition, or a generated file (`openapi.json`, the API client).
-- **Check**: search open pull requests and tickets for the same name. Producer and consumer
+- **Check**: the diff matches `docs/contracts/<module>.md`, or updates it along with every
+  consumer. Search open pull requests and tickets for the same name. Producer and consumer
   agree on the exact task name (set `name=` explicitly), the state the consumer receives,
   and a single port and adapter. Generated files are regenerated after a merge
   (`dump_openapi`, `pnpm generate:client`), never hand-merged.
