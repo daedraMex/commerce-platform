@@ -45,14 +45,14 @@ Present the proposed breakdown as a numbered list. For each ticket, show:
 
 - **Title**: short descriptive name
 - **Blocked by**: which other tickets (if any) must complete first
-- **Contracts**: the contract ids (ADR-0031, `docs/contracts/`) the ticket defines or consumes; a new contract gets an id and its owner is this ticket
+- **Contracts**: the contract ids (ADR-0031, `docs/contracts/`) the ticket defines, changes or consumes; a new contract gets an id and its owner is this ticket
 - **What it delivers**: the end-to-end behaviour this ticket makes work
 
 Ask the user:
 
 - Does the granularity feel right? (too coarse / too fine)
 - Are the blocking edges correct: does each ticket only depend on tickets that genuinely gate it?
-- Does each contract have exactly one defining ticket, and do two tickets that change the same contract block one another?
+- Does each contract have exactly one defining ticket, and do two tickets that define or change the same contract block one another?
 - Should any tickets be merged or split further?
 
 Iterate until the user approves the breakdown.
@@ -76,7 +76,7 @@ Do NOT close or modify any parent issue.
 
 **Blocked by:** the numbers/titles of the tickets that gate this one, or "None (can start immediately)".
 
-**Contracts:** `Defines <module>.<name>; consumes <module>.<name>.`, or "None".
+**Contracts:** `Defines <module>.<name>; changes <module>.<name>; consumes <module>.<name>.` (only the verbs that apply), or "None".
 
 **Status:** ready-for-agent
 
@@ -104,7 +104,7 @@ The end-to-end behaviour this ticket makes work, from the user's perspective, no
 
 ## Contracts
 
-Defines `<module>.<name>`; consumes `<module>.<name>`. Or "None".
+Defines `<module>.<name>`; changes `<module>.<name>`; consumes `<module>.<name>` (only the verbs that apply). Or "None".
 
 ## Blocked by
 

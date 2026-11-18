@@ -12,7 +12,7 @@ A **contract** is an agreement that more than one ticket or module depends on, s
 
 Each contract has exactly one owner: the ticket that introduces it, or an ADR when the contract is a decision in its own right. Its written source is `docs/contracts/<module>.md`, which records the contract as merged code implements it and names the owner. The ticket that defines a contract writes or updates that file in the same pull request. A ticket that changes a contract it does not own also updates the file, and every consumer it can find, in that same pull request.
 
-Tickets declare the contracts they touch in a **Contracts** section, next to **Blocked by**, for example "Defines `photos.submission-states`; consumes `photos.process-photo-task`." Contract ids are `<module>.<name>` and are the headings of the contract file.
+Tickets declare the contracts they touch in a **Contracts** section, next to **Blocked by**, with three verbs: **defines** (the ticket is the owner), **changes** (the ticket alters a contract it does not own) and **consumes** (the ticket relies on it unchanged). For example: "Changes `photos.submission-states`; consumes `photos.process-photo-task`." Contract ids are `<module>.<name>` and are the headings of the contract file. Two tickets that define or change the same contract must not be in flight at once.
 
 ## Considered Options
 
