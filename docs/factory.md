@@ -398,13 +398,20 @@ Run these once, as the admin user unless a step says `factory`.
     ```
 
 12. **Protect `main`.** `.github/CODEOWNERS` contains `* @daedraMex`. On
-    GitHub: require a pull request before merging, require 1 approval, turn on
-    **Require review from Code Owners**, and require the "Backend" and "Ticket
-    link" checks. Do not give the factory or any agent a bypass. The repository
-    admin (the owner) may bypass the ruleset in a pull request, but only to
-    merge her own human pull requests, which GitHub does not let her approve;
-    factory pull requests always go through her approval. Agents (the factory,
-    evaluators and reviewers) never approve.
+    GitHub, two rulesets target the default branch (ADR-0032):
+    - **main approval**: require a pull request before merging, require 1
+      approval, turn on **Require review from Code Owners**, and block
+      deletion and force pushes. The repository admin (the owner) is its only
+      bypass actor, in pull requests, and uses it only to merge her own human
+      pull requests, which GitHub does not let her approve; factory pull
+      requests always go through her approval.
+    - **main checks**: require the "Backend", "Console", "Level 2 E2E",
+      "Celery broker" and "Ticket link" checks, with **Require branches to be
+      up to date before merging**. No bypass actors.
+
+    In the repository settings, turn on **Always suggest updating pull request
+    branches**. Do not give the factory or any agent a bypass. Agents (the
+    factory, evaluators and reviewers) never approve.
 
 ## Migrating an existing machine
 

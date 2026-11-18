@@ -125,8 +125,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   `main`. Agents — the night factory, evaluators and reviewers — never approve a
   pull request. The factory may enable auto-merge with merge commits but never
   approves or merges directly. As repository admin the owner may bypass the
-  ruleset only to merge her own human pull requests, which GitHub does not let
-  her approve.
+  approval ruleset only to merge her own human pull requests, which GitHub does
+  not let her approve; the required checks have no bypass (ADR-0032).
 - Never read, print or commit .env files, secrets, tokens or credentials.
 - Never run git push, destructive git commands or database drops without asking.
   Exception (night factory only, see ADR): may run `git push origin nf/<ticket-id>`
