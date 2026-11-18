@@ -9,6 +9,7 @@ from typing import BinaryIO, Protocol
 
 from apps.catalog.services import (
     MediaRecord,
+    NewMedia,
     ProductImageRecord,
     ProductRecord,
     VariantRecord,
@@ -23,6 +24,15 @@ class UploadedPhoto:
 
     original_key: str
     preview_key: str
+    width: int
+    height: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProcessedPhoto:
+    """The final product image one processing run produced."""
+
+    content: bytes
     width: int
     height: int
 
@@ -52,6 +62,10 @@ class PhotoCatalog(Protocol):
 
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         """Return the media of ``store``, or None when another store owns it."""
+        ...
+
+    def create_media(self, store: StoreReference, media: NewMedia) -> MediaRecord:
+        """Create or reuse the store's content-addressed Media and its renditions."""
         ...
 
     def product_images_for_media(
@@ -93,6 +107,19 @@ class PhotoProcessingQueue(Protocol):
 
     def enqueue(self, store: StoreReference, submission_id: int) -> None:
         """Put the submission on the processing queue; the task receives the store id."""
+        ...
+
+
+class PhotoProcessor(Protocol):
+    """Turn a private original into the final product image (crop, straighten, colour)."""
+
+    def process(
+        self,
+        submission: PhotoSubmission,
+        size: tuple[float, float] | None,
+        original: bytes,
+    ) -> ProcessedPhoto:
+        """Return the encoded final image for one submission; raise a domain error to fail."""
         ...
 
 

@@ -10,6 +10,7 @@ from apps.catalog.services import CatalogService
 from apps.photos.application.ports import (
     MediaUploader,
     PhotoProcessingQueue,
+    PhotoProcessor,
     PhotoSubmissionRepository,
     PrivateMediaReader,
     UnitOfWork,
@@ -80,6 +81,15 @@ def get_photo_processing_queue() -> PhotoProcessingQueue:
     from apps.photos.infrastructure.processing_queue import CeleryPhotoProcessingQueue
 
     return CeleryPhotoProcessingQueue()
+
+
+def get_photo_processor() -> PhotoProcessor:
+    if get_photo_processor in _overrides:
+        return _overrides[get_photo_processor]()
+
+    from apps.photos.infrastructure.processor import PillowPhotoProcessor
+
+    return PillowPhotoProcessor()
 
 
 def get_photo_unit_of_work() -> UnitOfWork:

@@ -3,6 +3,7 @@
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from io import BytesIO
 
 from apps.catalog.services import (
     CategoryReference,
@@ -13,7 +14,7 @@ from apps.catalog.services import (
     ProductRecord,
     VariantRecord,
 )
-from apps.photos.application.ports import UploadedPhoto
+from apps.photos.application.ports import ProcessedPhoto, UploadedPhoto
 from apps.photos.domain.errors import DuplicateIdempotencyKey
 from apps.photos.domain.submission import PhotoSubmission
 from apps.shared.domain.exceptions import PermissionDeniedError
@@ -124,6 +125,7 @@ class FakeCatalog:
 
     append_calls: list[dict] = field(default_factory=list)
     remove_calls: list[dict] = field(default_factory=list)
+    create_media_calls: list[tuple] = field(default_factory=list)
 
     def __init__(self, *, products=(), variants=(), media=(), images=()):
         self.products = {product.id: product for product in products}
@@ -132,6 +134,7 @@ class FakeCatalog:
         self.images = {image.id: image for image in images}
         self.append_calls = []
         self.remove_calls = []
+        self.create_media_calls = []
 
     def get_product(self, store: StoreReference, product_id: int) -> ProductRecord | None:
         product = self.products.get(product_id)
@@ -144,6 +147,23 @@ class FakeCatalog:
     def get_media(self, store: StoreReference, media_id: int) -> MediaRecord | None:
         item = self.media.get(media_id)
         return item if item is not None and item.store_id == store.id else None
+
+    def create_media(self, store: StoreReference, media) -> MediaRecord:
+        self.create_media_calls.append((store, media))
+        media_id = max((item.id for item in self.media.values()), default=0) + 1
+        record = MediaRecord(
+            id=media_id,
+            store_id=store.id,
+            storage_key=media.storage_key,
+            content_hash=media.content_hash,
+            mime_type=media.mime_type,
+            alt_text=media.alt_text,
+            width=media.width,
+            height=media.height,
+            metadata=media.metadata,
+        )
+        self.media[media_id] = record
+        return record
 
     def product_images_for_media(
         self, store: StoreReference, media_id: int
@@ -288,6 +308,35 @@ class FakeProcessingQueue:
 
     def enqueue(self, store: StoreReference, submission_id: int) -> None:
         self.calls.append((store, submission_id))
+
+
+@dataclass
+class FakePhotoProcessor:
+    """Return a fixed final image, recording each process call for assertions."""
+
+    result: ProcessedPhoto = field(
+        default_factory=lambda: ProcessedPhoto(content=b"processed", width=4, height=5)
+    )
+    error: Exception | None = None
+    calls: list[tuple] = field(default_factory=list)
+
+    def process(self, submission, size, original):
+        self.calls.append((submission, size, original))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+
+@dataclass
+class FakePrivateMediaReader:
+    """Serve private originals from memory; a missing key raises OSError."""
+
+    contents: dict[str, bytes] = field(default_factory=dict)
+
+    def open(self, store: StoreReference, key: str):
+        if key not in self.contents:
+            raise OSError(f"missing {key}")
+        return BytesIO(self.contents[key])
 
 
 def make_product(product_id=10, store=HOME):

@@ -6,6 +6,7 @@ from apps.photos.application.fingerprints import photo_request_fingerprint
 from apps.photos.application.ports import (
     MediaUploader,
     PhotoCatalog,
+    PhotoProcessingQueue,
     PhotoSubmissionRepository,
 )
 from apps.photos.domain.errors import DuplicateIdempotencyKey, InvalidSubmissionTarget
@@ -57,11 +58,13 @@ class UploadPhoto:
         uploader: MediaUploader,
         catalog: PhotoCatalog,
         authorizer: Authorizer,
+        queue: PhotoProcessingQueue,
     ):
         self._repository = repository
         self._uploader = uploader
         self._catalog = catalog
         self._authorizer = authorizer
+        self._queue = queue
 
     def __call__(self, command: UploadPhotoCommand) -> UploadPhotoResult:
         self._authorizer.require(command.user_id, command.store, MANAGE_CATALOG)
@@ -109,6 +112,7 @@ class UploadPhoto:
             if replay is None:
                 raise
             return UploadPhotoResult(submission=replay, created=False)
+        self._queue.enqueue(command.store, saved.id)
         return UploadPhotoResult(submission=saved, created=True)
 
     def _validate_target(self, command: UploadPhotoCommand) -> None:
