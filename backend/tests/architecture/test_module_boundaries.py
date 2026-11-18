@@ -1,4 +1,8 @@
-"""A module never imports another module's models; it goes through services or ports."""
+"""A module never imports another module's models or infrastructure.
+
+It goes through services or ports. CRUD modules keep their models in ``models.py``;
+modules with business rules keep them in ``infrastructure/`` (AGENTS.md).
+"""
 
 import ast
 
@@ -14,6 +18,16 @@ EXCEPTIONS = {
 }
 
 
+def _is_foreign_internal(name, own_module):
+    parts = name.split(".")
+    return (
+        len(parts) >= 3
+        and parts[0] == "apps"
+        and parts[1] != own_module
+        and parts[2] in {"models", "infrastructure"}
+    )
+
+
 def foreign_model_imports(path, own_module):
     for node in ast.walk(parse(path)):
         if isinstance(node, ast.Import):
@@ -23,11 +37,9 @@ def foreign_model_imports(path, own_module):
         else:
             continue
         for name in names:
-            parts = name.split(".")
-            if len(parts) >= 3 and parts[0] == "apps" and parts[2] == "models":
-                if parts[1] != own_module:
-                    yield name
-                    break
+            if _is_foreign_internal(name, own_module):
+                yield name
+                break
 
 
 def violations():
@@ -42,11 +54,27 @@ def violations():
     return found
 
 
+def test_the_scan_sees_models_and_infrastructure_imports(tmp_path):
+    planted = tmp_path / "views_extra.py"
+    planted.write_text(
+        "from apps.photos.infrastructure.models import PhotoSubmission\n"
+        "import apps.stores.models as store_models\n"
+        "from apps.catalog import models\n"
+        "from apps.catalog.models import Product\n"
+    )
+
+    assert sorted(foreign_model_imports(planted, "catalog")) == [
+        "apps.photos.infrastructure.models",
+        "apps.stores.models",
+    ]
+
+
 def test_no_module_imports_another_modules_models():
     unexpected = {path: names for path, names in violations().items() if path not in EXCEPTIONS}
 
     assert unexpected == {}, (
-        f"Use the other module's services or ports instead of its models: {unexpected}"
+        "Use the other module's services or ports instead of its models or "
+        f"infrastructure: {unexpected}"
     )
 
 

@@ -40,10 +40,14 @@ extend-exclude = ["*/migrations/*"]
 force-exclude = true
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "DJ", "TID251"]
+select = ["E", "F", "I", "UP", "B", "DJ", "TID251", "TID252"]
 
 # Modules with business rules keep DRF thin (AGENTS.md): serializers validate shape and
 # use cases enforce rules. The CRUD-only modules below may use the generic DRF classes.
+[tool.ruff.lint.flake8-tidy-imports]
+# Absolute imports only, so the architecture tests and import-linter see every import.
+ban-relative-imports = "all"
+
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "rest_framework.viewsets.ModelViewSet".msg = "Business modules expose use cases through thin views, not ModelViewSet."
 "rest_framework.serializers.ModelSerializer".msg = "Business modules validate shape with plain serializers; use cases save."
@@ -72,10 +76,24 @@ include_external_packages = true
 name = "Domain layers import no framework or infrastructure"
 type = "forbidden"
 source_modules = ["apps.*.domain"]
-forbidden_modules = ["django", "rest_framework", "celery", "apps.*.infrastructure", "apps.*.interfaces"]
+forbidden_modules = [
+    "django",
+    "rest_framework",
+    "celery",
+    "config",
+    "apps.*.infrastructure",
+    "apps.*.interfaces",
+]
 
 [[tool.importlinter.contracts]]
 name = "Application layers import no Django, DRF, Celery or infrastructure"
 type = "forbidden"
 source_modules = ["apps.*.application"]
-forbidden_modules = ["django", "rest_framework", "celery", "apps.*.infrastructure", "apps.*.interfaces"]
+forbidden_modules = [
+    "django",
+    "rest_framework",
+    "celery",
+    "config",
+    "apps.*.infrastructure",
+    "apps.*.interfaces",
+]

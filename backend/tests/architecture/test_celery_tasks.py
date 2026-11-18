@@ -54,7 +54,8 @@ def test_every_task_receives_its_store():
         f"{path}:{node.name}"
         for path, node, decorator in tasks()
         if _explicit_name(decorator) not in GLOBAL_TASKS
-        and not STORE_PARAMETERS & {arg.arg for arg in node.args.args + node.args.kwonlyargs}
+        and not STORE_PARAMETERS
+        & {arg.arg for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs}
     ]
 
     assert storeless == [], "Every task receives the store explicitly (store_id)."
