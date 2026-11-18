@@ -6,7 +6,7 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -62,6 +62,7 @@ from .tickets import (
     assert_push_target,
     branch_from_worktree_dir_name,
     branch_name,
+    is_ready,
     select_tickets,
     worktree_path,
 )
@@ -148,7 +149,6 @@ class Factory:
         cleanup_old(self.settings.logs_dir, keep_days=self.settings.keep_days)
         tickets = self.run_preflight(token=token)
         held = self._retry_held_labels(token)
-        _log_contract_skips(tickets)
         if review_fix is not None:
             self.review_attempts.record_attempted(review_fix.review_id)
             return [
@@ -160,6 +160,7 @@ class Factory:
             ]
         results: list[TicketResult] = []
         eligible = [t for t in tickets if t.number not in held]
+        _log_contract_skips(eligible)
         for ticket in select_tickets(eligible, max_tickets=self.settings.max_tickets):
             result = self._execute(
                 ticket,
@@ -1124,9 +1125,9 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _log_contract_skips(tickets: list[Ticket]) -> None:
-    """Say once per run which ticket waits for which open PR's contract (#144)."""
+    """Say once per run which ticket waits only because of an open PR's contract (#144)."""
     for ticket in tickets:
-        if ticket.contract_conflicts:
+        if ticket.contract_conflicts and is_ready(replace(ticket, contract_conflicts=())):
             reasons = "; ".join(ticket.contract_conflicts)
             print(f"#{ticket.number} skipped: {reasons}", file=sys.stderr)
 

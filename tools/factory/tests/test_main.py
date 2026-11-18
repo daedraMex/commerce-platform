@@ -2368,3 +2368,21 @@ def test_a_ticket_held_by_a_contract_is_skipped_and_logged_once(tmp_path, capsys
     err = capsys.readouterr().err
     assert err.count("#7 skipped") == 1
     assert "photos.submission-states held by PR #175 (#156)" in err
+
+
+def test_a_contract_skip_is_not_logged_when_the_ticket_is_not_ready_anyway(tmp_path, capsys):
+    blocked = replace(
+        make_ticket(7, labels={"ready-for-agent", "needs-decision"}),
+        contract_conflicts=("photos.submission-states held by PR #175 (#156)",),
+    )
+    factory = build_factory(
+        tmp_path,
+        git=FakeGit(check_passed=True),
+        github=FakeGitHub(tickets=[blocked]),
+        runner=FakeRunner(),
+        notifier=RecordingNotifier(),
+    )
+
+    factory.run()
+
+    assert "skipped" not in capsys.readouterr().err

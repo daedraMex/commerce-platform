@@ -225,3 +225,41 @@ def test_select_skips_a_ticket_that_conflicts_with_one_already_selected():
     other = Ticket(number=9, title="c", labels=frozenset({"ready-for-agent"}))
 
     assert select_tickets([first, second, other], max_tickets=2) == [first, other]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Consumes `photos.processing-queue` and changes `photos.submission-states`.",
+        "Consumes `photos.processing-queue`, changes `photos.submission-states`.",
+        "Consumes `photos.processing-queue`. Changes `photos.submission-states`.",
+    ],
+)
+def test_each_id_takes_the_nearest_verb_before_it(line):
+    contracts = parse_contracts(f"## Contracts\n\n{line}\n")
+
+    assert contracts.held == {"photos.submission-states"}
+    assert contracts.consumed == {"photos.processing-queue"}
+
+
+def test_a_fenced_example_is_not_the_contracts_section():
+    body = (
+        "## Notes\n\n```markdown\n## Contracts\n\nConsumes `a.example`.\n```\n\n"
+        "## Contracts\n\nChanges `photos.submission-states`.\n"
+    )
+
+    contracts = parse_contracts(body)
+
+    assert contracts.held == {"photos.submission-states"}
+    assert "a.example" not in contracts.consumed
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "#### Contracts\n\nChanges `photos.submission-states`.\n",
+        "**Contracts** Changes `photos.submission-states`.\n",
+    ],
+)
+def test_other_heading_shapes_are_read(body):
+    assert parse_contracts(body).held == {"photos.submission-states"}

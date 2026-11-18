@@ -519,21 +519,31 @@ class GitHub:
         tickets: list[Ticket],
         pr_tickets: list[tuple[int | None, list[int]]],
         token: str | None,
-    ) -> list[tuple[int | None, int, Contracts]]:
+    ) -> list[tuple[int | None, int, Contracts | str]]:
         """(PR, ticket, contracts) for every open PR's ticket that declares contracts.
 
-        Bodies are read only when a listed ticket declares contracts. An unreadable
-        body raises: guessing "no contracts" would let two tickets race on one.
+        Bodies are read only when a listed ticket declares contracts, and listed
+        tickets are not read again. An unreadable body becomes a hold on every
+        contract (its error text in place of the contracts): guessing "no contracts"
+        would let two tickets race on one, and failing the listing would stop every
+        run over one bad reference.
         """
         if not any(_declares(parse_contracts(t.body)) for t in tickets):
             return []
-        bodies: dict[int, str] = {}
-        holds = []
+        bodies: dict[int, str | GitHubError] = {t.number: t.body for t in tickets}
+        holds: list[tuple[int | None, int, Contracts | str]] = []
         for pr_number, numbers in pr_tickets:
             for number in numbers:
                 if number not in bodies:
-                    bodies[number] = self._issue_body(number, token)
-                contracts = parse_contracts(bodies[number])
+                    try:
+                        bodies[number] = self._issue_body(number, token)
+                    except GitHubError as exc:
+                        bodies[number] = exc
+                body = bodies[number]
+                if isinstance(body, GitHubError):
+                    holds.append((pr_number, number, _unreadable_reason(body)))
+                    continue
+                contracts = parse_contracts(body)
                 if _declares(contracts):
                     holds.append((pr_number, number, contracts))
         return holds
@@ -614,14 +624,25 @@ def _declares(contracts: Contracts) -> bool:
     return bool(contracts.held or contracts.consumed)
 
 
-def _conflicts(ticket: Ticket, holds: list[tuple[int | None, int, Contracts]]) -> tuple[str, ...]:
+def _unreadable_reason(error: GitHubError) -> str:
+    return str(error).split(": ", 1)[-1]
+
+
+def _conflicts(
+    ticket: Ticket, holds: list[tuple[int | None, int, Contracts | str]]
+) -> tuple[str, ...]:
     mine = parse_contracts(ticket.body)
+    if not _declares(mine):
+        return ()
     lines = []
     for pr_number, number, theirs in holds:
         if number == ticket.number:
             continue
+        pr = "an open PR" if pr_number is None else f"PR #{pr_number}"
+        if isinstance(theirs, str):
+            lines.append(f"contracts of #{number} unreadable ({pr}): {theirs}")
+            continue
         for contract in sorted(mine.conflicts_with(theirs)):
-            pr = "an open PR" if pr_number is None else f"PR #{pr_number}"
             lines.append(f"{contract} held by {pr} (#{number})")
     return tuple(lines)
 

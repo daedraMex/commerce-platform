@@ -26,12 +26,19 @@ REQUIRED_LABELS = frozenset(
 )
 
 _BLOCKED_BY_RE = re.compile(r"^\s*Blocked by:\s*(.+?)\s*$", re.IGNORECASE)
-_CONTRACTS_HEADING_RE = re.compile(r"^#{2,3}\s*Contracts\s*$", re.IGNORECASE | re.MULTILINE)
+_CONTRACTS_HEADING_RE = re.compile(r"^#{2,4}\s*Contracts\s*$", re.IGNORECASE | re.MULTILINE)
 _NEXT_HEADING_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
-_CONTRACTS_LINE_RE = re.compile(r"^\s*\**Contracts:\**\s*(.+?)\s*$", re.IGNORECASE | re.MULTILINE)
-# Only backticked ids count, so a path such as `docs/contracts/photos.md` is never an id.
-_CONTRACT_ID_RE = re.compile(r"`([a-z][a-z0-9_]*\.[a-z0-9][a-z0-9_-]*)`")
-_VERBS = {"defines": "held", "changes": "held", "consumes": "consumed"}
+_CONTRACTS_LINE_RE = re.compile(
+    r"^\s*\*{0,2}Contracts:?\*{0,2}:?\s+(.+?)\s*$", re.IGNORECASE | re.MULTILINE
+)
+_FENCE_RE = re.compile(r"^```.*?^```[^\n]*$", re.MULTILINE | re.DOTALL)
+# A verb, or a backticked id. Only backticked ids count, so a path such as
+# `docs/contracts/photos.md` is never an id.
+_CONTRACT_TOKEN_RE = re.compile(
+    r"\b(?P<verb>defines?|changes?|consumes?)\b"
+    r"|`(?P<id>[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9_-]*)`",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -50,25 +57,24 @@ class Contracts:
 
 
 def parse_contracts(body: str) -> Contracts:
-    """Read a ticket's Contracts section (or ``Contracts:`` line), by verb.
+    """Read a ticket's Contracts section (or ``Contracts:`` line).
 
-    An id in a clause with no verb counts as held, so an unclear section blocks
-    rather than lets two tickets race on one contract.
+    Each id takes the nearest verb before it. An id with no verb before it counts as
+    held, so an unclear section blocks rather than lets two tickets race on one.
     """
-    text = _contracts_text(body)
     held: set[str] = set()
     consumed: set[str] = set()
-    verb = "held"
-    for clause in text.split(";"):
-        words = clause.strip().lstrip("*_").split(maxsplit=1)
-        if words and words[0].lower() in _VERBS:
-            verb = _VERBS[words[0].lower()]
-        target = held if verb == "held" else consumed
-        target.update(_CONTRACT_ID_RE.findall(clause))
+    holding = True
+    for token in _CONTRACT_TOKEN_RE.finditer(_contracts_text(body)):
+        if token.group("verb"):
+            holding = not token.group("verb").lower().startswith("consume")
+        else:
+            (held if holding else consumed).add(token.group("id"))
     return Contracts(held=frozenset(held), consumed=frozenset(consumed - held))
 
 
 def _contracts_text(body: str) -> str:
+    body = _FENCE_RE.sub("", body)
     heading = _CONTRACTS_HEADING_RE.search(body)
     if heading is not None:
         rest = body[heading.end() :]

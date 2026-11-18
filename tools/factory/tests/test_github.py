@@ -764,13 +764,15 @@ def test_no_issue_body_is_read_when_no_ready_ticket_declares_contracts():
     assert gh.viewed == []
 
 
-def test_an_unreadable_pr_ticket_fails_the_listing_instead_of_letting_tickets_race():
+def test_an_unreadable_pr_ticket_holds_only_tickets_that_declare_contracts():
     gh = ContractGh(
-        ready=[_ready(170, CHANGES)],
+        ready=[_ready(170, CHANGES), _ready(99, "## What to build\n\nA page.\n")],
         prs=[{"number": 175, "body": "Closes #156."}],
         bodies={},
         failing_issue=156,
     )
 
-    with pytest.raises(GitHubError, match="HTTP 502"):
-        GitHub(REPO, run=gh).list_tickets("TOKEN")
+    tickets = {t.number: t for t in GitHub(REPO, run=gh).list_tickets("TOKEN")}
+
+    assert tickets[170].contract_conflicts == ("contracts of #156 unreadable (PR #175): HTTP 502",)
+    assert tickets[99].contract_conflicts == ()
