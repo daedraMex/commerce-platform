@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -50,7 +51,7 @@ from .review_step import (
     stuck_reason,
 )
 from .reviews import ReviewFix
-from .runner import AgentRunner
+from .runner import OPENCODE_CONFIG_PATH, AgentRunner
 from .sudoers import verify_sudoers_logging
 from .tickets import (
     Ticket,
@@ -249,6 +250,7 @@ class Factory:
             verify_isolation_fn=self._preflight_verify_isolation,
             verify_git_version_fn=self._preflight_verify_git_version,
             verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
+            runner=self.runner,
         ).run(token=token)
 
     def _remove_expired_worktree(self, worktree: Path) -> None:
@@ -291,6 +293,7 @@ class Factory:
         self._remove_stale_ticket_worktree(worktree, branch)
         # Each ticket fetches its own base; it must not depend on the preflight's fetch.
         self.git.fetch_main(self.settings.repo_dir)
+        builder_config = self._builder_config()
         worktree = self.git.create_worktree(self.settings.repo_dir, worktree, branch)
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
@@ -330,6 +333,7 @@ class Factory:
                 model=model,
                 prompt=prompt,
                 timeout_seconds=int(remaining),
+                config_content=builder_config,
             )
             made += 1
             self._write_log(ticket, result, step=_step, model=model)
@@ -434,6 +438,7 @@ class Factory:
         # starts. A conflict goes to a human instead of letting the agent imitate
         # a merge by editing files (PR #119).
         self.git.fetch_main(self.settings.repo_dir)
+        builder_config = self._builder_config()
         if not self.git.merge_main(worktree):
             return self._stuck(
                 ticket,
@@ -484,6 +489,7 @@ class Factory:
                 model=model,
                 prompt=prompt,
                 timeout_seconds=int(remaining),
+                config_content=builder_config,
             )
             made += 1
             self._write_log(ticket, result, step=_step, model=model)
@@ -799,6 +805,33 @@ class Factory:
             log.write(header + content)
         return log_path
 
+    def _builder_config(self) -> str:
+        """Main's builder permissions, passed inline so the repo's opencode.json cannot
+        override them (an OPENCODE_CONFIG file ranks below project config, #153)."""
+        return self._inline_config(OPENCODE_CONFIG_PATH)
+
+    def _inline_config(self, path: str) -> str:
+        """An OpenCode config from origin/main, ready to pass inline.
+
+        A blank or invalid file fails closed: OpenCode would silently skip it and run
+        with the repo's own permissions. The top-level permissions are also set as the
+        ``build`` agent's, because agent-level permissions are merged after top-level
+        ones and the repo's opencode.json defines that agent.
+        """
+        text = self.git.read_ref_file(self.settings.repo_dir, "origin/main", path)
+        try:
+            config = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"{path} on origin/main is not valid JSON") from exc
+        if not isinstance(config, dict) or not isinstance(config.get("permission"), dict):
+            raise RuntimeError(f"{path} on origin/main has no permission block")
+        build = config.setdefault("agent", {}).setdefault("build", {})
+        build["permission"] = config["permission"]
+        # Pin the agent: a planted .opencode/opencode.json (project config, ranked
+        # below inline) cannot switch the run to an agent with wider permissions.
+        config["default_agent"] = "build"
+        return json.dumps(config)
+
     def _pre_pr_review(
         self,
         ticket: Ticket,
@@ -825,9 +858,7 @@ class Factory:
             rules = self.git.read_ref_file(self.settings.repo_dir, "origin/main", REVIEW_RULES)
             # Main's reviewer permissions, passed inline: they outrank the repo's own
             # opencode.json and .opencode/, and the worktree copy is never read.
-            reviewer_config = self.git.read_ref_file(
-                self.settings.repo_dir, "origin/main", REVIEWER_CONFIG_PATH
-            )
+            reviewer_config = self._inline_config(REVIEWER_CONFIG_PATH)
             diff = self.git.review_diff(worktree)
             before = self.git.worktree_fingerprint(worktree)
         except Exception as exc:
@@ -840,6 +871,7 @@ class Factory:
             ),
             timeout_seconds=int(remaining),
             config_content=reviewer_config,
+            disable_project_config=True,
         )
         self._write_log(ticket, result, step=step, model=reviewer, review=True)
         if self.git.worktree_fingerprint(worktree) != before:
@@ -904,6 +936,7 @@ def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> F
         runner=AgentRunner(
             agent_user=settings.agent_user,
             agent_home=settings.agent_home,
+            config_home=str(settings.agent_config_home),
         ),
         notifier=notifier or _build_notifier(settings),
         token_provider=_build_token_provider(settings),

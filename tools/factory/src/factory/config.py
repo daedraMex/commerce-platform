@@ -64,6 +64,7 @@ class Settings:
     deploy_key: Path = field(default_factory=lambda: Path.home() / ".ssh" / "commerce_deploy")
     handoff_host: str | None = None
     pre_pr_review: bool = False
+    agent_config_home: Path = Path("/srv/factory/agent-config")
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -95,6 +96,9 @@ class Settings:
             max_tickets_per_day=_read_int(env, "FACTORY_MAX_TICKETS_PER_DAY", 6),
             attempts=_read_int(env, "FACTORY_ATTEMPTS", 3),
             pre_pr_review=_read(env, "FACTORY_PRE_PR_REVIEW") not in ("0", "false", "no"),
+            agent_config_home=Path(
+                _read(env, "FACTORY_AGENT_CONFIG_HOME") or "/srv/factory/agent-config"
+            ),
             repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or "/srv/factory/repo"),
             worktrees_dir=Path(_read(env, "FACTORY_WORKTREES_DIR") or "/srv/factory/worktrees"),
             logs_dir=Path(_read(env, "FACTORY_LOGS_DIR") or str(home / "factory" / "logs")),

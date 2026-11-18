@@ -9,8 +9,9 @@ requests and daily ticket attempts. The decisions behind it are in
 
 - Code lives in `tools/factory/` (a small Python package run with `uv`).
 - It is governed by the factory-only OpenCode config
-  `tools/factory/opencode.factory.json`, loaded via the `OPENCODE_CONFIG`
-  environment variable, so the repo's own `opencode.json` is untouched.
+  `tools/factory/opencode.factory.json`, read from `origin/main` and passed
+  inline as `OPENCODE_CONFIG_CONTENT`, which outranks the repo's own
+  `opencode.json` (left untouched for interactive use).
 - It never pushes to `main`, never force-pushes, never approves and never merges
   directly. After opening a PR it marks it ready for review and enables
   auto-merge with the merge-commit method, so every factory PR needs the owner's
@@ -299,6 +300,37 @@ Run these once, as the admin user unless a step says `factory`.
    never receive the production, R2, payment or per-store integration
    credentials, and never the real `.env`.
 
+   Then create the agent's **read-only OpenCode config home**. Every OpenCode
+   run gets `XDG_CONFIG_HOME` pointing here (`FACTORY_AGENT_CONFIG_HOME`,
+   default `/srv/factory/agent-config`), so the global config is something the
+   agent can read but never write; its own `~/.config/opencode/` is ignored. The
+   auth store stays in `~/.local/share/opencode/`, which `XDG_CONFIG_HOME` does
+   not move. OpenCode creates `<config home>/opencode` at startup, so that
+   subdirectory must already exist:
+   ```bash
+   sudo install -d -o factory -g factory -m 0755 /srv/factory/agent-config
+   sudo install -d -o factory -g factory -m 0755 /srv/factory/agent-config/opencode
+   ```
+   Leave `opencode/` empty unless OpenCode needs global settings; if it does,
+   review the file and put it there (owned by `factory`, mode `0644`).
+
+   OpenCode also loads `~/.opencode/` (config and plugins) from the agent's home
+   even with project config disabled, and `~/.claude/` and `~/.agents/` unless
+   switched off. Every run sets `OPENCODE_DISABLE_CLAUDE_CODE=1` and
+   `OPENCODE_DISABLE_EXTERNAL_SKILLS=1`, and before every OpenCode run the
+   factory checks that none of `~/.opencode`, `~/.claude` or `~/.agents` exists
+   in `/home/factory-agent`; if one does, the run stops and names it. Review
+   any of them (and the old `~/.config/opencode/`, now ignored) and remove them:
+   ```bash
+   sudo ls -la /home/factory-agent/.opencode /home/factory-agent/.claude \
+     /home/factory-agent/.agents /home/factory-agent/.config/opencode
+   strings /usr/bin/opencode | grep -c OPENCODE_DISABLE_CLAUDE_CODE      # expect > 0
+   strings /usr/bin/opencode | grep -c OPENCODE_DISABLE_EXTERNAL_SKILLS  # expect > 0
+   ```
+   The preflight fails if the config home or its `opencode/` is missing or
+   writable by the agent, if the agent cleanup (`pkill` through sudo) does not
+   work, or if OpenCode cannot start as the agent with the real environment.
+
 9. **Create the secrets file** `~/factory/secrets.env`, `chmod 600`, with the
    settings the factory reads from the environment:
     ```bash
@@ -322,6 +354,7 @@ Run these once, as the admin user unless a step says `factory`.
     # FACTORY_MAX_TICKETS=1
     # FACTORY_ATTEMPTS=3              # max agent steps per ticket
     # FACTORY_PRE_PR_REVIEW=1         # 0 turns the pre-PR reviewer off
+    # FACTORY_AGENT_CONFIG_HOME=/srv/factory/agent-config  # agent's read-only OpenCode config
     # FACTORY_TIME_LIMIT_MINUTES=120  # max wall-clock per ticket
     # FACTORY_REPO=daedraMex/commerce-platform
     # FACTORY_REPO_DIR=/srv/factory/repo
@@ -504,9 +537,19 @@ unreachable" as before.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
   ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
-  `DATABASE_URL` and `OPENCODE_CONFIG` (the reviewer gets
-  `OPENCODE_CONFIG_CONTENT` and `OPENCODE_DISABLE_PROJECT_CONFIG` instead) —
-  nothing else. The model provider key is
+  `DATABASE_URL`, `XDG_CONFIG_HOME` (the read-only config home),
+  `OPENCODE_DISABLE_CLAUDE_CODE`, `OPENCODE_DISABLE_EXTERNAL_SKILLS` and
+  `OPENCODE_CONFIG_CONTENT` (main's `opencode.factory.json` for the builder,
+  `opencode.reviewer.json` plus `OPENCODE_DISABLE_PROJECT_CONFIG` for the
+  reviewer) — nothing else. An inline config outranks the repo's
+  `opencode.json`, which a file named by `OPENCODE_CONFIG` does not; its
+  permissions are also set as the `build` agent's, which the repo's
+  `opencode.json` defines. A blank or invalid config on `origin/main` fails the
+  run. After every OpenCode run and every set of area checks, the factory kills
+  every process the agent user still has, repeating while `pkill` finds some; a
+  cleanup sudo refuses fails the run, so nothing the agent started can change
+  files later. The model
+  provider key is
   not in it: the agent reads its own OpenCode auth store from its home, so the
   key never crosses sudo. The backend check runner gets the same downgrade with
   only `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret
@@ -559,10 +602,12 @@ unreachable" as before.
   times out or answers without a findings block is reported in the PR body
   ("read in full") and the PR still opens. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
-  `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#153): the agent's global
-  OpenCode config (`~/.config/opencode/`) is still loaded and is writable by the
-  agent user, so a builder or a test could plant global instructions that
-  weaken later reviews; the owner's review stays the gate.
+  `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#158): the agent's home
+  (`/home/factory-agent`) is still its own and is reused across runs, and
+  OpenCode reads from it at every start (`auth.json`, its local database, the
+  cached `rg`, `~/.gitconfig`). A builder could use it to blind the reviewer in
+  later runs; the reviewer is advisory, and the owner's approval, the
+  protected-path guard and the worktree fingerprint still gate every PR.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** each area check script that passed or was
   skipped and the agent steps used, under **Review** the pre-PR review's

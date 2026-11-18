@@ -13,7 +13,13 @@ from pathlib import Path
 
 from .areas import Area, select_areas
 from .diff import DiffStats, build_diff_stats
-from .runner import build_check_env, kill_agent_processes, sudo_argv, truncate_check_output
+from .runner import (
+    build_check_env,
+    ensure_agent_cleanup,
+    kill_agent_processes,
+    sudo_argv,
+    truncate_check_output,
+)
 from .shell import CommandTimeout, RunCommand, run_command
 
 MIN_GIT_VERSION = (2, 46)
@@ -425,6 +431,9 @@ class Git:
             chunks.append(f"=== {label} ===\n{body}" if body else f"=== {label} ===")
             if result.exit_code != 0:
                 failed.append(area)
+        # Tests and dev servers run as the agent; none may outlive the checks, and a
+        # cleanup that cannot be trusted fails the run instead of passing silently.
+        ensure_agent_cleanup(self._run, self._agent_user)
         return CheckResult(
             passed=not failed,
             output=truncate_check_output("\n\n".join(chunks).strip()),

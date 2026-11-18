@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
@@ -70,6 +71,7 @@ class FakeGit:
         self.review_rules = "## Rules\n\n### 1. Multi-step writes commit together"
         self.fingerprints = []
         self.reviewer_config = '{"permission": {"edit": {"*": "deny"}}}'
+        self.builder_config = '{"permission": {"edit": {"AGENTS.md": "deny"}}}'
         self.worktree_reviewer_config = None
         self.review_files = ["backend/apps/x.py"]
         self.check_script = []
@@ -156,6 +158,8 @@ class FakeGit:
         self.ref_reads.append((str(repo_dir), ref, path))
         if path == "tools/factory/opencode.reviewer.json":
             return self.reviewer_config
+        if path == "tools/factory/opencode.factory.json":
+            return self.builder_config
         return self.review_rules
 
     def review_diff(self, worktree):
@@ -315,32 +319,74 @@ class FailingTokenProvider:
 
 
 class FakeRunner:
+    def ensure_clean(self):
+        pass
+
+    def verify_home_is_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     def __init__(self, result=None):
         self.result = result or AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
         self.calls = []
 
     def run(
-        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+        self,
+        *,
+        worktree,
+        model,
+        prompt,
+        timeout_seconds,
+        config_path=None,
+        config_content=None,
+        disable_project_config=False,
     ):
         self.calls.append(
-            {"model": model, "prompt": prompt, "worktree": worktree, "config_path": config_path}
+            {
+                "model": model,
+                "prompt": prompt,
+                "worktree": worktree,
+                "config_path": config_path,
+                "config_content": config_content,
+                "disable_project_config": disable_project_config,
+            }
         )
         return self.result
 
 
 class ExplodingRunner:
+    def ensure_clean(self):
+        pass
+
+    def verify_home_is_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     def __init__(self, error):
         self.error = error
 
-    def run(self, *, worktree, model, prompt, timeout_seconds):
+    def run(self, *, worktree, model, prompt, timeout_seconds, **_options):
         raise self.error
 
 
 class BaseExceptionRunner:
+    def ensure_clean(self):
+        pass
+
+    def verify_home_is_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     def __init__(self, error):
         self.error = error
 
-    def run(self, *, worktree, model, prompt, timeout_seconds):
+    def run(self, *, worktree, model, prompt, timeout_seconds, **_options):
         raise self.error
 
 
@@ -1804,6 +1850,15 @@ BUILDER_OK = AgentResult(exit_code=0, stdout="built", stderr="", timed_out=False
 
 
 class ScriptedRunner:
+    def ensure_clean(self):
+        pass
+
+    def verify_home_is_clean(self):
+        pass
+
+    def smoke_check(self, worktree):
+        pass
+
     """Builder calls always succeed; reviewer calls (with a config path) follow a script."""
 
     def __init__(self, reviews):
@@ -1812,9 +1867,17 @@ class ScriptedRunner:
         self.review_calls = []
 
     def run(
-        self, *, worktree, model, prompt, timeout_seconds, config_path=None, config_content=None
+        self,
+        *,
+        worktree,
+        model,
+        prompt,
+        timeout_seconds,
+        config_path=None,
+        config_content=None,
+        disable_project_config=False,
     ):
-        if config_content is None:
+        if not disable_project_config:
             self.builder_prompts.append(prompt)
             return BUILDER_OK
         self.review_calls.append(
@@ -1853,7 +1916,10 @@ def test_reviewer_runs_with_the_strong_model_and_rules_from_origin_main(tmp_path
     assert len(runner.review_calls) == 1
     call = runner.review_calls[0]
     assert call["model"] == "deepseek/deepseek-v4-pro"
-    assert call["config_content"] == git.reviewer_config
+    assert (
+        json.loads(call["config_content"])["permission"]
+        == (json.loads(git.reviewer_config)["permission"])
+    )
     assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.reviewer.json") in (
         git.ref_reads
     )
@@ -1984,3 +2050,62 @@ def test_an_open_finding_is_listed_when_the_next_review_fails(tmp_path):
     assert "automated review failed" in body
     assert "Open finding from an earlier round" in body
     assert "link and save are not atomic" in body
+
+
+def test_builder_gets_main_s_factory_config_inline_and_keeps_project_config(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    builder = runner.calls[0]
+    config = json.loads(builder["config_content"])
+    expected = json.loads(git.builder_config)["permission"]
+    assert config["permission"] == expected
+    assert config["agent"]["build"]["permission"] == expected
+    assert config["default_agent"] == "build"
+    assert builder["disable_project_config"] is False
+    assert (str(tmp_path / "repo"), "origin/main", "tools/factory/opencode.factory.json") in (
+        git.ref_reads
+    )
+
+
+def test_review_fix_builder_also_gets_main_s_factory_config_inline(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert (
+        json.loads(runner.calls[0]["config_content"])["permission"]
+        == (json.loads(git.builder_config)["permission"])
+    )
+
+
+def test_reviewer_still_disables_project_config(tmp_path):
+    results, _, _, runner, _ = run_with_reviewer(tmp_path, [NO_FINDINGS])
+
+    assert results[0].ok
+    assert len(runner.review_calls) == 1
+
+
+def test_a_blank_builder_config_on_main_fails_the_run_closed(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.builder_config = "   "
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    runner = FakeRunner()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    with pytest.raises(RunFailed, match="opencode.factory.json"):
+        factory.run()
+    assert runner.calls == []
