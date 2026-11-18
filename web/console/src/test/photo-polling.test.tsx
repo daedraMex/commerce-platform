@@ -1,3 +1,5 @@
+import * as React from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -8,9 +10,24 @@ import { nextPollDelay } from "@/features/photos/lib/polling";
 
 const { retrieve } = vi.hoisted(() => ({ retrieve: vi.fn() }));
 
-vi.mock("@commerce-platform/api-client", () => ({
+vi.mock("@commerce-platform/api-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@commerce-platform/api-client")>()),
   apiV1StaffPhotosRetrieve: (...args: unknown[]) => retrieve(...args),
 }));
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const client = new QueryClient();
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+function renderPolling(
+  props: Omit<Parameters<typeof usePhotoPolling>[0], "store">,
+) {
+  return renderHook(
+    (current: typeof props) => usePhotoPolling({ store: "anime", ...current }),
+    { initialProps: props, wrapper },
+  );
+}
 
 function submission(
   status: string,
@@ -77,9 +94,7 @@ describe("usePhotoPolling", () => {
       .mockResolvedValueOnce(submission("ready"));
     const onUpdate = vi.fn();
 
-    renderHook(() =>
-      usePhotoPolling({ submissionId: 1, status: "uploaded", onUpdate }),
-    );
+    renderPolling({ submissionId: 1, status: "uploaded", onUpdate });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -119,9 +134,7 @@ describe("usePhotoPolling", () => {
     retrieve.mockResolvedValueOnce(submission("failed"));
     const onUpdate = vi.fn();
 
-    renderHook(() =>
-      usePhotoPolling({ submissionId: 1, status: "processing", onUpdate }),
-    );
+    renderPolling({ submissionId: 1, status: "processing", onUpdate });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -139,14 +152,12 @@ describe("usePhotoPolling", () => {
   it("does not poll a discarded submission whose status is still processing", async () => {
     const onUpdate = vi.fn();
 
-    renderHook(() =>
-      usePhotoPolling({
+    renderPolling({
         submissionId: 1,
         status: "processing",
         discarded: true,
         onUpdate,
-      }),
-    );
+      });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -164,9 +175,7 @@ describe("usePhotoPolling", () => {
       .mockResolvedValue(submission("processing"));
     const onUpdate = vi.fn();
 
-    renderHook(() =>
-      usePhotoPolling({ submissionId: 1, status: "uploaded", onUpdate }),
-    );
+    renderPolling({ submissionId: 1, status: "uploaded", onUpdate });
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(0);
@@ -185,5 +194,32 @@ describe("usePhotoPolling", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(retrieve).toHaveBeenCalledTimes(2);
+  });
+
+  it("restarts the backoff when a new processing attempt starts", async () => {
+    retrieve.mockResolvedValue(submission("processing"));
+    const onUpdate = vi.fn();
+
+    const { rerender } = renderPolling({
+      submissionId: 1,
+      status: "processing",
+      attempt: 1,
+      onUpdate,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0 + 1000 + 2000 + 4000);
+    });
+    expect(retrieve).toHaveBeenCalledTimes(4);
+
+    rerender({ submissionId: 1, status: "processing", attempt: 2, onUpdate });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(retrieve).toHaveBeenCalledTimes(5);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1000);
+    });
+    expect(retrieve).toHaveBeenCalledTimes(6);
   });
 });

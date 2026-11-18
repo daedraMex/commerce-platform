@@ -49,7 +49,7 @@ export function PhotoSourcePicker({
             {t("localPreview")}
           </p>
           <div className="overflow-hidden rounded-md border border-border bg-foreground/5">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
+            {/* eslint-disable-next-line @next/next/no-img-element -- a local blob URL, which next/image cannot load #185 */}
             <img
               src={localUrl}
               alt={t("previewAlt")}

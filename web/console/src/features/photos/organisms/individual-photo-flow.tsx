@@ -149,8 +149,10 @@ export function IndividualPhotoFlow({
   const editorImageUrl = localUrl ?? previewUrl;
 
   usePhotoPolling({
+    store,
     submissionId: submission?.id ?? null,
     status: submission?.status,
+    attempt: submission?.attempts ?? 0,
     discarded: Boolean(submission?.discarded_at),
     onUpdate: setSubmission,
   });

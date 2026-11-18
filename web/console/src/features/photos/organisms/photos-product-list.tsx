@@ -12,7 +12,7 @@ import {
 } from "@commerce-platform/api-client";
 
 import { Button } from "@/components/atoms/button";
-import { useDebouncedValue } from "../hooks/use-debounced-value";
+import { useDebouncedState } from "../hooks/use-debounced-state";
 import {
   photoCategoriesQueryKey,
   photoProductsQueryKey,
@@ -30,8 +30,10 @@ type PhotosProductListProps = {
 export function PhotosProductList({ store }: PhotosProductListProps) {
   const t = useTranslations("Photos");
 
-  const [searchInput, setSearchInput] = React.useState("");
-  const search = useDebouncedValue(searchInput, SEARCH_DEBOUNCE_MS);
+  const [searchInput, search, setSearchInput] = useDebouncedState(
+    "",
+    SEARCH_DEBOUNCE_MS,
+  );
   const [category, setCategory] = React.useState("");
   const [onlyMissing, setOnlyMissing] = React.useState(true);
   const [page, setPage] = React.useState(1);

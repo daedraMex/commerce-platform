@@ -1,93 +1,66 @@
 "use client";
 
-import * as React from "react";
-
 import {
   apiV1StaffPhotosRetrieve,
+  useApiV1StaffPhotosRetrieve,
   type PhotoSubmission,
 } from "@commerce-platform/api-client";
 
 import { isTerminalSubmission, nextPollDelay } from "../lib/polling";
+import { photoSubmissionQueryKey } from "../lib/queries";
 
 type UsePhotoPollingOptions = {
+  store: string;
   submissionId: number | null;
   status: string | null | undefined;
+  /** Processing attempts so far; a new attempt restarts the backoff. */
+  attempt?: number;
   discarded?: boolean;
   onUpdate: (submission: PhotoSubmission) => void;
 };
 
 export function usePhotoPolling({
+  store,
   submissionId,
   status,
+  attempt = 0,
   discarded = false,
   onUpdate,
 }: UsePhotoPollingOptions): void {
-  const onUpdateRef = React.useRef(onUpdate);
-
-  React.useEffect(() => {
-    onUpdateRef.current = onUpdate;
-  }, [onUpdate]);
-
   const shouldPoll =
     submissionId !== null &&
     !!status &&
     !discarded &&
     !isTerminalSubmission({ status });
+  const id = submissionId ?? 0;
 
-  React.useEffect(() => {
-    if (!shouldPoll || submissionId === null) {
-      return;
-    }
-
-    const id = submissionId;
-    let cancelled = false;
-    let attempt = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-
-    function schedule(delay: number | null) {
-      if (delay === null || cancelled) {
-        return;
-      }
-      timer = setTimeout(poll, delay);
-    }
-
-    async function poll() {
-      try {
-        const submission = await apiV1StaffPhotosRetrieve(id);
-        if (cancelled) {
-          return;
+  useApiV1StaffPhotosRetrieve(id, {
+    query: {
+      queryKey: photoSubmissionQueryKey(store, id, attempt),
+      enabled: shouldPoll,
+      retry: false,
+      refetchOnWindowFocus: false,
+      // The update is handed over where the response arrives, not in an effect (#166).
+      queryFn: async ({ signal }) => {
+        const submission = await apiV1StaffPhotosRetrieve(id, undefined, signal);
+        onUpdate(submission);
+        return submission;
+      },
+      refetchInterval: (query) => {
+        const { data, dataUpdateCount, errorUpdateCount } = query.state;
+        if (data && isTerminalSubmission(data)) {
+          return false;
         }
-
-        onUpdateRef.current(submission);
-        if (isTerminalSubmission(submission)) {
-          return;
-        }
-
-        const delay = nextPollDelay(
-          submission.status,
-          attempt,
-          Boolean(submission.discarded_at),
+        // A failed request keeps polling with the same backoff, as if still processing.
+        const fetches = dataUpdateCount + errorUpdateCount;
+        return (
+          nextPollDelay(
+            data?.status ?? "processing",
+            fetches - 1,
+            Boolean(data?.discarded_at),
+          ) ?? false
         );
-        attempt += 1;
-        schedule(delay);
-      } catch {
-        if (cancelled) {
-          return;
-        }
-
-        const delay = nextPollDelay("processing", attempt);
-        attempt += 1;
-        schedule(delay);
-      }
-    }
-
-    void poll();
-
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) {
-        clearTimeout(timer);
-      }
-    };
-  }, [shouldPoll, submissionId]);
+      },
+    },
+  });
 }
