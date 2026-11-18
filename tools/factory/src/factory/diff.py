@@ -41,6 +41,9 @@ PROTECTED_NAMES = frozenset(
         ".ruff.toml",
     }
 )
+# Lint configuration, protected wherever it lives: lint rules are where an agent's
+# recurring mistake becomes a guard, so only the owner may change them (#160).
+PROTECTED_NAME_PATTERNS = ("eslint.config.*", ".eslintrc*")
 # Dependency manifests and lockfiles: protected unless the ticket is labeled
 # ``deps-change``, so a new dependency is always a decision the owner made.
 DEPENDENCY_NAMES = frozenset({"package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"})
@@ -62,8 +65,6 @@ CHECK_CONFIG_NAME_PATTERNS = (
     "vitest.config.*",
     "vitest.workspace.*",
     "playwright*.config.*",
-    "eslint.config.*",
-    ".eslintrc*",
     "tsconfig*.json",
 )
 
@@ -173,6 +174,8 @@ def is_protected_path(path: str, *, allow_dependencies: bool = False) -> bool:
         return True
     name = PurePosixPath(normalized).name
     if name in PROTECTED_NAMES:
+        return True
+    if any(fnmatchcase(name, pattern) for pattern in PROTECTED_NAME_PATTERNS):
         return True
     if name in DEPENDENCY_NAMES and not allow_dependencies:
         return True

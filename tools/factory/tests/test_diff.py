@@ -141,7 +141,12 @@ def test_opencode_edit_denies_match_the_protected_lists():
     import json
     from pathlib import Path
 
-    from factory.diff import PROTECTED_FILES, PROTECTED_NAMES, PROTECTED_PREFIXES
+    from factory.diff import (
+        PROTECTED_FILES,
+        PROTECTED_NAME_PATTERNS,
+        PROTECTED_NAMES,
+        PROTECTED_PREFIXES,
+    )
 
     config = json.loads((Path(__file__).resolve().parents[1] / "opencode.factory.json").read_text())
     edit = config["permission"]["edit"]
@@ -149,6 +154,7 @@ def test_opencode_edit_denies_match_the_protected_lists():
         set(PROTECTED_FILES)
         | {f"{prefix}*" for prefix in PROTECTED_PREFIXES}
         | {f"*{name}" for name in PROTECTED_NAMES}
+        | {f"*{pattern}" for pattern in PROTECTED_NAME_PATTERNS}
         | {"*opencode*.json", "*opencode*.jsonc"}
     )
     # Denies the guard does not mirror on purpose: env files and ADRs.
@@ -226,8 +232,6 @@ CONSOLE_CHECK_CONFIG = (
     "web/console/vitest.workspace.ts",
     "web/console/playwright.config.ts",
     "web/console/playwright.level2.config.ts",
-    "web/console/eslint.config.mjs",
-    "web/console/.eslintrc.json",
     "web/console/tsconfig.json",
     "web/console/tsconfig.build.json",
     "packages/api-client/tsconfig.json",
@@ -252,3 +256,9 @@ def test_ordinary_files_are_not_check_configuration():
         "backend/apps/orders/config.py",
     ):
         assert not is_check_config_path(path), path
+
+
+def test_lint_configuration_is_protected_so_a_ticket_cannot_loosen_the_rules():
+    for path in ("web/console/eslint.config.mjs", "web/console/.eslintrc.json"):
+        assert is_protected_path(path), path
+        assert is_protected_path(path, allow_dependencies=True), path

@@ -613,7 +613,7 @@ unreachable" as before.
   skipped and the agent steps used, under **Review** the pre-PR review's
   outcome and non-blocking findings, under **Risk** changed migrations, console
   check configuration (`CHECK_CONFIG_NAME_PATTERNS` in `diff.py`: `vitest.config.*`,
-  `playwright*.config.*`, `eslint.config.*`, `tsconfig*.json` and similar, which
+  `playwright*.config.*`, `tsconfig*.json` and similar, which
   decide what the checks see, so read them in full) and sensitive paths
   (`SENSITIVE_PREFIXES` in `diff.py`), and under **How to revert** what undoing
   the merge takes.
@@ -654,7 +654,9 @@ unreachable" as before.
   `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`, any `opencode*.json[c]`,
   any `conftest.py`, or any backend check configuration that outranks
   `pyproject.toml` (`pytest.toml`, `.pytest.toml`, `pytest.ini`, `.pytest.ini`,
-  `setup.cfg`, `tox.ini`, `ruff.toml`, `.ruff.toml`; no label unlocks these), the ticket goes to `_stuck` with
+  `setup.cfg`, `tox.ini`, `ruff.toml`, `.ruff.toml`; no label unlocks these),
+  or any lint configuration (`eslint.config.*`, `.eslintrc*`: lint rules are
+  where an agent's recurring mistake becomes a guard), the ticket goes to `_stuck` with
   `protected path changed`; nothing is pushed and no PR is opened. Dependency manifests and
   lockfiles (`package.json`, `pnpm-lock.yaml`, `pyproject.toml`, `uv.lock`) are
   protected the same way unless the ticket is labeled `deps-change`. Even then a

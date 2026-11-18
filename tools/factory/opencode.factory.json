@@ -24,6 +24,8 @@
       "web/console/scripts/*": "deny",
       ".opencode/*": "deny",
       "*conftest.py": "deny",
+      "*eslint.config.*": "deny",
+      "*.eslintrc*": "deny",
       "*pytest.toml": "deny",
       "*.pytest.toml": "deny",
       "*pytest.ini": "deny",
