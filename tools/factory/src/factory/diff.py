@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import tomllib
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 
@@ -9,6 +11,7 @@ PROTECTED_PREFIXES = (
     ".github/",
     "tools/factory/",
     "backend/scripts/",
+    "web/console/scripts/",
     ".opencode/",
 )
 PROTECTED_FILES = frozenset(
@@ -19,6 +22,11 @@ PROTECTED_FILES = frozenset(
         ".pre-commit-config.yaml",
     }
 )
+# Protected wherever they live: test fixtures run with every check.
+PROTECTED_NAMES = frozenset({"conftest.py"})
+# Dependency manifests and lockfiles: protected unless the ticket is labeled
+# ``deps-change``, so a new dependency is always a decision the owner made.
+DEPENDENCY_NAMES = frozenset({"package.json", "pnpm-lock.yaml", "pyproject.toml", "uv.lock"})
 
 # Paths whose changes the PR body flags under Risk so the owner reads them in full:
 # authentication, store permissions and credentials, the shared ports (Authorizer,
@@ -62,14 +70,84 @@ def is_test_path(path: str) -> bool:
     return "tests/" in path and path.endswith(".py")
 
 
-def is_protected_path(path: str) -> bool:
-    """Paths the agent must never change on an unattended run."""
+def is_dependency_path(path: str) -> bool:
+    """A dependency manifest or lockfile, anywhere in the repo."""
+    return PurePosixPath(path.replace("\\", "/")).name in DEPENDENCY_NAMES
+
+
+LOCKFILE_NAMES = frozenset({"pnpm-lock.yaml", "uv.lock"})
+# Sections a deps-change ticket may change; anything else in the manifest (package
+# "scripts", [tool.pytest], [tool.ruff]) changes what the checks run.
+PACKAGE_JSON_DEPENDENCY_KEYS = frozenset(
+    {"dependencies", "devDependencies", "optionalDependencies", "peerDependencies", "pnpm"}
+)
+
+
+def _without_pyproject_dependencies(data: dict) -> dict:
+    data = dict(data)
+    data.pop("dependency-groups", None)
+    project = dict(data.get("project", {}))
+    project.pop("dependencies", None)
+    project.pop("optional-dependencies", None)
+    if project or "project" in data:
+        data["project"] = project
+    tool = dict(data.get("tool", {}))
+    uv = dict(tool.get("uv", {}))
+    uv.pop("sources", None)
+    uv.pop("dev-dependencies", None)
+    if "uv" in tool:
+        tool["uv"] = uv
+    if tool or "tool" in data:
+        data["tool"] = tool
+    return data
+
+
+def non_dependency_change(path: str, old: str | None, new: str | None) -> str | None:
+    """Why a dependency file changed beyond its dependency sections, or None.
+
+    Lockfiles only list resolved dependencies. A manifest may change only its
+    dependency sections; a new, deleted or unreadable manifest is never dependency-only.
+    """
+    name = PurePosixPath(path.replace("\\", "/")).name
+    if name in LOCKFILE_NAMES:
+        return None
+    if old is None or new is None:
+        return f"{path} was added or deleted"
+    try:
+        if name == "package.json":
+            before, after = json.loads(old), json.loads(new)
+            keys = sorted(
+                key
+                for key in set(before) | set(after)
+                if key not in PACKAGE_JSON_DEPENDENCY_KEYS and before.get(key) != after.get(key)
+            )
+        else:
+            before = _without_pyproject_dependencies(tomllib.loads(old))
+            after = _without_pyproject_dependencies(tomllib.loads(new))
+            keys = sorted(
+                key for key in set(before) | set(after) if before.get(key) != after.get(key)
+            )
+    except (ValueError, tomllib.TOMLDecodeError) as exc:
+        return f"{path} could not be parsed ({type(exc).__name__})"
+    return f"{path} changed {', '.join(keys)}" if keys else None
+
+
+def is_protected_path(path: str, *, allow_dependencies: bool = False) -> bool:
+    """Paths the agent must never change on an unattended run.
+
+    ``allow_dependencies`` (a ``deps-change`` ticket) unlocks only dependency
+    files outside the protected prefixes; the factory's own lockfiles stay locked.
+    """
     normalized = path.replace("\\", "/")
     if normalized in PROTECTED_FILES:
         return True
     if any(normalized.startswith(prefix) for prefix in PROTECTED_PREFIXES):
         return True
     name = PurePosixPath(normalized).name
+    if name in PROTECTED_NAMES:
+        return True
+    if name in DEPENDENCY_NAMES and not allow_dependencies:
+        return True
     return name.startswith("opencode") and name.endswith((".json", ".jsonc"))
 
 
@@ -79,8 +157,8 @@ def is_sensitive_path(path: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in SENSITIVE_PREFIXES)
 
 
-def touches_protected_paths(paths) -> bool:
-    return any(is_protected_path(path) for path in paths)
+def touches_protected_paths(paths, *, allow_dependencies: bool = False) -> bool:
+    return any(is_protected_path(path, allow_dependencies=allow_dependencies) for path in paths)
 
 
 def build_diff_stats(numstat: str, new_files: list[str]) -> DiffStats:

@@ -8,7 +8,7 @@ the merge.
 from __future__ import annotations
 
 from .areas import Area
-from .diff import DiffStats, is_sensitive_path
+from .diff import DiffStats, is_dependency_path, is_sensitive_path
 
 
 def build_pr_body(
@@ -65,6 +65,10 @@ def _risk(diff: DiffStats) -> list[str]:
     lines: list[str] = []
     if diff.migrations_changed:
         lines.append("- Migrations changed: review them before merging.")
+    dependencies = [f.path for f in diff.files if is_dependency_path(f.path)]
+    if dependencies:
+        lines.append("- Dependencies changed (deps-change ticket):")
+        lines += [f"  - `{path}`" for path in dependencies]
     sensitive = [f.path for f in diff.files if is_sensitive_path(f.path)]
     if sensitive:
         lines.append("- Sensitive paths (read in full):")

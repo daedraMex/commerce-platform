@@ -15,7 +15,7 @@ from .cleanup import cleanup_old
 from .config import Settings
 from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
-from .diff import touches_protected_paths
+from .diff import DiffStats, is_dependency_path, non_dependency_change, touches_protected_paths
 from .git import Git, verify_git_version
 from .github import GitHub, GitHubError
 from .isolation import verify_isolation
@@ -55,6 +55,7 @@ from .runner import OPENCODE_CONFIG_PATH, AgentRunner
 from .sudoers import verify_sudoers_logging
 from .tickets import (
     Ticket,
+    assert_push_target,
     branch_from_worktree_dir_name,
     branch_name,
     select_tickets,
@@ -64,6 +65,9 @@ from .tickets import (
 DECISIONS_FILE = "DECISIONS.md"
 IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
 NEEDS_DECISION_LABEL = "needs-decision"
+# A ticket the owner allowed to change dependency manifests and lockfiles; the PR
+# gets the same label so the owner sees it in the list.
+DEPS_CHANGE_LABEL = "deps-change"
 MIGRATION_LABEL = "migration"
 LOG_TAIL_LINES = 30
 FACTORY_BOT_LOGIN = "xolo-bot"
@@ -274,6 +278,7 @@ class Factory:
             strong_model=self.settings.factory_strong_model,
         )
         branch = branch_name(ticket)
+        assert_push_target(branch, ticket)  # before any model spend
         worktree = worktree_path(self.settings.worktrees_dir, branch)
         # A remote branch left by a run whose PR was never opened would make the push
         # non-fast-forward forever. Stop here; deleting it stays a manual step.
@@ -569,7 +574,9 @@ class Factory:
                 failing_check="no changes made for the review",
                 attempts=attempts,
             )
-        if touches_protected_paths(f.path for f in diff.files):
+        if touches_protected_paths(
+            (f.path for f in diff.files), allow_dependencies=_allows_dependencies(ticket)
+        ):
             return self._stuck(
                 ticket,
                 model=model,
@@ -580,8 +587,23 @@ class Factory:
                 failing_check="protected path changed",
                 attempts=attempts,
             )
+        violation = self._dependency_scope_violation(ticket, worktree, diff, base_sha)
+        if violation is not None:
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check=violation,
+                attempts=attempts,
+            )
+        assert_push_target(fix.branch, ticket)
         token = self.token_provider.mint(self.settings.repo)
         self.git.push(worktree, fix.branch, token)
+        if any(is_dependency_path(f.path) for f in diff.files):
+            self.github.add_pr_label(fix.pr_number, DEPS_CHANGE_LABEL, token)
         sha = self.git.head_sha(worktree)
         self.github.comment(
             fix.pr_number,
@@ -630,7 +652,9 @@ class Factory:
                 failing_check="no changes made for the ticket",
                 attempts=attempts,
             )
-        if touches_protected_paths(f.path for f in diff.files):
+        if touches_protected_paths(
+            (f.path for f in diff.files), allow_dependencies=_allows_dependencies(ticket)
+        ):
             return self._stuck(
                 ticket,
                 model=model,
@@ -642,6 +666,19 @@ class Factory:
                 attempts=attempts,
             )
         token = self.token_provider.mint(self.settings.repo)
+        violation = self._dependency_scope_violation(ticket, worktree, diff, "origin/main")
+        if violation is not None:
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check=violation,
+                attempts=attempts,
+            )
+        assert_push_target(branch, ticket)
         self.git.push(worktree, branch, token)
         summary = extract_summary(decisions) or ticket.title
         body = build_pr_body(
@@ -677,6 +714,8 @@ class Factory:
             )
         if diff.migrations_changed:
             self.github.add_pr_label(pr_number, MIGRATION_LABEL, token)
+        if any(is_dependency_path(f.path) for f in diff.files):
+            self.github.add_pr_label(pr_number, DEPS_CHANGE_LABEL, token)
         self._mark_pr_ready(pr_number, token)
         self._enable_auto_merge(pr_number, token)
         info = PrReadyInfo(
@@ -805,6 +844,28 @@ class Factory:
             log.write(header + content)
         return log_path
 
+    def _dependency_scope_violation(
+        self, ticket: Ticket, worktree: Path, diff: DiffStats, base: str
+    ) -> str | None:
+        """On a deps-change ticket, the reason a manifest changed beyond dependencies."""
+        if not _allows_dependencies(ticket):
+            return None
+        for change in diff.files:
+            if not is_dependency_path(change.path):
+                continue
+            try:
+                old = self.git.read_ref_file(worktree, base, change.path)
+            except RuntimeError:
+                old = None
+            try:
+                new = self.git.read_file(worktree, change.path)
+            except (OSError, RuntimeError):
+                new = None  # deleted by the change
+            reason = non_dependency_change(change.path, old, new)
+            if reason is not None:
+                return f"dependency file changed beyond dependencies: {reason}"
+        return None
+
     def _builder_config(self) -> str:
         """Main's builder permissions, passed inline so the repo's opencode.json cannot
         override them (an OPENCODE_CONFIG file ranks below project config, #153)."""
@@ -853,7 +914,10 @@ class Factory:
         try:
             # The publish guard runs again later; running it here keeps the reviewer
             # off any change to protected paths, OpenCode configs included.
-            if touches_protected_paths(self.git.review_changed_files(worktree)):
+            if touches_protected_paths(
+                self.git.review_changed_files(worktree),
+                allow_dependencies=_allows_dependencies(ticket),
+            ):
                 return PrePrReview.protected()
             rules = self.git.read_ref_file(self.settings.repo_dir, "origin/main", REVIEW_RULES)
             # Main's reviewer permissions, passed inline: they outrank the repo's own
@@ -1025,6 +1089,10 @@ def main(argv: list[str] | None = None) -> int:
         outcome = "ok" if result.ok else "stuck"
         print(f"#{result.ticket.number}: {outcome}")
     return 0
+
+
+def _allows_dependencies(ticket: Ticket) -> bool:
+    return DEPS_CHANGE_LABEL in ticket.labels
 
 
 if __name__ == "__main__":
