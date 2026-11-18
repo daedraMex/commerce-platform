@@ -20,7 +20,7 @@ from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
 from .notify import Notifier, RunFailedInfo
 from .sudoers import verify_sudoers_logging
-from .tickets import Ticket, worktree_path
+from .tickets import REQUIRED_LABELS, Ticket, worktree_path
 
 MAX_ERROR_CHARS = 300
 
@@ -84,6 +84,9 @@ class Preflight:
                 token = self.token_provider.mint(self.settings.repo)
             tickets = self.github.list_tickets(token)
 
+            step = "verify labels"
+            self._verify_labels(token)
+
             step = "verify isolation"
             self._verify_isolation(
                 agent_user=self.settings.agent_user,
@@ -145,6 +148,15 @@ class Preflight:
             raise PreflightError(step, detail) from exc
         finally:
             self._cleanup(worktree, branch)
+
+    def _verify_labels(self, token: str) -> None:
+        """Fail before any model spend when a label the factory writes is missing."""
+        missing = sorted(REQUIRED_LABELS - self.github.list_label_names(token))
+        if missing:
+            commands = "; ".join(
+                f"gh label create {name} --repo {self.settings.repo}" for name in missing
+            )
+            raise RuntimeError(f"missing labels; run: {commands}")
 
     def _write_check_log(self, log_path, output: str) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)

@@ -11,8 +11,19 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .models import STRONG_MODEL_LABEL
+
 READY_LABEL = "ready-for-agent"
 NEEDS_DECISION_LABEL = "needs-decision"
+# A ticket the owner allowed to change dependency manifests and lockfiles; the PR
+# gets the same label so the owner sees it in the list.
+DEPS_CHANGE_LABEL = "deps-change"
+MIGRATION_LABEL = "migration"
+# Every label the factory reads or writes. The preflight checks they exist, because
+# gh cannot add a label the repo does not have (#160).
+REQUIRED_LABELS = frozenset(
+    {READY_LABEL, NEEDS_DECISION_LABEL, STRONG_MODEL_LABEL, DEPS_CHANGE_LABEL, MIGRATION_LABEL}
+)
 
 _BLOCKED_BY_RE = re.compile(r"^\s*Blocked by:\s*(.+?)\s*$", re.IGNORECASE)
 

@@ -611,8 +611,10 @@ unreachable" as before.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** each area check script that passed or was
   skipped and the agent steps used, under **Review** the pre-PR review's
-  outcome and non-blocking findings, under **Risk** changed migrations and
-  sensitive paths
+  outcome and non-blocking findings, under **Risk** changed migrations, console
+  check configuration (`CHECK_CONFIG_NAME_PATTERNS` in `diff.py`: `vitest.config.*`,
+  `playwright*.config.*`, `eslint.config.*`, `tsconfig*.json` and similar, which
+  decide what the checks see, so read them in full) and sensitive paths
   (`SENSITIVE_PREFIXES` in `diff.py`), and under **How to revert** what undoing
   the merge takes.
 - **Areas.** Each ticket's changed files select its check areas: `backend/**`
@@ -649,9 +651,11 @@ unreachable" as before.
 - **Protected paths.** Before the pre-PR review and again before pushing, the
   factory inspects the diff. If it touches `.github/`, `tools/factory/`,
   `backend/scripts/`, `web/console/scripts/`, `.opencode/`, `AGENTS.md`,
-  `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`, any `opencode*.json[c]`
-  or any `conftest.py`, the ticket goes to `_stuck` with `protected path
-  changed`; nothing is pushed and no PR is opened. Dependency manifests and
+  `CLAUDE.md`, `REVIEW.md`, `.pre-commit-config.yaml`, any `opencode*.json[c]`,
+  any `conftest.py`, or any backend check configuration that outranks
+  `pyproject.toml` (`pytest.ini`, `setup.cfg`, `tox.ini`, `ruff.toml`,
+  `.ruff.toml`; no label unlocks these), the ticket goes to `_stuck` with
+  `protected path changed`; nothing is pushed and no PR is opened. Dependency manifests and
   lockfiles (`package.json`, `pnpm-lock.yaml`, `pyproject.toml`, `uv.lock`) are
   protected the same way unless the ticket is labeled `deps-change`. Even then a
   manifest may change only its dependency sections (`dependencies`,
@@ -755,6 +759,13 @@ lines) and the `needs-decision` label. To unblock it:
 3. Remove `needs-decision`. The next run picks it up again if it is still
    `ready-for-agent`.
 
+If the label cannot be added (the label is missing, or GitHub fails), the
+Telegram message says so and the factory holds the ticket in
+`label-holds.log` in its state directory. Every run retries the label before
+picking tickets and drops the hold once it lands; a held ticket is never run.
+Labeling a pull request (`migration`, `deps-change`) raises the same way: the
+run fails loudly and the PR stays a draft without auto-merge.
+
 ## Preflight
 
 Run the preflight first after any machine or factory change, and before the
@@ -766,7 +777,9 @@ uv run factory preflight
 ```
 
 It uses the real tools and the real code paths, not fakes: it fetches
-`origin/main`, lists tickets through the `gh` code path, creates a throwaway
+`origin/main`, lists tickets through the `gh` code path, fails if a label the
+factory reads or writes is missing (`REQUIRED_LABELS` in `tickets.py`; the
+message gives the `gh label create` command for each), creates a throwaway
 `preflight-<timestamp>` worktree from the fresh `origin/main`, runs every
 present area's `check.sh` in it as `factory-agent` with the real check
 environment, verifies isolation,

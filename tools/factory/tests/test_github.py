@@ -636,3 +636,49 @@ def test_has_open_pr_for_branch_raises_when_gh_fails():
 
     with pytest.raises(GitHubError, match="gh pr list failed: HTTP 502"):
         GitHub("daedraMex/commerce-platform", run=run).has_open_pr_for_branch("nf/7-x", "TOKEN")
+
+
+class ScriptedGh:
+    """Answer every gh call with one fixed result."""
+
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def __call__(self, argv, cwd, *, timeout, env=None, replace_env=False):
+        self.calls.append(argv)
+        return self.result
+
+
+@pytest.mark.parametrize("method", ["add_issue_label", "add_pr_label"])
+def test_a_failed_label_write_raises(method):
+    gh = ScriptedGh(CommandResult(1, "", "could not add label: 'needs-decision' not found"))
+
+    with pytest.raises(GitHubError, match="needs-decision"):
+        getattr(GitHub(REPO, run=gh), method)(95, "needs-decision", "tok")
+
+
+@pytest.mark.parametrize("method", ["add_issue_label", "add_pr_label"])
+def test_a_label_write_that_succeeds_returns_quietly(method):
+    gh = ScriptedGh(CommandResult(0, "https://github.com/r/issues/95\n", ""))
+
+    getattr(GitHub(REPO, run=gh), method)(95, "needs-decision", "tok")
+
+    assert gh.calls[0][-2:] == ["--add-label", "needs-decision"]
+
+
+def test_list_label_names_reads_every_name():
+    gh = ScriptedGh(CommandResult(0, '[{"name":"needs-decision"},{"name":"migration"}]', ""))
+
+    names = GitHub(REPO, run=gh).list_label_names("tok")
+
+    assert names == frozenset({"needs-decision", "migration"})
+    assert gh.calls[0][:3] == ["gh", "label", "list"]
+    assert "--limit" in gh.calls[0]
+
+
+def test_list_label_names_raises_when_gh_fails():
+    gh = ScriptedGh(CommandResult(1, "", "HTTP 401"))
+
+    with pytest.raises(GitHubError, match="HTTP 401"):
+        GitHub(REPO, run=gh).list_label_names("tok")

@@ -422,19 +422,45 @@ class GitHub:
         return values
 
     def add_issue_label(self, number: int, label: str, token: str) -> None:
-        self._run(
-            ["gh", "issue", "edit", str(number), "--repo", self.repo, "--add-label", label],
+        self._add_label("issue", number, label, token)
+
+    def add_pr_label(self, number: int, label: str, token: str) -> None:
+        self._add_label("pr", number, label, token)
+
+    def _add_label(self, kind: str, number: int, label: str, token: str) -> None:
+        """Add a label, or raise: a missing label must never pass silently (#160)."""
+        result = self._run(
+            ["gh", kind, "edit", str(number), "--repo", self.repo, "--add-label", label],
             cwd="/",
             timeout=120,
             env={"GH_TOKEN": token},
         )
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or result.stdout.strip() or f"exit {result.exit_code}"
+            raise GitHubError(f"could not add label {label} to {kind} #{number}: {reason}")
 
-    def add_pr_label(self, number: int, label: str, token: str) -> None:
-        self._run(
-            ["gh", "pr", "edit", str(number), "--repo", self.repo, "--add-label", label],
+    def list_label_names(self, token: str | None = None) -> frozenset[str]:
+        result = self._run(
+            [
+                "gh",
+                "label",
+                "list",
+                "--repo",
+                self.repo,
+                "--limit",
+                "1000",
+                "--json",
+                "name",
+            ],
             cwd="/",
             timeout=120,
-            env={"GH_TOKEN": token},
+            env=_gh_env(token),
+        )
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or f"exit {result.exit_code}"
+            raise GitHubError(f"gh label list failed: {reason}")
+        return frozenset(
+            str(obj.get("name", "")) for obj in self._json_list(result.stdout, "gh label list")
         )
 
     def comment(self, number: int, body: str, token: str) -> str:

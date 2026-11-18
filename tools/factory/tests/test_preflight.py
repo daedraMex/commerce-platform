@@ -5,8 +5,9 @@ import pytest
 from factory.areas import AREAS
 from factory.config import Settings
 from factory.git import CheckResult
+from factory.github import GitHubError
 from factory.preflight import MAX_ERROR_CHARS, Preflight, PreflightError
-from factory.tickets import Ticket
+from factory.tickets import REQUIRED_LABELS, Ticket
 
 
 class FakeGit:
@@ -69,9 +70,16 @@ class FakeGit:
 
 
 class FakeGitHub:
-    def __init__(self, tickets=None):
+    def __init__(self, tickets=None, labels=None, label_error=None):
         self.tickets = tickets or []
         self.listed_with = None
+        self.labels = REQUIRED_LABELS if labels is None else frozenset(labels)
+        self.label_error = label_error
+
+    def list_label_names(self, token=None):
+        if self.label_error is not None:
+            raise self.label_error
+        return self.labels
 
     def list_tickets(self, token=None):
         self.listed_with = token
@@ -367,3 +375,37 @@ def test_preflight_fails_when_opencode_cannot_start_as_the_agent(tmp_path):
 
     with pytest.raises(PreflightError, match="verify agent sandbox"):
         preflight.run()
+
+
+def test_preflight_stops_with_the_create_commands_when_a_label_is_missing(tmp_path):
+    events = []
+    notifier = RecordingNotifier()
+    github = FakeGitHub(labels=REQUIRED_LABELS - {"needs-decision", "deps-change"})
+
+    with pytest.raises(PreflightError) as caught:
+        build_preflight(tmp_path, github=github, notifier=notifier, events=events).run()
+
+    assert caught.value.step == "verify labels"
+    assert "create_worktree" not in [event[0] for event in events]
+    reason = notifier.run_failed[0].reason
+    assert "gh label create deps-change --repo daedraMex/commerce-platform" in reason
+    assert "gh label create needs-decision --repo daedraMex/commerce-platform" in reason
+
+
+def test_preflight_stops_when_the_labels_cannot_be_listed(tmp_path):
+    github = FakeGitHub(label_error=GitHubError("gh label list failed: HTTP 401"))
+
+    with pytest.raises(PreflightError) as caught:
+        build_preflight(tmp_path, github=github).run()
+
+    assert caught.value.step == "verify labels"
+
+
+def test_required_labels_cover_every_label_the_factory_reads_or_writes():
+    assert REQUIRED_LABELS == {
+        "ready-for-agent",
+        "needs-decision",
+        "strong-model",
+        "migration",
+        "deps-change",
+    }
