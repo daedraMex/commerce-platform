@@ -12,6 +12,8 @@ PROTECTED_PREFIXES = (
     ".github/",
     "tools/factory/",
     "backend/scripts/",
+    # Architecture tests are guards written from agent mistakes (#165).
+    "backend/tests/architecture/",
     "web/console/scripts/",
     ".opencode/",
 )
@@ -27,10 +29,11 @@ PROTECTED_FILES = frozenset(
 # configuration that outranks pyproject.toml (pytest 9 reads pytest.toml, .pytest.toml,
 # pytest.ini, .pytest.ini, tox.ini and setup.cfg before [tool.pytest]; a ruff.toml
 # overrides [tool.ruff] for its directory). No ticket needs them, so no label unlocks
-# them (#160).
+# them (#160). .importlinter holds import contracts, which are guards (#165).
 PROTECTED_NAMES = frozenset(
     {
         "conftest.py",
+        ".importlinter",
         "pytest.toml",
         ".pytest.toml",
         "pytest.ini",

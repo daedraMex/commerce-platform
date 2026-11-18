@@ -262,3 +262,13 @@ def test_lint_configuration_is_protected_so_a_ticket_cannot_loosen_the_rules():
     for path in ("web/console/eslint.config.mjs", "web/console/.eslintrc.json"):
         assert is_protected_path(path), path
         assert is_protected_path(path, allow_dependencies=True), path
+
+
+def test_architecture_tests_are_protected_so_a_ticket_cannot_loosen_them():
+    # Guards written from agent mistakes (#165) live here; ordinary tests stay editable.
+    guard = "backend/tests/architecture/test_stores_dependencies.py"
+    assert is_protected_path(guard)
+    assert is_protected_path(guard, allow_dependencies=True)
+    # import-linter's default config file holds import contracts too.
+    assert is_protected_path("backend/.importlinter")
+    assert not is_protected_path("backend/tests/unit/test_orders.py")

@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-PHOTOS_DIR = Path(__file__).resolve().parents[3] / "apps" / "photos"
+PHOTOS_DIR = Path(__file__).resolve().parents[2] / "apps" / "photos"
 PURE_LAYERS = ("domain", "application")
 FORBIDDEN_ROOTS = ("django", "rest_framework", "celery")
 
