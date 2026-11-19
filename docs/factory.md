@@ -668,7 +668,13 @@ unreachable" as before.
 - **Evidence check.** **Verification** sits between
   `<!-- factory:verification sha=<sha> -->` markers. The `Evidence` job in
   `.github/workflows/pr-ticket.yml` fails an `nf/*` PR whose body does not name
-  its current head, so a push after the checks cannot merge on old evidence. A
+  its current head, so a push after the checks cannot merge on old evidence.
+  GitHub's "Update branch" merges are the exception: the job walks back through
+  merges committed and signed by GitHub (`web-flow`) whose second parent is on
+  `main`, and passes when it reaches the checked commit, since the required
+  checks already run on that combination (ADR-0032). A merge made through
+  GitHub's "Resolve conflicts" editor looks the same, so resolve conflicts on a
+  factory branch only after reading the resolution. A
   review fix rewrites the section with its new commit before it pushes; if the
   body cannot be read or edited, nothing is pushed and the ticket goes stuck. When
   the owner pushes to a factory branch by hand, the `evidence-manual` label lets
