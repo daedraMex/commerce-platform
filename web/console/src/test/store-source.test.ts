@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  bindStoreToSignal,
   clearCurrentStore,
   getCurrentStore,
+  getStoreFromSignal,
   setCurrentStore,
 } from "@/lib/api/store-source";
 
@@ -23,9 +25,26 @@ describe("store source", () => {
     expect(getCurrentStore()).toBe("home");
   });
 
-  it("clears the store when the route leaves the store scope", () => {
+  it("only clears the store it owns", () => {
     setCurrentStore("anime");
-    clearCurrentStore();
+
+    clearCurrentStore("home");
+    expect(getCurrentStore()).toBe("anime");
+
+    clearCurrentStore("anime");
     expect(getCurrentStore()).toBeUndefined();
+  });
+
+  it("binds a store to the signal of the query it owns", () => {
+    const controller = new AbortController();
+
+    bindStoreToSignal(controller.signal, "anime");
+
+    expect(getStoreFromSignal(controller.signal)).toBe("anime");
+  });
+
+  it("has no store for an unbound or missing signal", () => {
+    expect(getStoreFromSignal(new AbortController().signal)).toBeUndefined();
+    expect(getStoreFromSignal(undefined)).toBeUndefined();
   });
 });

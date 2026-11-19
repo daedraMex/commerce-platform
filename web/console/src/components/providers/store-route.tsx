@@ -2,7 +2,10 @@
 
 import * as React from "react";
 
-import { setCurrentStore } from "@/lib/api/store-source";
+import {
+  clearCurrentStore,
+  setCurrentStore,
+} from "@/lib/api/store-source";
 
 const StoreRouteContext = React.createContext<string | null>(null);
 
@@ -13,10 +16,21 @@ export function StoreRoute({
   store: string;
   children: React.ReactNode;
 }) {
-  setCurrentStore(store);
+  const bindStore = React.useCallback(
+    (node: HTMLSpanElement | null) => {
+      if (!node) {
+        return undefined;
+      }
+
+      setCurrentStore(store);
+      return () => clearCurrentStore(store);
+    },
+    [store],
+  );
 
   return (
     <StoreRouteContext.Provider value={store}>
+      <span hidden ref={bindStore} />
       {children}
     </StoreRouteContext.Provider>
   );
