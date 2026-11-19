@@ -335,7 +335,8 @@ Run these once, as the admin user unless a step says `factory`.
    settings the factory reads from the environment:
     ```bash
     FACTORY_MODEL=deepseek/deepseek-flash        # the cheap default model
-    FACTORY_STRONG_MODEL=deepseek/deepseek-v4-pro # for strong-model tickets
+    FACTORY_STRONG_MODEL=deepseek/deepseek-v4-pro # strong-model tickets and the reviewer;
+                                                 # prefer another model family than FACTORY_MODEL
     FACTORY_TELEGRAM_BOT_TOKEN=123456:ABC...     # from @BotFather
     FACTORY_TELEGRAM_CHAT_ID=123456789           # the one fixed chat id
     XOLO_BOT_APP_ID=123456                       # the xolo-bot App ID
@@ -457,7 +458,12 @@ To upgrade an existing machine to this version:
   on a contract.
 - Add `strong-model` to a ticket that touches security, money, migrations or
   otherwise tricky logic; it runs with `FACTORY_STRONG_MODEL` instead of the
-  default. The builder model is never the reviewer of its own work.
+  default. The builder model is never the reviewer of its own work. Prefer a
+  `FACTORY_STRONG_MODEL` from another model family than `FACTORY_MODEL`: in
+  #191 a DeepSeek reviewer reported a DeepSeek builder's store race only as a
+  Nit, and the owner had to request the change. Switching family means logging
+  OpenCode in as `factory-agent` with that provider's key (step 8), with its own
+  spending cap.
 - Migrations and changes touching money, security or customer data still get a
   human review before merging (unchanged AGENTS.md safety rules).
 - `FACTORY_MAX_TICKETS` (default 1) is how many independent tickets one run
