@@ -776,3 +776,45 @@ def test_an_unreadable_pr_ticket_holds_only_tickets_that_declare_contracts():
 
     assert tickets[170].contract_conflicts == ("contracts of #156 unreadable (PR #175): HTTP 502",)
     assert tickets[99].contract_conflicts == ()
+
+
+def test_pr_body_reads_the_body_from_the_pulls_api():
+    gh = ScriptedGh(CommandResult(0, json.dumps({"number": 101, "body": "Closes #7\n"}), ""))
+
+    assert GitHub(REPO, run=gh).pr_body(101, "tok") == "Closes #7\n"
+    assert gh.calls[0] == ["gh", "api", f"repos/{REPO}/pulls/101"]
+
+
+def test_pr_body_treats_a_null_body_as_empty():
+    gh = ScriptedGh(CommandResult(0, json.dumps({"number": 101, "body": None}), ""))
+
+    assert GitHub(REPO, run=gh).pr_body(101, "tok") == ""
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        CommandResult(1, "", "HTTP 502"),
+        CommandResult(0, "not json", ""),
+        CommandResult(0, json.dumps([{"body": "x"}]), ""),
+        CommandResult(0, json.dumps({"body": 5}), ""),
+    ],
+)
+def test_pr_body_fails_closed_on_an_untrustworthy_answer(result):
+    with pytest.raises(GitHubError):
+        GitHub(REPO, run=ScriptedGh(result)).pr_body(101, "tok")
+
+
+def test_edit_pr_body_patches_the_pull_request():
+    gh = ScriptedGh(CommandResult(0, "{}", ""))
+
+    GitHub(REPO, run=gh).edit_pr_body(101, "new body", "tok")
+
+    argv = gh.calls[0]
+    assert argv[:5] == ["gh", "api", f"repos/{REPO}/pulls/101", "--method", "PATCH"]
+    assert "body=new body" in argv
+
+
+def test_edit_pr_body_raises_when_the_edit_fails():
+    with pytest.raises(GitHubError, match="#101"):
+        GitHub(REPO, run=ScriptedGh(CommandResult(1, "", "HTTP 422"))).edit_pr_body(101, "x", "tok")

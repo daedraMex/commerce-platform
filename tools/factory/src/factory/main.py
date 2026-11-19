@@ -10,13 +10,13 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .areas import Area
+from .areas import BACKEND, Area, select_areas
 from .cleanup import cleanup_old
 from .config import Settings
 from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .diff import DiffStats, is_dependency_path, non_dependency_change, touches_protected_paths
-from .git import Git, verify_git_version
+from .git import CheckResult, Git, verify_git_version
 from .github import GitHub, GitHubError
 from .holds import LabelHolds
 from .isolation import verify_isolation
@@ -37,19 +37,23 @@ from .notify import (
 )
 from .outcomes import build_issue_comment
 from .pause import PauseState
-from .pr_body import build_pr_body
+from .pr_body import build_pr_body, replace_verification, verification_section
 from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, compose_review_prompt, read_command_body
 from .review_attempts import ReviewAttemptLedger
 from .review_step import (
     REVIEW_RULES,
     REVIEWER_CONFIG_PATH,
+    AttackRun,
     Finding,
     PrePrReview,
+    attack_test_paths,
     build_reviewer_feedback,
     compose_reviewer_prompt,
     parse_review,
     stuck_reason,
+    suggested_ticket_body,
+    suggested_ticket_title,
 )
 from .reviews import ReviewFix
 from .runner import OPENCODE_CONFIG_PATH, AgentRunner
@@ -74,6 +78,7 @@ FACTORY_BOT_LOGIN = "xolo-bot"
 FACTORY_BRANCH_PREFIX = "nf/"
 OWNER_LOGIN = "daedraMex"
 MERGE_CONFLICT_CHECK = "branch conflicts with main; a human must merge main"
+EVIDENCE_NOT_UPDATED_CHECK = "PR body evidence not updated; nothing was pushed"
 
 
 def _orphan_branch_check(branch: str) -> str:
@@ -412,7 +417,7 @@ class Factory:
                 if review.blocking:
                     feedback = ""
                     failed_areas = ()
-                    review_feedback = build_reviewer_feedback(review.findings)
+                    review_feedback = build_reviewer_feedback(review.findings, review.attack)
                     previous_findings = review.findings
                     continue
                 return self._success(
@@ -425,7 +430,9 @@ class Factory:
                     attempts=made,
                     checked_areas=check.checked_areas,
                     skipped_areas=check.skipped_areas,
+                    check_output=check.output,
                     review_lines=review.pr_lines(previous_findings),
+                    suggested=review.result.suggested,
                 )
             # The open review findings stay in the next prompt until a review passes.
             feedback = check.output
@@ -444,6 +451,28 @@ class Factory:
             ),
             attempts=made,
         )
+
+    def _open_suggested_tickets(
+        self, ticket: Ticket, pr_number: int, suggested: tuple[Finding, ...], token: str
+    ) -> None:
+        """Write work the reviewer found outside the ticket's scope down as new tickets.
+
+        The ticket is open, so a failed issue is logged and the run stays a success.
+        The new tickets carry no triage label: the owner decides if they are real.
+        """
+        for finding in suggested:
+            try:
+                number = self.github.create_issue(
+                    title=suggested_ticket_title(finding),
+                    body=suggested_ticket_body(
+                        finding, ticket_number=ticket.number, pr_number=pr_number
+                    ),
+                    token=token,
+                )
+            except Exception as exc:
+                print(f"suggested ticket not opened: {short_error(exc)}", file=sys.stderr)
+                continue
+            print(f"#{ticket.number}: opened suggested ticket #{number}", file=sys.stderr)
 
     def _run_review_fix(self, fix: ReviewFix) -> TicketResult:
         ticket = fix.ticket
@@ -554,6 +583,7 @@ class Factory:
                     log_path=log_path,
                     base_sha=base_sha,
                     attempts=made,
+                    check=check,
                 )
             feedback = check.output
             failed_areas = check.failed_areas
@@ -578,6 +608,7 @@ class Factory:
         log_path: Path,
         base_sha: str,
         attempts: int,
+        check: CheckResult,
     ) -> TicketResult:
         ticket = fix.ticket
         # commit_all's result decides nothing: the agent may have committed on its own
@@ -626,8 +657,39 @@ class Factory:
         # label must leave nothing pushed (#160).
         if any(is_dependency_path(f.path) for f in diff.files):
             self.github.add_pr_label(fix.pr_number, DEPS_CHANGE_LABEL, token)
-        self.git.push(worktree, fix.branch, token)
         sha = self.git.head_sha(worktree)
+        # The evidence names the new commit before it is pushed: a push with a stale
+        # body would fail the Evidence check, and a failed edit leaves nothing pushed.
+        try:
+            body = self.github.pr_body(fix.pr_number, token)
+            self.github.edit_pr_body(
+                fix.pr_number,
+                replace_verification(
+                    body,
+                    verification_section(
+                        verified_sha=sha,
+                        checked_areas=check.checked_areas,
+                        skipped_areas=check.skipped_areas,
+                        steps_used=attempts,
+                        step_budget=self.settings.attempts,
+                        check_output=check.output,
+                    ),
+                ),
+                token,
+            )
+        except Exception as exc:
+            print(f"PR #{fix.pr_number} body not updated: {short_error(exc)}", file=sys.stderr)
+            return self._stuck(
+                ticket,
+                model=model,
+                decisions=decisions,
+                log_path=log_path,
+                worktree=worktree,
+                open_question=None,
+                failing_check=EVIDENCE_NOT_UPDATED_CHECK,
+                attempts=attempts,
+            )
+        self.git.push(worktree, fix.branch, token)
         self.github.comment(
             fix.pr_number,
             f"Addressed the review in {sha}; please re-review.",
@@ -658,7 +720,9 @@ class Factory:
         attempts: int,
         checked_areas: tuple[Area, ...] = (),
         skipped_areas: tuple[Area, ...] = (),
+        check_output: str = "",
         review_lines: tuple[str, ...] = (),
+        suggested: tuple[Finding, ...] = (),
     ) -> TicketResult:
         # commit_all's result decides nothing: the agent may have committed on its own
         # (commit_all then has nothing left). The diff against origin/main decides.
@@ -702,6 +766,8 @@ class Factory:
                 attempts=attempts,
             )
         assert_push_target(branch, ticket)
+        # The checks ran on this tree before commit_all, so this commit is what they verified.
+        verified_sha = self.git.head_sha(worktree)
         self.git.push(worktree, branch, token)
         summary = extract_summary(decisions) or ticket.title
         body = build_pr_body(
@@ -715,6 +781,8 @@ class Factory:
             diff=diff,
             steps_used=attempts,
             step_budget=self.settings.attempts,
+            verified_sha=verified_sha,
+            check_output=check_output,
         )
         try:
             pr_number = self.github.create_draft_pr(
@@ -741,6 +809,7 @@ class Factory:
             self.github.add_pr_label(pr_number, DEPS_CHANGE_LABEL, token)
         self._mark_pr_ready(pr_number, token)
         self._enable_auto_merge(pr_number, token)
+        self._open_suggested_tickets(ticket, pr_number, suggested, token)
         info = PrReadyInfo(
             ticket_number=ticket.number,
             ticket_title=ticket.title,
@@ -947,10 +1016,8 @@ class Factory:
         try:
             # The publish guard runs again later; running it here keeps the reviewer
             # off any change to protected paths, OpenCode configs included.
-            if touches_protected_paths(
-                self.git.review_changed_files(worktree),
-                allow_dependencies=_allows_dependencies(ticket),
-            ):
+            changed = tuple(self.git.review_changed_files(worktree))
+            if touches_protected_paths(changed, allow_dependencies=_allows_dependencies(ticket)):
                 return PrePrReview.protected()
             rules = self.git.read_ref_file(self.settings.repo_dir, "origin/main", REVIEW_RULES)
             # Main's reviewer permissions, passed inline: they outrank the repo's own
@@ -975,7 +1042,37 @@ class Factory:
             return PrePrReview.tampered(reviewer)
         if result.timed_out:
             return PrePrReview.failed(reviewer, "the reviewer timed out")
-        return PrePrReview.done(reviewer, parse_review(result.stdout))
+        review = PrePrReview.done(reviewer, parse_review(result.stdout))
+        if (
+            not self.settings.review_tests
+            or review.status != "done"
+            or not review.result.tests
+            or BACKEND not in select_areas(changed)
+        ):
+            return review
+        attack = self._run_attack_tests(ticket, worktree, review.result.tests)
+        if self.git.worktree_fingerprint(worktree) != before:
+            # Fail closed: what gets published must be exactly what the builder made.
+            return PrePrReview.leftover(reviewer)
+        return review.with_attack(attack)
+
+    def _run_attack_tests(
+        self, ticket: Ticket, worktree: Path, tests: tuple[str, ...]
+    ) -> AttackRun:
+        """Place the reviewer's attack tests, run them as the agent, always remove them."""
+        paths = attack_test_paths(ticket.number, len(tests))
+        try:
+            self.git.place_review_tests(worktree, dict(zip(paths, tests, strict=True)))
+            status, output = self.git.run_review_tests(worktree, paths)
+        except Exception as exc:
+            status, output = "error", short_error(exc)
+        finally:
+            try:
+                self.git.remove_review_tests(worktree, paths)
+            except Exception as exc:
+                # The fingerprint check right after this turns a leftover into a stuck run.
+                print(f"attack tests not removed: {short_error(exc)}", file=sys.stderr)
+        return AttackRun(status, output, tests)
 
     def _pr_url(self, pr_number: int) -> str:
         return f"https://github.com/{self.settings.repo}/pull/{pr_number}"

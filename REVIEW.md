@@ -94,6 +94,14 @@ rule whose trigger matches the diff; skip the rest.
   needs fixing, say so plainly.
 - Tag each finding **Important**, **Nit** or **Pre-existing**. Only Important findings
   block. Pre-existing bugs go to a follow-up issue, not to the author.
+- **Important is narrow**: an acceptance criterion of the ticket that is not met, or
+  something the change introduces that crashes, corrupts or loses data, opens a security
+  hole, or leaks one store's data into another (the failures above). If you doubt it is
+  Important, it is not. Otherwise every round finds something new and the ticket never
+  closes.
+- Work outside the ticket's scope (another path, a nicer design, a missing feature) is a
+  **Suggested ticket**, at most three, never a finding. The factory opens each one as an
+  untriaged issue that links the pull request.
 - A comment that justifies a workaround instead of fixing its cause is **Important**, even
   when a disable comment names its rule and a ticket (#166).
 - Every finding names the file and line, and gives the concrete failure case (inputs or

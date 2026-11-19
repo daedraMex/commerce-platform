@@ -7,8 +7,23 @@ the merge.
 
 from __future__ import annotations
 
+import re
+
 from .areas import Area
 from .diff import DiffStats, is_check_config_path, is_dependency_path, is_sensitive_path
+
+# The Verification section names the exact commit its checks ran on. The
+# "Evidence" job in .github/workflows/pr-ticket.yml fails a factory PR whose head
+# is not that commit, so a push after the checks cannot merge on old evidence.
+VERIFICATION_BEGIN = "<!-- factory:verification sha={sha} -->"
+VERIFICATION_END = "<!-- /factory:verification -->"
+_VERIFICATION_RE = re.compile(
+    r"<!-- factory:verification sha=[0-9a-f]{40} -->.*?<!-- /factory:verification -->",
+    re.DOTALL,
+)
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+CHECK_TAIL_LINES = 15
+FENCE = "`" * 3
 
 
 def build_pr_body(
@@ -23,6 +38,8 @@ def build_pr_body(
     review_lines: tuple[str, ...] = (),
     steps_used: int,
     step_budget: int,
+    verified_sha: str,
+    check_output: str = "",
 ) -> str:
     parts: list[str] = [
         f"Closes #{ticket_number}",
@@ -37,15 +54,75 @@ def build_pr_body(
         parts += ["", "## Decisions", "", decisions.strip()]
     parts += [
         "",
-        "## Verification",
-        "",
-        *_verification(checked_areas, skipped_areas, steps_used, step_budget),
+        verification_section(
+            verified_sha=verified_sha,
+            checked_areas=checked_areas,
+            skipped_areas=skipped_areas,
+            steps_used=steps_used,
+            step_budget=step_budget,
+            check_output=check_output,
+        ),
     ]
     if review_lines:
         parts += ["", "## Review", "", *review_lines]
     parts += ["", "## Risk", "", *_risk(diff)]
     parts += ["", "## How to revert", "", *_revert(diff)]
     return "\n".join(parts) + "\n"
+
+
+def verification_section(
+    *,
+    verified_sha: str,
+    checked_areas: tuple[Area, ...],
+    skipped_areas: tuple[Area, ...],
+    steps_used: int,
+    step_budget: int,
+    check_output: str = "",
+) -> str:
+    """The Verification section, wrapped in markers that name the checked commit."""
+    if not _SHA_RE.match(verified_sha):
+        # Fail closed: without a full sha the Evidence check could never pass, so
+        # refuse to build a body that would only fail later with a vaguer message.
+        raise ValueError(f"verified_sha must be a full 40-char sha, got {verified_sha!r}")
+    lines = [
+        VERIFICATION_BEGIN.format(sha=verified_sha),
+        "## Verification",
+        "",
+        f"Checks ran on commit `{verified_sha}`.",
+        "",
+        *_verification(checked_areas, skipped_areas, steps_used, step_budget),
+    ]
+    tail = _tail(check_output)
+    if tail:
+        lines += [
+            "",
+            "<details><summary>Last lines of the check output</summary>",
+            "",
+            FENCE,
+            tail,
+            FENCE,
+            "",
+            "</details>",
+        ]
+    lines.append(VERIFICATION_END)
+    return "\n".join(lines)
+
+
+def replace_verification(body: str, section: str) -> str:
+    """Swap the Verification section of an existing PR body for a new one.
+
+    A body from before the markers existed gets the section appended, so the
+    Evidence check can pass after a review fix without a human editing it.
+    """
+    if _VERIFICATION_RE.search(body):
+        return _VERIFICATION_RE.sub(lambda _: section, body, count=1)
+    return body.rstrip("\n") + "\n\n" + section + "\n"
+
+
+def _tail(output: str) -> str:
+    lines = [line for line in output.strip().splitlines() if line.strip()]
+    # A fence inside the output would close the code block early.
+    return "\n".join(line.replace(FENCE, "'''") for line in lines[-CHECK_TAIL_LINES:])
 
 
 def _verification(

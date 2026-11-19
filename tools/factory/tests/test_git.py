@@ -983,3 +983,53 @@ def test_check_kills_agent_processes_left_behind_by_the_scripts(tmp_path):
         "-u",
         "factory-agent",
     ]
+
+
+def test_review_tests_run_through_check_sh_as_the_agent_without_secrets(tmp_path):
+    run = RecordingRun()
+    script = write_script(tmp_path, BACKEND)
+
+    status, _output = Git(
+        run=run,
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        base_env={"PATH": "/usr/bin", "GH_TOKEN": "secret"},
+    ).run_review_tests(tmp_path, ("tests/review/test_review_7_1.py",))
+
+    argv, cwd, env, replace_env = run.calls[0]
+    assert status == "held"
+    assert argv[:2] == ["sudo", "-n"]
+    assert argv[-3:] == [str(script), "--review-tests", "tests/review/test_review_7_1.py"]
+    assert "PYTHONDONTWRITEBYTECODE" in argv[2]
+    assert env["PYTHONDONTWRITEBYTECODE"] == "1"
+    assert "GH_TOKEN" not in env
+    assert cwd == str(tmp_path / "backend" / "scripts")
+    assert replace_env is True
+
+
+@pytest.mark.parametrize(
+    ("exit_code", "status"), [(0, "held"), (1, "broke"), (2, "error"), (5, "error")]
+)
+def test_review_tests_map_pytest_exit_codes_to_a_verdict(tmp_path, exit_code, status):
+    write_script(tmp_path, BACKEND)
+    run = RecordingRun(CommandResult(exit_code=exit_code, stdout="out", stderr=""))
+
+    assert (
+        Git(run=run).run_review_tests(tmp_path, ("tests/review/test_review_7_1.py",))[0] == status
+    )
+
+
+def test_review_tests_without_a_backend_script_give_no_verdict(tmp_path):
+    assert Git(run=RecordingRun()).run_review_tests(tmp_path, ("x",))[0] == "error"
+
+
+def test_review_tests_are_placed_and_removed_with_their_directory(tmp_path):
+    git = Git(run=RecordingRun())
+    paths = ("tests/review/test_review_7_1.py", "tests/review/test_review_7_2.py")
+
+    git.place_review_tests(tmp_path, {paths[0]: "a\n", paths[1]: "b\n"})
+    assert (tmp_path / "backend" / paths[1]).read_text() == "b\n"
+
+    git.remove_review_tests(tmp_path, paths)
+    assert not (tmp_path / "backend" / "tests" / "review").exists()
+    assert (tmp_path / "backend" / "tests").is_dir()

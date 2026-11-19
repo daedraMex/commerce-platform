@@ -463,6 +463,73 @@ class GitHub:
             str(obj.get("name", "")) for obj in self._json_list(result.stdout, "gh label list")
         )
 
+    def pr_body(self, number: int, token: str) -> str:
+        """Read a pull request's body; any failure raises so the caller fails closed."""
+        result = self._run(
+            ["gh", "api", f"repos/{self.repo}/pulls/{number}"],
+            cwd="/",
+            timeout=120,
+            env={"GH_TOKEN": token},
+        )
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or f"exit {result.exit_code}"
+            raise GitHubError(f"gh api pulls/{number} failed: {reason}")
+        try:
+            obj = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GitHubError(f"gh api pulls/{number} returned invalid JSON") from exc
+        if not isinstance(obj, dict) or not isinstance(obj.get("body"), (str, type(None))):
+            raise GitHubError(f"gh api pulls/{number} returned an unexpected JSON shape")
+        return obj.get("body") or ""
+
+    def edit_pr_body(self, number: int, body: str, token: str) -> None:
+        """Replace a pull request's body; a failed edit raises."""
+        result = self._run(
+            [
+                "gh",
+                "api",
+                f"repos/{self.repo}/pulls/{number}",
+                "--method",
+                "PATCH",
+                "-f",
+                f"body={body}",
+            ],
+            cwd="/",
+            timeout=120,
+            env={"GH_TOKEN": token},
+        )
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or f"exit {result.exit_code}"
+            raise GitHubError(f"could not edit the body of PR #{number}: {reason}")
+
+    def create_issue(self, *, title: str, body: str, token: str) -> int:
+        """Open an issue and return its number; a failed or unreadable answer raises."""
+        result = self._run(
+            [
+                "gh",
+                "api",
+                f"repos/{self.repo}/issues",
+                "--method",
+                "POST",
+                "-f",
+                f"title={title}",
+                "-f",
+                f"body={body}",
+                "--jq",
+                ".number",
+            ],
+            cwd="/",
+            timeout=120,
+            env={"GH_TOKEN": token},
+        )
+        if result.exit_code != 0:
+            reason = result.stderr.strip() or f"exit {result.exit_code}"
+            raise GitHubError(f"could not open issue {title!r}: {reason}")
+        try:
+            return int(result.stdout.strip())
+        except ValueError as exc:
+            raise GitHubError(f"gh api issues returned no issue number: {result.stdout!r}") from exc
+
     def comment(self, number: int, body: str, token: str) -> str:
         """Post a comment and return its URL so it can be linked from a notification."""
         result = self._run(

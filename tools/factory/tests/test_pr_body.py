@@ -1,6 +1,8 @@
+import pytest
+
 from factory.areas import BACKEND, CONSOLE
 from factory.diff import DiffStats, FileChange
-from factory.pr_body import build_pr_body
+from factory.pr_body import build_pr_body, replace_verification, verification_section
 
 
 def test_pr_body_closes_ticket_and_records_model_and_decisions():
@@ -18,6 +20,10 @@ def test_pr_body_omits_decisions_when_empty():
     assert "Closes #7" in body
 
 
+SHA = "c" * 40
+NEW_SHA = "d" * 40
+
+
 def _body(**overrides):
     args = dict(
         ticket_number=7,
@@ -29,6 +35,7 @@ def _body(**overrides):
         diff=DiffStats(files=(FileChange("backend/apps/catalog/views.py", 3, 1),)),
         steps_used=2,
         step_budget=3,
+        verified_sha=SHA,
     )
     args.update(overrides)
     return build_pr_body(**args)
@@ -118,3 +125,62 @@ def test_pr_body_flags_check_configuration_as_risk():
     assert "Check configuration changed" in risk
     assert "`web/console/vitest.config.mts`" in risk
     assert "page.tsx" not in risk
+
+
+def test_pr_body_ties_the_verification_to_the_checked_commit():
+    body = _body()
+
+    assert f"<!-- factory:verification sha={SHA} -->" in body
+    assert f"Checks ran on commit `{SHA}`." in body
+    assert "<!-- /factory:verification -->" in body
+
+
+def test_pr_body_refuses_a_short_or_missing_sha():
+    with pytest.raises(ValueError):
+        _body(verified_sha="abc1234")
+    with pytest.raises(ValueError):
+        _body(verified_sha="")
+
+
+def test_pr_body_shows_the_tail_of_the_check_output_without_breaking_the_fence():
+    output = "\n".join(f"line {i}" for i in range(40)) + "\n```oops```"
+
+    body = _body(check_output=output)
+
+    assert "Last lines of the check output" in body
+    assert "line 39" in body
+    assert "line 10" not in body
+    assert "```oops```" not in body
+
+
+def test_pr_body_without_check_output_has_no_details_block():
+    assert "<details>" not in _body(check_output="")
+
+
+def _section(sha):
+    return verification_section(
+        verified_sha=sha,
+        checked_areas=(BACKEND,),
+        skipped_areas=(),
+        steps_used=1,
+        step_budget=3,
+    )
+
+
+def test_replace_verification_swaps_only_the_marked_section():
+    body = _body(decisions="- Kept A.\n")
+
+    updated = replace_verification(body, _section(NEW_SHA))
+
+    assert f"sha={NEW_SHA}" in updated
+    assert f"sha={SHA}" not in updated
+    assert updated.count("## Verification") == 1
+    assert "Kept A." in updated
+    assert "## How to revert" in updated
+
+
+def test_replace_verification_appends_to_a_body_without_markers():
+    updated = replace_verification("Closes #7\n\n## Summary\n\nOld PR.\n", _section(NEW_SHA))
+
+    assert updated.startswith("Closes #7")
+    assert f"sha={NEW_SHA}" in updated
