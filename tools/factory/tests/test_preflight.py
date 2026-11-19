@@ -20,6 +20,8 @@ class FakeGit:
         identity_error=None,
         remove_error=None,
         leaked_error=None,
+        check_error=None,
+        leftovers=(),
         events=None,
     ):
         self.check_passed = check_passed
@@ -28,6 +30,8 @@ class FakeGit:
         self.identity_error = identity_error
         self.remove_error = remove_error
         self.leaked_error = leaked_error
+        self.check_error = check_error
+        self.leftovers = list(leftovers)
         self.calls = events if events is not None else []
 
     def fetch_main(self, repo_dir):
@@ -40,6 +44,9 @@ class FakeGit:
         if self.identity_error is not None:
             raise self.identity_error
 
+    def preflight_leftovers(self, worktrees_dir):
+        return list(self.leftovers)
+
     def verify_no_leaked_worktrees(self, repo_dir, worktrees_dir):
         self.calls.append(("verify_no_leaked_worktrees", worktrees_dir))
         if self.leaked_error is not None:
@@ -51,6 +58,8 @@ class FakeGit:
 
     def check(self, worktree, *, areas=None):
         self.calls.append(("check", worktree, areas))
+        if self.check_error is not None:
+            raise self.check_error
         return CheckResult(self.check_passed, self.check_output)
 
     def create_agent_cleanup_probe(self, worktree):
@@ -94,6 +103,10 @@ class FakeTokenProvider:
 class RecordingNotifier:
     def __init__(self):
         self.run_failed = []
+        self.cleaned_up = []
+
+    def send_cleaned_up(self, info):
+        self.cleaned_up.append(info)
 
     def send_pr_ready(self, info):
         return None
@@ -327,6 +340,50 @@ def test_preflight_fails_loudly_when_worktree_cleanup_fails(tmp_path):
     ]
 
 
+def test_a_failed_cleanup_never_hides_the_step_that_failed(tmp_path):
+    """On 2026-11-19 the cleanup error replaced the real one in Telegram (#194)."""
+    git = FakeGit(
+        check_error=RuntimeError("uv sync failed"),
+        remove_error=RuntimeError("rm: Directory not empty"),
+    )
+    notifier = RecordingNotifier()
+
+    with pytest.raises(PreflightError, match="check.sh: uv sync failed"):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    reasons = [info.reason for info in notifier.run_failed]
+    assert reasons[0] == "preflight failed: check.sh: uv sync failed"
+    assert "cleanup" in reasons[1]
+    assert "rm: Directory not empty" in reasons[1]
+    assert "check.sh" in reasons[1]
+
+
+def test_an_interrupt_still_propagates_when_the_cleanup_fails(tmp_path):
+    git = FakeGit(
+        check_error=KeyboardInterrupt(),
+        remove_error=RuntimeError("rm: Directory not empty"),
+    )
+    notifier = RecordingNotifier()
+
+    with pytest.raises(KeyboardInterrupt):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    [info] = notifier.run_failed
+    assert "interrupted during check.sh" in info.reason
+    assert "rm: Directory not empty" in info.reason
+
+
+def test_an_interrupt_with_a_clean_cleanup_sends_nothing(tmp_path):
+    notifier = RecordingNotifier()
+
+    with pytest.raises(KeyboardInterrupt):
+        build_preflight(
+            tmp_path, git=FakeGit(check_error=KeyboardInterrupt()), notifier=notifier
+        ).run()
+
+    assert notifier.run_failed == []
+
+
 def test_preflight_fails_loudly_on_leftover_worktree_entries(tmp_path):
     git = FakeGit(leaked_error=RuntimeError("worktrees directory contains nf-66-leftover"))
     notifier = RecordingNotifier()
@@ -336,6 +393,41 @@ def test_preflight_fails_loudly_on_leftover_worktree_entries(tmp_path):
 
     assert "nf-66-leftover" in notifier.run_failed[0].reason
     assert [call[0] for call in git.calls][-1] == "verify_no_leaked_worktrees"
+
+
+def test_preflight_removes_its_own_leftovers_and_goes_on(tmp_path):
+    """A half-deleted preflight-* stopped every hourly run on 2026-11-19 (#194)."""
+    leftover = tmp_path / "worktrees" / "preflight-1795099946"
+    events = []
+    git = FakeGit(leftovers=[leftover], events=events)
+    notifier = RecordingNotifier()
+    tickets = [Ticket(number=7, title="Ready", labels=frozenset({"ready-for-agent"}))]
+
+    result = build_preflight(
+        tmp_path, git=git, github=FakeGitHub(tickets), notifier=notifier, events=events
+    ).run()
+
+    assert result == tickets
+    names = [call[0] for call in events]
+    first = names.index("remove_worktree")
+    assert events[first] == ("remove_worktree", leftover)
+    assert events[first + 1] == ("delete_branch", "preflight-1795099946")
+    assert first < names.index("verify_no_leaked_worktrees")
+    [info] = notifier.cleaned_up
+    assert str(leftover) in info.reason
+    assert notifier.run_failed == []
+
+
+def test_preflight_stops_when_a_leftover_cannot_be_removed(tmp_path):
+    leftover = tmp_path / "worktrees" / "preflight-7"
+    git = FakeGit(leftovers=[leftover], remove_error=RuntimeError("rm: Permission denied"))
+    notifier = RecordingNotifier()
+
+    with pytest.raises(PreflightError, match="remove preflight leftovers"):
+        build_preflight(tmp_path, git=git, notifier=notifier).run()
+
+    assert "rm: Permission denied" in notifier.run_failed[0].reason
+    assert "create_worktree" not in [call[0] for call in git.calls]
 
 
 class SandboxRunner:

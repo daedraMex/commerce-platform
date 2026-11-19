@@ -9,6 +9,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 TIMEOUT_GRACE_SECONDS = 20
+# Shorter than a timeout's grace: someone pressed Ctrl+C and is waiting.
+INTERRUPT_GRACE_SECONDS = 5
 
 
 class CommandTimeout(RuntimeError):
@@ -65,6 +67,12 @@ def run_command(
     except subprocess.TimeoutExpired as exc:
         _terminate_process_group(proc, grace_seconds=TIMEOUT_GRACE_SECONDS)
         raise CommandTimeout(f"command timed out after {timeout}s: {' '.join(argv)}") from exc
+    except BaseException:
+        # Ctrl+C or SystemExit reaches only the factory: the command runs in its own
+        # session. Stop it before the caller's cleanup deletes the files it is
+        # writing (#194). Agent-user processes still need the caller's pkill.
+        _terminate_process_group(proc, grace_seconds=INTERRUPT_GRACE_SECONDS)
+        raise
     return CommandResult(exit_code=proc.returncode, stdout=stdout, stderr=stderr)
 
 

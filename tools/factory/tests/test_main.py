@@ -109,6 +109,9 @@ class FakeGit:
     def verify_commit_identity(self, repo_dir):
         self.events.append("verify_commit_identity")
 
+    def preflight_leftovers(self, worktrees_dir):
+        return []
+
     def verify_no_leaked_worktrees(self, repo_dir, worktrees_dir):
         self.events.append("verify_no_leaked_worktrees")
 
@@ -245,7 +248,10 @@ class FakeGitHub:
         pr_label_error=None,
         pr_bodies=None,
         pr_body_error=None,
+        closed_tickets=(),
     ):
+        self.closed_tickets = set(closed_tickets)
+        self.open_checks = []
         self.pr_bodies = dict(pr_bodies or {})
         self.created_issues = []
         self.issue_error = None
@@ -282,6 +288,10 @@ class FakeGitHub:
     def list_tickets(self, token=None):
         self.listed_with = token
         return list(self.tickets)
+
+    def is_open(self, number, token=None):
+        self.open_checks.append(number)
+        return number not in self.closed_tickets
 
     def list_review_fixes(
         self,
@@ -1895,6 +1905,55 @@ def test_nothing_to_commit_goes_stuck_without_push_or_pr(tmp_path):
     assert git.pushed == []
     assert github.created_prs == []
     assert "no changes made for the ticket" in github.comments[0][1]
+
+
+def test_a_ticket_closed_during_its_run_gets_no_stuck_comment_or_label(tmp_path, capsys):
+    """#130 was closed by its PR at 08:00:30; the 08:00 run commented on it anyway (#194)."""
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC, diff=DiffStats())
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], closed_tickets={7})
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert github.comments == []
+    assert github.issue_label_attempts == []
+    assert notifier.stuck == []
+    assert "#7 was closed during the run" in capsys.readouterr().err
+
+
+def test_a_ticket_closed_during_its_run_is_not_pushed(tmp_path, capsys):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], closed_tickets={7})
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert len(results) == 1 and not results[0].ok
+    assert git.pushed == []
+    assert github.created_prs == []
+    assert github.comments == []
+    assert notifier.pr_ready == []
+    assert "#7 was closed during the run" in capsys.readouterr().err
+
+
+def test_an_open_ticket_is_checked_right_before_the_push(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert 7 in github.open_checks
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
 
 
 def test_empty_diff_against_main_goes_stuck_without_push_or_pr(tmp_path):

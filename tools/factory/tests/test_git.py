@@ -16,7 +16,7 @@ from factory.git import (
     verify_git_version,
     worktree_cleanup_path,
 )
-from factory.runner import TEST_SETTINGS
+from factory.runner import TEST_SETTINGS, AgentSandboxError
 from factory.shell import CommandResult, CommandTimeout
 
 
@@ -135,16 +135,26 @@ def test_worktree_cleanup_path_refuses_a_path_containing_dotdot(tmp_path):
         worktree_cleanup_path(worktrees, worktrees / ".." / "repo")
 
 
-def test_remove_worktree_deletes_as_the_agent_then_prunes(tmp_path):
+NOTHING_TO_KILL = CommandResult(1, "", "")  # pkill: no agent process matched
+AGENT_PKILL = (
+    ["sudo", "-n", "-u", "factory-agent", "/usr/bin/pkill", "-KILL", "-u", "factory-agent"],
+    "/",
+    None,
+    False,
+)
+
+
+def test_remove_worktree_kills_agent_processes_then_deletes_as_the_agent_then_prunes(tmp_path):
     worktrees = tmp_path / "worktrees"
     worktree = worktrees / "nf-7-x"
     repo = tmp_path / "repo"
-    run = SequenceRun([CommandResult(0, "", ""), CommandResult(0, "", "")])
+    run = SequenceRun([NOTHING_TO_KILL, CommandResult(0, "", ""), CommandResult(0, "", "")])
 
     Git(run=run, agent_user="factory-agent").remove_worktree(repo, worktree, worktrees)
 
     target = worktree.resolve()
     assert run.calls == [
+        AGENT_PKILL,
         (
             ["sudo", "-n", "-u", "factory-agent", "--", "/usr/bin/rm", "-rf", str(target)],
             "/",
@@ -155,21 +165,56 @@ def test_remove_worktree_deletes_as_the_agent_then_prunes(tmp_path):
     ]
 
 
+def test_remove_worktree_repeats_the_kill_while_agent_processes_remain(tmp_path):
+    """A uv still installing into .venv made rm fail with "Directory not empty" (#194)."""
+    worktrees = tmp_path / "worktrees"
+    run = SequenceRun(
+        [
+            CommandResult(0, "", ""),  # killed something
+            NOTHING_TO_KILL,
+            CommandResult(0, "", ""),
+            CommandResult(0, "", ""),
+        ]
+    )
+
+    Git(run=run, agent_user="factory-agent").remove_worktree(
+        tmp_path / "repo", worktrees / "preflight-42", worktrees
+    )
+
+    assert [call[0][4] for call in run.calls[:3]] == ["/usr/bin/pkill", "/usr/bin/pkill", "--"]
+
+
+def test_remove_worktree_deletes_nothing_when_the_agent_cleanup_is_refused(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    run = SequenceRun([CommandResult(1, "", "sudo: a password is required")])
+
+    with pytest.raises(AgentSandboxError, match="refused by sudo"):
+        Git(run=run, agent_user="factory-agent").remove_worktree(
+            tmp_path / "repo", worktrees / "nf-7-x", worktrees
+        )
+
+    assert run.calls == [AGENT_PKILL]
+
+
 def test_remove_worktree_raises_when_the_agent_cannot_delete(tmp_path):
     worktrees = tmp_path / "worktrees"
-    run = SequenceRun([CommandResult(1, "", "rm: cannot remove: Permission denied")])
+    run = SequenceRun(
+        [NOTHING_TO_KILL, CommandResult(1, "", "rm: cannot remove: Permission denied")]
+    )
 
     with pytest.raises(WorktreeCleanupError, match="could not delete worktree"):
         Git(run=run, agent_user="factory-agent").remove_worktree(
             tmp_path / "repo", worktrees / "nf-7-x", worktrees
         )
 
-    assert len(run.calls) == 1
+    assert len(run.calls) == 2
 
 
 def test_remove_worktree_raises_when_prune_fails(tmp_path):
     worktrees = tmp_path / "worktrees"
-    run = SequenceRun([CommandResult(0, "", ""), CommandResult(1, "", "fatal: prune failed")])
+    run = SequenceRun(
+        [NOTHING_TO_KILL, CommandResult(0, "", ""), CommandResult(1, "", "fatal: prune failed")]
+    )
 
     with pytest.raises(WorktreeCleanupError, match="worktree prune failed"):
         Git(run=run, agent_user="factory-agent").remove_worktree(
@@ -241,6 +286,20 @@ def test_create_agent_cleanup_probe_requires_the_agent_user(tmp_path):
         Git(run=run).create_agent_cleanup_probe(tmp_path / "worktrees" / "nf-7-x")
 
     assert run.calls == []
+
+
+def test_preflight_leftovers_lists_only_preflight_entries(tmp_path):
+    worktrees = tmp_path / "worktrees"
+    for name in ("preflight-9", "preflight-10", "nf-66-x", "notes"):
+        (worktrees / name).mkdir(parents=True)
+
+    leftovers = Git(run=RecordingRun()).preflight_leftovers(worktrees)
+
+    assert leftovers == [worktrees / "preflight-10", worktrees / "preflight-9"]
+
+
+def test_preflight_leftovers_without_a_worktrees_directory(tmp_path):
+    assert Git(run=RecordingRun()).preflight_leftovers(tmp_path / "missing") == []
 
 
 def test_verify_no_leaked_worktrees_accepts_only_live_entries(tmp_path):

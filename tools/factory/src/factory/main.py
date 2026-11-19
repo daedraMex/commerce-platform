@@ -766,6 +766,8 @@ class Factory:
                 attempts=attempts,
             )
         assert_push_target(branch, ticket)
+        if self._closed_during_run(ticket, token):
+            return TicketResult(ticket=ticket, ok=False)
         # The checks ran on this tree before commit_all, so this commit is what they verified.
         verified_sha = self.git.head_sha(worktree)
         self.git.push(worktree, branch, token)
@@ -839,6 +841,9 @@ class Factory:
         failing_check: str,
         attempts: int,
     ) -> TicketResult:
+        token = self.token_provider.mint(self.settings.repo)
+        if self._closed_during_run(ticket, token):
+            return TicketResult(ticket=ticket, ok=False)
         comment = build_issue_comment(
             open_question=open_question,
             decisions=extract_decisions(decisions),
@@ -850,7 +855,6 @@ class Factory:
         # Held before any GitHub call: if the comment or the label fails, the ticket
         # still looks ready and must not be picked again (#160).
         self.label_holds.add(ticket.number)
-        token = self.token_provider.mint(self.settings.repo)
         comment_url = self.github.comment(ticket.number, comment, token)
         label_error = None
         try:
@@ -879,6 +883,16 @@ class Factory:
         )
         self._notify(self.notifier.send_stuck, info)
         return TicketResult(ticket=ticket, ok=False)
+
+    def _closed_during_run(self, ticket: Ticket, token: str) -> bool:
+        """A ticket its PR closed mid-run gets no comment, label or push (#194)."""
+        if self.github.is_open(ticket.number, token):
+            return False
+        print(
+            f"#{ticket.number} was closed during the run; nothing was posted or pushed",
+            file=sys.stderr,
+        )
+        return True
 
     def _mark_pr_ready(self, pr_number: int, token: str) -> None:
         """Mark the PR ready; a failure leaves it a draft and never fails the ticket."""
