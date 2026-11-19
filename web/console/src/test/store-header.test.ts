@@ -1,8 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { axiosInstance } from "@commerce-platform/api-client";
+import {
+  apiClient,
+  axiosInstance,
+} from "@commerce-platform/api-client";
 
+import { setCurrentStore } from "@/lib/api/store-source";
 import { installStoreHeader } from "@/lib/api/store-header";
+import { createQueryClient } from "@/lib/query/client";
 
 const originalAdapter = axiosInstance.defaults.adapter;
 
@@ -27,16 +32,17 @@ function captureRequest() {
 
 beforeEach(() => {
   installStoreHeader();
+  setCurrentStore(undefined);
 });
 
 afterEach(() => {
   axiosInstance.defaults.adapter = originalAdapter;
-  window.history.replaceState({}, "", "/");
+  setCurrentStore(undefined);
 });
 
 describe("store header interceptor", () => {
-  it("turns the store segment into the X-Store header", async () => {
-    window.history.replaceState({}, "", "/anime/photos");
+  it("reads the store from the route-param source", async () => {
+    setCurrentStore("anime");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/staff/products/");
@@ -44,8 +50,8 @@ describe("store header interceptor", () => {
     expect(seen().headerValue).toBe("anime");
   });
 
-  it("follows the URL when the store segment changes", async () => {
-    window.history.replaceState({}, "", "/home/orders");
+  it("follows the source when the store route changes", async () => {
+    setCurrentStore("home");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/staff/products/");
@@ -54,7 +60,6 @@ describe("store header interceptor", () => {
   });
 
   it("does not send a store header outside a store route", async () => {
-    window.history.replaceState({}, "", "/sign-in");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/me/");
@@ -63,7 +68,7 @@ describe("store header interceptor", () => {
   });
 
   it("keeps an explicit X-Store header", async () => {
-    window.history.replaceState({}, "", "/anime");
+    setCurrentStore("anime");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/staff/products/", {
@@ -71,5 +76,47 @@ describe("store header interceptor", () => {
     });
 
     expect(seen().headerValue).toBe("kawaii");
+  });
+
+  it("keeps store A's header when A's client fires after switching to B (#130)", async () => {
+    const seen = captureRequest();
+    const client = createQueryClient("anime");
+    setCurrentStore("home");
+
+    await client.fetchQuery({
+      queryKey: ["probe"],
+      queryFn: ({ signal }) =>
+        apiClient({
+          url: "/api/v1/staff/products/",
+          method: "GET",
+          signal,
+        }),
+    });
+
+    expect(seen().headerValue).toBe("anime");
+  });
+
+  it("leaves a global query without a store even inside a store page (#130)", async () => {
+    setCurrentStore("anime");
+    const seen = captureRequest();
+    const signal = new AbortController().signal;
+
+    await apiClient({ url: "/api/v1/me/", method: "GET", signal });
+
+    expect(seen().headerPresent).toBe(false);
+  });
+
+  it("labels a direct request before the route switches under it (#130)", async () => {
+    const seen = captureRequest();
+    setCurrentStore("anime");
+
+    const pending = apiClient({
+      url: "/api/v1/staff/products/",
+      method: "POST",
+    });
+    setCurrentStore("home");
+    await pending;
+
+    expect(seen().headerValue).toBe("anime");
   });
 });

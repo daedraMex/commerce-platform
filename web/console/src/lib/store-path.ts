@@ -18,16 +18,27 @@ export function storeSlugFromPathname(pathname: string): string | undefined {
   return first && isStoreSegment(first) ? first : undefined;
 }
 
+export function isStoreDetailPath(pathname: string): boolean {
+  const [first, , ...rest] = pathSegments(pathname);
+  return Boolean(first && isStoreSegment(first) && rest.length > 0);
+}
+
 export function swapStoreInPath(pathname: string, store: string): string {
-  const segments = pathname.split("/");
-  const [first] = pathSegments(pathname);
+  const [path] = pathname.split(/[?#]/);
+  const segments = pathSegments(path);
+  const [first] = segments;
 
   if (!first || !isStoreSegment(first)) {
     return `/${store}`;
   }
 
-  segments[1] = store;
-  return segments.join("/");
+  if (segments.length > 2) {
+    return `/${store}/${segments[1]}`;
+  }
+
+  const section = segments[1] ? `/${segments[1]}` : "";
+  const trailing = path.endsWith("/") ? "/" : "";
+  return `/${store}${section}${trailing}`;
 }
 
 export function storeHref(store: string, segment: string): string {

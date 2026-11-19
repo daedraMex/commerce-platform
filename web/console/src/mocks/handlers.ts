@@ -52,6 +52,7 @@ const AUTUMN_IMAGE: ProductImage = {
     "https://media.example.test/stores/1/media/renditions/frazada-otono-800w-v1.webp",
 };
 
+
 export type MockPhotoProduct = Omit<StaffProduct, "main_image"> & {
   main_image: ProductImage | null;
 };
@@ -108,6 +109,30 @@ export const PHOTO_PRODUCTS: MockPhotoProduct[] = [
   },
 ];
 
+const HOME_PHOTO_PRODUCTS: MockPhotoProduct[] = [
+  {
+    id: 21,
+    name: "Manta Hogar",
+    slug: "manta-hogar",
+    category: { name: "Frazada", slug: "frazada" },
+    needs_main_image: true,
+    main_image: null,
+  },
+  {
+    id: 22,
+    name: "Cojín Nube",
+    slug: "cojin-nube",
+    category: { name: "Almohada", slug: "almohada" },
+    needs_main_image: true,
+    main_image: null,
+  },
+];
+
+const PHOTO_PRODUCTS_BY_STORE: Record<string, MockPhotoProduct[]> = {
+  anime: PHOTO_PRODUCTS,
+  home: HOME_PHOTO_PRODUCTS,
+};
+
 function normalize(text: string): string {
   return text
     .normalize("NFD")
@@ -115,7 +140,10 @@ function normalize(text: string): string {
     .toLowerCase();
 }
 
-function photoProductsPage(request: Request) {
+function photoProductsPage(
+  request: Request,
+  storeProducts: MockPhotoProduct[],
+) {
   const url = new URL(request.url);
   const search = url.searchParams.get("search")?.trim() ?? "";
   const category = url.searchParams.get("category") ?? "";
@@ -126,7 +154,7 @@ function photoProductsPage(request: Request) {
     Math.min(100, Number(url.searchParams.get("page_size") ?? "20") || 20),
   );
 
-  let items = PHOTO_PRODUCTS;
+  let items = storeProducts;
   if (search) {
     items = items.filter((product) =>
       normalize(product.name).includes(normalize(search)),
@@ -895,6 +923,19 @@ export const handlers = [
       );
     }
 
-    return HttpResponse.json(photoProductsPage(request));
+    const store = request.headers.get("X-Store");
+    const storeProducts = store ? PHOTO_PRODUCTS_BY_STORE[store] : undefined;
+    if (!store) {
+      return problem(
+        400,
+        "store_header_missing",
+        "The X-Store header is required.",
+      );
+    }
+    if (!storeProducts) {
+      return problem(400, "store_not_found", "No store matches this slug.");
+    }
+
+    return HttpResponse.json(photoProductsPage(request, storeProducts));
   }),
 ];

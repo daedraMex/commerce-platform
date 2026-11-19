@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isStoreDetailPath,
   isStoreSegment,
   storeHref,
   storeSlugFromPathname,
@@ -31,7 +32,25 @@ describe("swapStoreInPath", () => {
   });
 
   it("keeps the query string out of the path", () => {
-    expect(swapStoreInPath("/anime/photos", "kawaii")).toBe("/kawaii/photos");
+    expect(swapStoreInPath("/anime/photos?product=12", "kawaii")).toBe(
+      "/kawaii/photos",
+    );
+  });
+
+  it("lands on the same section's list from a detail route", () => {
+    expect(swapStoreInPath("/anime/photos/12", "home")).toBe("/home/photos");
+    expect(swapStoreInPath("/anime/photos/new", "home")).toBe("/home/photos");
+    expect(swapStoreInPath("/anime/orders/42/", "home")).toBe("/home/orders");
+  });
+});
+
+describe("isStoreDetailPath", () => {
+  it("tells a detail route from a section list", () => {
+    expect(isStoreDetailPath("/anime/photos/12")).toBe(true);
+    expect(isStoreDetailPath("/anime/photos/new?product=12")).toBe(true);
+    expect(isStoreDetailPath("/anime/photos")).toBe(false);
+    expect(isStoreDetailPath("/anime")).toBe(false);
+    expect(isStoreDetailPath("/sign-in")).toBe(false);
   });
 });
 
