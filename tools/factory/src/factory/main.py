@@ -89,6 +89,14 @@ def _orphan_branch_check(branch: str) -> str:
 class TicketResult:
     ticket: Ticket
     ok: bool
+    # Closed mid-run by someone else (usually its own PR): not a failure (#194).
+    closed: bool = False
+
+
+def _outcome(result: TicketResult) -> str:
+    if result.ok:
+        return "ok"
+    return "closed" if result.closed else "stuck"
 
 
 class RunFailed(RuntimeError):
@@ -173,7 +181,7 @@ class Factory:
                 f"#{ticket.number} {ticket.title}",
             )
             results.append(result)
-            if not result.ok:
+            if not result.ok and not result.closed:
                 break
         return results
 
@@ -234,7 +242,7 @@ class Factory:
             raise
         self.ledger.record_outcome(
             ticket.number,
-            "ok" if result.ok else "stuck",
+            _outcome(result),
             finished_at=self.ledger.now(),
         )
         return result
@@ -495,7 +503,7 @@ class Factory:
         self.git.fetch_main(self.settings.repo_dir)
         builder_config = self._builder_config()
         if not self.git.merge_main(worktree):
-            return self._stuck(
+            return self._review_stuck(
                 ticket,
                 model=model,
                 decisions="",
@@ -518,7 +526,7 @@ class Factory:
         for _step in range(1, self.settings.attempts + 1):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return self._stuck(
+                return self._review_stuck(
                     ticket,
                     model=model,
                     decisions=decisions,
@@ -552,7 +560,7 @@ class Factory:
             open_question = extract_open_question(decisions)
 
             if open_question:
-                return self._stuck(
+                return self._review_stuck(
                     ticket,
                     model=model,
                     decisions=decisions,
@@ -563,7 +571,7 @@ class Factory:
                     attempts=made,
                 )
             if result.timed_out:
-                return self._stuck(
+                return self._review_stuck(
                     ticket,
                     model=model,
                     decisions=decisions,
@@ -587,7 +595,7 @@ class Factory:
                 )
             feedback = check.output
             failed_areas = check.failed_areas
-        return self._stuck(
+        return self._review_stuck(
             ticket,
             model=model,
             decisions=decisions,
@@ -616,7 +624,7 @@ class Factory:
         self.git.commit_all(worktree, f"fix: address review on #{fix.pr_number}")
         diff = self.git.diff_stats(worktree, since=base_sha)
         if not diff.files:
-            return self._stuck(
+            return self._review_stuck(
                 ticket,
                 model=model,
                 decisions=decisions,
@@ -629,7 +637,7 @@ class Factory:
         if touches_protected_paths(
             (f.path for f in diff.files), allow_dependencies=_allows_dependencies(ticket)
         ):
-            return self._stuck(
+            return self._review_stuck(
                 ticket,
                 model=model,
                 decisions=decisions,
@@ -641,7 +649,7 @@ class Factory:
             )
         violation = self._dependency_scope_violation(ticket, worktree, diff, base_sha)
         if violation is not None:
-            return self._stuck(
+            return self._review_stuck(
                 ticket,
                 model=model,
                 decisions=decisions,
@@ -679,7 +687,7 @@ class Factory:
             )
         except Exception as exc:
             print(f"PR #{fix.pr_number} body not updated: {short_error(exc)}", file=sys.stderr)
-            return self._stuck(
+            return self._review_stuck(
                 ticket,
                 model=model,
                 decisions=decisions,
@@ -767,7 +775,7 @@ class Factory:
             )
         assert_push_target(branch, ticket)
         if self._closed_during_run(ticket, token):
-            return TicketResult(ticket=ticket, ok=False)
+            return TicketResult(ticket=ticket, ok=False, closed=True)
         # The checks ran on this tree before commit_all, so this commit is what they verified.
         verified_sha = self.git.head_sha(worktree)
         self.git.push(worktree, branch, token)
@@ -840,10 +848,8 @@ class Factory:
         open_question: str | None,
         failing_check: str,
         attempts: int,
+        skip_if_closed: bool = True,
     ) -> TicketResult:
-        token = self.token_provider.mint(self.settings.repo)
-        if self._closed_during_run(ticket, token):
-            return TicketResult(ticket=ticket, ok=False)
         comment = build_issue_comment(
             open_question=open_question,
             decisions=extract_decisions(decisions),
@@ -855,6 +861,10 @@ class Factory:
         # Held before any GitHub call: if the comment or the label fails, the ticket
         # still looks ready and must not be picked again (#160).
         self.label_holds.add(ticket.number)
+        token = self.token_provider.mint(self.settings.repo)
+        if skip_if_closed and self._closed_during_run(ticket, token):
+            self.label_holds.remove(ticket.number)
+            return TicketResult(ticket=ticket, ok=False, closed=True)
         comment_url = self.github.comment(ticket.number, comment, token)
         label_error = None
         try:
@@ -884,9 +894,28 @@ class Factory:
         self._notify(self.notifier.send_stuck, info)
         return TicketResult(ticket=ticket, ok=False)
 
+    def _review_stuck(self, ticket: Ticket, **kwargs) -> TicketResult:
+        """Report a review fix as stuck even when its ticket is closed.
+
+        The PR is still open and the owner asked for changes, so they must not
+        vanish without a comment or a Telegram message.
+        """
+        return self._stuck(ticket, skip_if_closed=False, **kwargs)
+
     def _closed_during_run(self, ticket: Ticket, token: str) -> bool:
-        """A ticket its PR closed mid-run gets no comment, label or push (#194)."""
-        if self.github.is_open(ticket.number, token):
+        """A ticket its PR closed mid-run gets no comment, label or push (#194).
+
+        An unreadable state, a timeout included, counts as open: the run goes on
+        as it did before this check existed.
+        """
+        try:
+            if self.github.is_open(ticket.number, token):
+                return False
+        except Exception as exc:
+            print(
+                f"#{ticket.number}: state unreadable, treated as open: {short_error(exc)}",
+                file=sys.stderr,
+            )
             return False
         print(
             f"#{ticket.number} was closed during the run; nothing was posted or pushed",
@@ -1230,7 +1259,7 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         return _report_failure(notifier, f"run failed: {phase}: {short_error(exc)}")
     for result in results:
-        outcome = "ok" if result.ok else "stuck"
+        outcome = _outcome(result)
         print(f"#{result.ticket.number}: {outcome}")
     return 0
 

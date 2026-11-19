@@ -714,9 +714,12 @@ unreachable" as before.
   Before deleting, the cleanup kills every agent process, so nothing is still
   writing into the worktree (`rm -rf` fails half-way with "Directory not empty"
   otherwise). If that kill is refused, nothing is deleted.
-- **Interrupted runs.** Ctrl+C or a stop while a command runs also stops that
-  command's process group before the cleanup starts, since commands run in
-  their own session and never see the interrupt. When a cleanup fails after a
+- **Interrupted runs.** Ctrl+C while a command runs also stops that command's
+  process group before the cleanup starts, since commands run in their own
+  session and never see the interrupt. `systemctl --user stop factory.service`
+  kills the whole service instead, and a bare `kill <pid>` ends the factory
+  without any cleanup; in both cases the next preflight removes what is left.
+  When a cleanup fails after a
   step failed or the run was interrupted, the step's error still propagates and
   Telegram gets a second "preflight cleanup failed after <step>" message. Any
   `preflight-*` entry an earlier preflight left behind is deleted at the start
@@ -869,8 +872,9 @@ message gives the `gh label create` command for each), creates a throwaway
 present area's `check.sh` in it as `factory-agent` with the real check
 environment, verifies isolation,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
-policy, fails if the worktrees directory contains entries that are not live git
-worktrees, then proves the cleanup removes an agent-owned
+policy, deletes any `preflight-*` entry an earlier preflight left behind, fails
+if the worktrees directory contains any other entry that is not a live git
+worktree, then proves the cleanup removes an agent-owned
 `factory-agent:factory-agent` 0770 directory and deletes the worktree and
 branch even on failure.
 Any failed step sends `preflight failed: <step>: <short error>` to Telegram

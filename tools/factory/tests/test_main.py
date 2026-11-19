@@ -18,7 +18,7 @@ from factory.preflight import PreflightError
 from factory.review_attempts import ReviewAttemptLedger
 from factory.reviews import ReviewComment, ReviewFix
 from factory.runner import AgentResult
-from factory.shell import CommandResult
+from factory.shell import CommandResult, CommandTimeout
 from factory.tickets import REQUIRED_LABELS, Ticket, worktree_path
 
 MEXICO_CITY = ZoneInfo("America/Mexico_City")
@@ -1954,6 +1954,137 @@ def test_an_open_ticket_is_checked_right_before_the_push(tmp_path):
 
     assert 7 in github.open_checks
     assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+
+
+def test_the_hold_comes_before_the_closed_check_and_a_closed_ticket_leaves_none(tmp_path):
+    """The closed check is a GitHub call, so the #160 hold must already be written."""
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], closed_tickets={7})
+    holds = LabelHolds(make_settings(tmp_path).state_dir)
+    seen = []
+    real_is_open = github.is_open
+
+    def is_open(number, token=None):
+        seen.append(holds.numbers())
+        return real_is_open(number, token)
+
+    github.is_open = is_open
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert seen == [{7}]
+    assert holds.numbers() == frozenset()
+
+
+def test_a_failed_token_in_the_stuck_flow_still_holds_the_ticket(tmp_path):
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    provider = FakeTokenProvider()
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=RecordingNotifier(),
+        token_provider=provider,
+    )
+    original_stuck = factory._stuck
+
+    def stuck(*args, **kwargs):
+        provider.mint = lambda repo: (_ for _ in ()).throw(RuntimeError("github api down"))
+        return original_stuck(*args, **kwargs)
+
+    factory._stuck = stuck
+
+    with pytest.raises(RunFailed):
+        factory.run()
+
+    assert LabelHolds(make_settings(tmp_path).state_dir).numbers() == {7}
+
+
+def test_an_unreadable_ticket_state_still_gets_the_stuck_comment(tmp_path):
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+
+    def is_open(number, token=None):
+        raise CommandTimeout("command timed out after 120s: gh issue view 7")
+
+    github.is_open = is_open
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert [number for number, _body, _token in github.comments] == [7]
+
+
+def test_an_unreadable_ticket_state_still_pushes(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+
+    def is_open(number, token=None):
+        raise CommandTimeout("command timed out after 120s: gh issue view 7")
+
+    github.is_open = is_open
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+
+
+def test_a_ticket_closed_during_its_run_does_not_stop_the_hour(tmp_path):
+    settings = replace(make_settings(tmp_path), max_tickets=2)
+    git = FakeGit(check_passed=False)
+    github = FakeGitHub(
+        tickets=[
+            make_ticket(7, labels={"ready-for-agent"}),
+            make_ticket(8, labels={"ready-for-agent"}),
+        ],
+        closed_tickets={7},
+    )
+    factory = build_factory(
+        tmp_path,
+        git=git,
+        github=github,
+        runner=FakeRunner(),
+        notifier=RecordingNotifier(),
+        settings=settings,
+    )
+
+    results = factory.run()
+
+    assert [(r.ticket.number, r.ok, r.closed) for r in results] == [
+        (7, False, True),
+        (8, False, False),
+    ]
+    ledger = (settings.state_dir / "attempts.log").read_text()
+    assert "#7\tclosed" in ledger
+
+
+def test_a_review_fix_whose_ticket_was_closed_still_reports_stuck(tmp_path):
+    """The owner's requested changes must not vanish because the ticket is closed."""
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        review_fixes=[make_review_fix()],
+        pr_body_error=GitHubError("gh api pulls/101 failed: HTTP 502"),
+        closed_tickets={7},
+    )
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    factory.run()
+
+    assert [number for number, _body, _token in github.comments] == [7]
+    assert len(notifier.stuck) == 1
 
 
 def test_empty_diff_against_main_goes_stuck_without_push_or_pr(tmp_path):
