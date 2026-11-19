@@ -55,10 +55,14 @@ rule whose trigger matches the diff; skip the rest.
   route that carries an id.
 - **Check**: the store is part of the cache key and the storage key prefix
   (`stores/{id}/`). Readers verify the prefix and fail closed. The console takes the store
-  from route params, not `window.location`. A test proves one store's data never appears
-  in another.
+  from route params, not `window.location`. A request's `X-Store` comes from the store of
+  the query client or signal that issued it, never from a module global read at request
+  time: during a store switch the old subtree stays mounted while the new route renders,
+  so its polling or debounced requests would carry the new store into the old cache. A
+  test proves one store's data never appears in another.
 - **From**: #127 (private reader ignores `store`), #128 (query keys without the store,
-  stale `X-Store`, ids kept across a store switch).
+  stale `X-Store`, ids kept across a store switch), #130 first attempt + #191 (`X-Store`
+  from a global set during render).
 
 ### 5. Authorize and validate before the work
 - **Trigger**: an endpoint that reads an upload, streams a private file, or exposes a page
