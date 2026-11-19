@@ -7,6 +7,10 @@ submission. Staff approval (apply) is what later adds the Media to a carousel.
 import hashlib
 
 from apps.catalog.services import MediaRecord, NewMedia
+from apps.photos.application.failures import (
+    DISCARDED_FAILURE_CODE,
+    DISCARDED_FAILURE_MESSAGE,
+)
 from apps.photos.application.ports import (
     PhotoCatalog,
     PhotoProcessor,
@@ -19,8 +23,6 @@ from apps.photos.domain.submission import PhotoSubmission, SubmissionStatus
 from apps.shared.domain.exceptions import NotFoundError
 from apps.shared.domain.store import StoreReference
 
-DISCARDED_FAILURE_CODE = "photo_submission_discarded"
-DISCARDED_FAILURE_MESSAGE = "A discarded submission is never processed."
 MEDIA_MIME_TYPE = "image/jpeg"
 
 _SIZE_OPTION_CODE = "size"

@@ -16,6 +16,10 @@ one updates this file and every consumer in the same pull request.
 | Unknown submission | returns quietly |
 | Retries | up to 3, with backoff, for any error raised outside the processing step: storage or broker errors, and the domain errors `submission_concurrent_modification`, `submission_cannot_mark_ready` and `submission_cannot_mark_failed` |
 
+When the last retry fails, the task records `failed` with `photo_processing_unavailable` and
+a short message, without spending another attempt. If recording that failure itself fails,
+the error is logged with the store and submission id instead of being dropped.
+
 The worker loads the submission, then:
 
 - **Discarded**, whatever its status: records `failed` with `photo_submission_discarded`.
@@ -29,8 +33,12 @@ while reading or processing the original (`photo_original_missing`, `invalid_ima
 `quad_*`, `crop_*` and `light_*` codes). These failures are not retried by Celery. Processing
 never links Media to a product (ADR-0030).
 
-**Retries exhausted:** nothing records a failure, so the submission stays `processing`.
-Retry and redo refuse it, and discard is the only way out (#171).
+**Retries exhausted:** the last retry records `failed` with
+`photo_processing_unavailable` through the `FailExhaustedProcessing` use case and the
+repository, leaving `attempts` unchanged, so retry is allowed while `attempts` < 3. A
+submission discarded meanwhile still records `failed` with `photo_submission_discarded`. If
+recording the failure itself fails, the task logs the error with the store and submission id
+(#171).
 
 ## photos.processing-queue
 
