@@ -29,23 +29,36 @@ from .tickets import Ticket
 REVIEWER_CONFIG_PATH = "tools/factory/opencode.reviewer.json"
 REVIEW_RULES = "REVIEW.md"
 TAMPERED = "reviewer modified the worktree"
+ATTACK_LEFTOVER = "attack tests left changes in the worktree"
 PROTECTED_PATH_CHANGED = "protected path changed"
 BEGIN = "REVIEW-FINDINGS-BEGIN"
 END = "REVIEW-FINDINGS-END"
+TEST_BEGIN = "REVIEW-TEST-BEGIN"
+TEST_END = "REVIEW-TEST-END"
+MAX_ATTACK_TESTS = 3
+MAX_ATTACK_TEST_CHARS = 20_000
+# Where the runner writes the attack tests, relative to backend/. backend/scripts/check.sh
+# --review-tests accepts only these names, so the reviewer never picks a path.
+ATTACK_TEST_DIR = "tests/review"
+MAX_ATTACK_OUTPUT_LINES = 40
 NO_FINDINGS = "NO FINDINGS"
-TAGS = ("Important", "Nit", "Pre-existing")
+SUGGESTED = "Suggested ticket"
+TAGS = ("Important", "Nit", "Pre-existing", SUGGESTED)
+MAX_SUGGESTED_TICKETS = 3
 MAX_DIFF_CHARS = 60_000
 
-_TAG = re.compile(r"^\[(important|nit|pre-existing)\]\s*(.*)$", re.IGNORECASE)
+_TAG = re.compile(r"^\[(important|nit|pre-existing|suggested ticket)\]\s*(.*)$", re.IGNORECASE)
 _LOCATION = re.compile(r"^(?P<path>.+?)(?::(?P<line>\d+)(?:-\d+)?)?$")
 _CANONICAL_TAG = {tag.lower(): tag for tag in TAGS}
 _TEMPLATE_LINES = {
     "[Important] path/to/file.py:42 | one-line summary | failure case",
     "[Nit] path/to/file.py | one-line summary | failure case",
+    "[Suggested ticket] path/to/file.py | one-line title | why it matters",
 }
 NO_LOCATION = "(location not given)"
 _EMPTY_FINDING = re.compile(r"^\(?\s*(none|n/?a|no findings|nothing)\b", re.IGNORECASE)
 MAX_UNPARSED_IN_PR = 5
+_CLOSING_KEYWORD = re.compile(r"\b(close[sd]?|fix(?:e[sd])?|resolve[sd]?)(\s+#)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -68,6 +81,7 @@ class ReviewResult:
     findings: tuple[Finding, ...] = ()
     error: str = ""
     unparsed: tuple[str, ...] = ()
+    tests: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -80,6 +94,11 @@ class ReviewResult:
     @property
     def non_blocking(self) -> tuple[Finding, ...]:
         return tuple(f for f in self.findings if f.tag != "Important")
+
+    @property
+    def suggested(self) -> tuple[Finding, ...]:
+        """Work outside the ticket's scope, at most MAX_SUGGESTED_TICKETS of it."""
+        return tuple(f for f in self.findings if f.tag == SUGGESTED)[:MAX_SUGGESTED_TICKETS]
 
 
 def _clean(line: str) -> str:
@@ -140,7 +159,62 @@ def parse_review(text: str) -> ReviewResult:
             unparsed.append(line[:200])
         else:
             findings.append(finding)
-    return ReviewResult(findings=tuple(findings), unparsed=tuple(unparsed))
+    return ReviewResult(
+        findings=tuple(findings), unparsed=tuple(unparsed), tests=parse_attack_tests(text)
+    )
+
+
+def parse_attack_tests(text: str) -> tuple[str, ...]:
+    """The reviewer's attack tests: pytest modules between REVIEW-TEST markers.
+
+    At most MAX_ATTACK_TESTS, each bounded; a block that is empty or too long is
+    dropped rather than truncated, because a cut module would fail to import and
+    look like a broken attack.
+    """
+    tests: list[str] = []
+    pattern = re.escape(TEST_BEGIN) + r"[^\n]*\n(.*?)" + re.escape(TEST_END)
+    for match in re.finditer(pattern, text.replace("\r\n", "\n"), re.DOTALL):
+        body = _strip_fence(match.group(1))
+        if body.strip() and len(body) <= MAX_ATTACK_TEST_CHARS:
+            tests.append(body.rstrip() + "\n")
+        if len(tests) >= MAX_ATTACK_TESTS:
+            break
+    return tuple(tests)
+
+
+def _strip_fence(body: str) -> str:
+    lines = body.strip("\n").splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines)
+
+
+def attack_test_paths(ticket_number: int, count: int) -> tuple[str, ...]:
+    """Backend-relative paths for the attack tests; check.sh --review-tests matches them."""
+    return tuple(
+        f"{ATTACK_TEST_DIR}/test_review_{ticket_number}_{index}.py" for index in range(1, count + 1)
+    )
+
+
+@dataclass(frozen=True)
+class AttackRun:
+    """What happened when the runner ran the reviewer's attack tests.
+
+    ``held``: every attack passed, so the change survived them. ``broke``: an
+    attack failed, which proves a defect. ``error``: the tests could not give a
+    verdict (import error, timeout, refused path), so they prove nothing.
+    """
+
+    status: str
+    output: str = ""
+    tests: tuple[str, ...] = ()
+
+    @property
+    def tail(self) -> str:
+        lines = [line for line in self.output.strip().splitlines() if line.strip()]
+        return "\n".join(lines[-MAX_ATTACK_OUTPUT_LINES:])
 
 
 def _quote(text: str) -> str:
@@ -179,6 +253,14 @@ def compose_reviewer_prompt(
         "(a bug the change did not introduce). A finding without a failure case is "
         "not a finding.",
         "",
+        "Important is narrow: an acceptance criterion of the ticket that is not met, "
+        "or something this change introduces that crashes, corrupts or loses data, "
+        "opens a security hole, or leaks one store's data into another. If you doubt "
+        "it is Important, it is not. Work outside the ticket's scope (another path, "
+        "a nicer design, a missing feature) is a Suggested ticket, at most three, "
+        "never a finding: otherwise every round finds something new and the ticket "
+        "never closes.",
+        "",
         "## Review rules (from main, trusted)",
         "",
         review_rules.strip(),
@@ -214,6 +296,17 @@ def compose_reviewer_prompt(
         _quoted_diff(diff),
         "DIFF>>>",
         "",
+        "## Attack tests",
+        "",
+        "When the change touches backend/, try to break it with pytest tests, as "
+        "the test suite in backend/tests does (same fixtures and conftest). Write each "
+        f"module between a {TEST_BEGIN} line and a {TEST_END} line, at most "
+        f"{MAX_ATTACK_TESTS}. The runner places them, runs them against the change "
+        "and deletes them; you never pick a path. Each test passes when the code is "
+        "right and fails when the defect you claim is real. An Important finding "
+        "that no failing attack test proves is reported to the owner as unproven "
+        "and does not block.",
+        "",
         "## Answer format",
         "",
         "End your answer with exactly one block, one finding per line:",
@@ -221,6 +314,7 @@ def compose_reviewer_prompt(
         BEGIN,
         "[Important] path/to/file.py:42 | one-line summary | failure case",
         "[Nit] path/to/file.py | one-line summary | failure case",
+        "[Suggested ticket] path/to/file.py | one-line title | why it matters",
         END,
         "",
         f"If there is nothing to report, put `{NO_FINDINGS}` alone inside the block.",
@@ -228,7 +322,7 @@ def compose_reviewer_prompt(
     return "\n".join(parts) + "\n"
 
 
-def build_reviewer_feedback(findings: tuple[Finding, ...]) -> str:
+def build_reviewer_feedback(findings: tuple[Finding, ...], attack: AttackRun | None = None) -> str:
     """The builder's feedback for the next step: Important findings, quoted as data."""
     important = [f for f in findings if f.tag == "Important"]
     lines = [
@@ -242,7 +336,56 @@ def build_reviewer_feedback(findings: tuple[Finding, ...]) -> str:
     for finding in important:
         lines.append(f"- `{finding.location}`")
         lines.append(_quote(f"{finding.summary}\nFailure case: {finding.failure}"))
+    if attack is not None and attack.status == "broke":
+        lines += [
+            "",
+            "The reviewer's attack tests failed against your change. Make the code "
+            "pass them, and add a real test for each case to the ticket's own tests: "
+            "the runner deletes the attack tests after this step.",
+            "",
+            "Attack test output:",
+            _quote(attack.tail),
+        ]
+        for index, test in enumerate(attack.tests, start=1):
+            lines += ["", f"Attack test {index}:", _quote(test)]
     return "\n".join(lines)
+
+
+def _defang(text: str) -> str:
+    """Keep model text from pinging people or closing issues from a new ticket."""
+    text = text.replace("@", "@\u200b")
+    return _CLOSING_KEYWORD.sub(lambda m: m.group(1) + "\u200b" + m.group(2), text)
+
+
+def suggested_ticket_title(finding: Finding) -> str:
+    summary = " ".join(_defang(finding.summary).split())[:100] or "(no title)"
+    return f"Suggested by review: {summary}"
+
+
+def suggested_ticket_body(finding: Finding, *, ticket_number: int, pr_number: int) -> str:
+    """A ticket body for work the reviewer found outside the ticket's scope.
+
+    The text is the reviewer's own, quoted as untrusted data. The ticket has no
+    triage label, so the factory never takes it until the owner triages it.
+    """
+    return (
+        "\n".join(
+            [
+                f"Found by the automated review of PR #{pr_number} (ticket #{ticket_number}), "
+                "outside that ticket's scope.",
+                "",
+                "Not triaged: decide whether it is real, then run it through `/to-tickets` "
+                "or close it.",
+                "",
+                "## Reviewer note (untrusted model output)",
+                "",
+                f"- Location: `{_defang(finding.location)}`",
+                "",
+                _quote(_defang(f"{finding.summary}\n{finding.failure}")),
+            ]
+        )
+        + "\n"
+    )
 
 
 def stuck_reason(finding: Finding) -> str:
@@ -280,6 +423,10 @@ class PrePrReview:
         return cls("tampered", reviewer)
 
     @classmethod
+    def leftover(cls, reviewer: str) -> PrePrReview:
+        return cls("leftover", reviewer)
+
+    @classmethod
     def protected(cls) -> PrePrReview:
         return cls("protected")
 
@@ -293,18 +440,41 @@ class PrePrReview:
     def findings(self) -> tuple[Finding, ...]:
         return self.result.findings
 
+    attack: AttackRun | None = None
+
+    def with_attack(self, attack: AttackRun) -> PrePrReview:
+        return PrePrReview(self.status, self.reviewer, self.result, self.reason, attack)
+
     @property
     def blocking(self) -> bool:
-        return self.status == "done" and bool(self.result.important)
+        if self.status != "done":
+            return False
+        if self.attack is not None and self.attack.status == "broke":
+            return True
+        if self.attack is not None and self.attack.status == "held":
+            # Ponytail's rule made checkable: a claim no failing attack backs is
+            # a question for the owner, not a reason to send the builder back.
+            return False
+        return bool(self.result.important)
+
+    @property
+    def unproven(self) -> tuple[Finding, ...]:
+        if self.attack is not None and self.attack.status == "held":
+            return self.result.important
+        return ()
 
     def stuck_check(self, *, last_step: bool) -> str | None:
         """The stuck reason, or None when the ticket may continue or publish."""
         if self.status == "tampered":
             return TAMPERED
+        if self.status == "leftover":
+            return ATTACK_LEFTOVER
         if self.status == "protected":
             return PROTECTED_PATH_CHANGED
         if self.blocking and last_step:
-            return stuck_reason(self.result.important[0])
+            if self.result.important:
+                return stuck_reason(self.result.important[0])
+            return "review: an attack test failed"
         return None
 
     def pr_lines(self, open_findings: tuple[Finding, ...] = ()) -> tuple[str, ...]:
@@ -329,6 +499,12 @@ class PrePrReview:
         if self.status == "failed":
             return (f"- automated review failed ({self.reason}): read in full.",)
         lines = [f"- Automated review by `{self.reviewer}`: No blocking findings."]
+        lines += self._attack_lines()
+        lines += [
+            f"- Unproven (attack tests held; read it): `{f.location}` {f.summary} "
+            f"(failure: {f.failure})"
+            for f in self.unproven
+        ]
         lines += [
             f"- [{f.tag}] `{f.location}` {f.summary} (failure: {f.failure})"
             for f in self.result.non_blocking
@@ -338,3 +514,13 @@ class PrePrReview:
         if len(unparsed) > MAX_UNPARSED_IN_PR:
             lines.append(f"- … and {len(unparsed) - MAX_UNPARSED_IN_PR} more unparsed lines.")
         return tuple(lines)
+
+    def _attack_lines(self) -> list[str]:
+        if self.attack is None:
+            return []
+        count = len(self.attack.tests)
+        if self.attack.status == "held":
+            return [f"- Attack tests: {count} written by the reviewer, all held."]
+        if self.attack.status == "error":
+            return [f"- Attack tests: {count} could not run, so they prove nothing."]
+        return []

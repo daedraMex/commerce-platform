@@ -354,6 +354,7 @@ Run these once, as the admin user unless a step says `factory`.
     # FACTORY_MAX_TICKETS=1
     # FACTORY_ATTEMPTS=3              # max agent steps per ticket
     # FACTORY_PRE_PR_REVIEW=1         # 0 turns the pre-PR reviewer off
+    # FACTORY_REVIEW_TESTS=0          # 1 runs the reviewer's attack tests (backend only)
     # FACTORY_AGENT_CONFIG_HOME=/srv/factory/agent-config  # agent's read-only OpenCode config
     # FACTORY_TIME_LIMIT_MINUTES=120  # max wall-clock per ticket
     # FACTORY_REPO=daedraMex/commerce-platform
@@ -398,13 +399,20 @@ Run these once, as the admin user unless a step says `factory`.
     ```
 
 12. **Protect `main`.** `.github/CODEOWNERS` contains `* @daedraMex`. On
-    GitHub: require a pull request before merging, require 1 approval, turn on
-    **Require review from Code Owners**, and require the "Backend" and "Ticket
-    link" checks. Do not give the factory or any agent a bypass. The repository
-    admin (the owner) may bypass the ruleset in a pull request, but only to
-    merge her own human pull requests, which GitHub does not let her approve;
-    factory pull requests always go through her approval. Agents (the factory,
-    evaluators and reviewers) never approve.
+    GitHub, two rulesets target the default branch (ADR-0032):
+    - **main approval**: require a pull request before merging, require 1
+      approval, turn on **Require review from Code Owners**, and block
+      deletion and force pushes. The repository admin (the owner) is its only
+      bypass actor, in pull requests, and uses it only to merge her own human
+      pull requests, which GitHub does not let her approve; factory pull
+      requests always go through her approval.
+    - **main checks**: require the "Backend", "Console", "Level 2 E2E",
+      "Celery broker" and "Ticket link" checks, with **Require branches to be
+      up to date before merging**. No bypass actors.
+
+    In the repository settings, turn on **Always suggest updating pull request
+    branches**. Do not give the factory or any agent a bypass. Agents (the
+    factory, evaluators and reviewers) never approve.
 
 ## Migrating an existing machine
 
@@ -620,15 +628,46 @@ unreachable" as before.
   cached `rg`, `~/.gitconfig`). A builder could use it to blind the reviewer in
   later runs; the reviewer is advisory, and the owner's approval, the
   protected-path guard and the worktree fingerprint still gate every PR.
+- **Important is narrow; the rest becomes a ticket.** `REVIEW.md` limits
+  Important to an unmet acceptance criterion or something the change introduces
+  that crashes, corrupts data, opens a security hole or leaks across stores. Work
+  outside the ticket's scope is a `[Suggested ticket]` (at most three): after the
+  PR opens, the factory opens each as an untriaged issue linking the PR, with the
+  reviewer's text quoted, `@` mentions and closing keywords defanged, and no
+  label, so it is never agent-ready until the owner triages it. A failed issue is
+  logged and the run stays a success.
+- **Attack tests (`FACTORY_REVIEW_TESTS=1`, off by default).** On a ticket that
+  touches `backend/`, the reviewer may answer with up to three pytest modules
+  between `REVIEW-TEST-BEGIN` and `REVIEW-TEST-END`. The reviewer stays read-only:
+  the runner writes them to `backend/tests/review/test_review_<n>_<k>.py`, runs
+  them as the agent through `backend/scripts/check.sh --review-tests` (the mode
+  accepts only those names, so the existing sudoers rule covers it), and always
+  deletes them; the worktree fingerprint must then match the one taken before the
+  review, or the ticket goes stuck as `attack tests left changes in the worktree`.
+  A failing attack blocks and goes back to the builder with its output and
+  source; when every attack passes, Important findings are listed in the PR body
+  as **Unproven** and do not block; tests that cannot give a verdict (import
+  error, timeout) prove nothing, and the findings block as before. Turn it on
+  only after one `FACTORY_REVIEW_TESTS=1 uv run factory` by hand on the machine.
 - **Pull request body.** Besides the summary and decisions, every factory PR
-  lists under **Verification** each area check script that passed or was
-  skipped and the agent steps used, under **Review** the pre-PR review's
+  lists under **Verification** the commit its checks ran on, each area check
+  script that passed or was skipped, the agent steps used and the last lines of
+  the check output, under **Review** the pre-PR review's
   outcome and non-blocking findings, under **Risk** changed migrations, console
   check configuration (`CHECK_CONFIG_NAME_PATTERNS` in `diff.py`: `vitest.config.*`,
   `playwright*.config.*`, `tsconfig*.json` and similar, which
   decide what the checks see, so read them in full) and sensitive paths
   (`SENSITIVE_PREFIXES` in `diff.py`), and under **How to revert** what undoing
   the merge takes.
+- **Evidence check.** **Verification** sits between
+  `<!-- factory:verification sha=<sha> -->` markers. The `Evidence` job in
+  `.github/workflows/pr-ticket.yml` fails an `nf/*` PR whose body does not name
+  its current head, so a push after the checks cannot merge on old evidence. A
+  review fix rewrites the section with its new commit before it pushes; if the
+  body cannot be read or edited, nothing is pushed and the ticket goes stuck. When
+  the owner pushes to a factory branch by hand, the `evidence-manual` label lets
+  the PR pass and says the owner reviewed that head herself. Make `Evidence` a
+  required check on `main` and create the `evidence-manual` label once.
 - **Areas.** Each ticket's changed files select its check areas: `backend/**`
   runs `backend/scripts/check.sh`, and `web/console/**` or `packages/**` runs
   `web/console/scripts/check.sh` (so a backend ticket that refreshes

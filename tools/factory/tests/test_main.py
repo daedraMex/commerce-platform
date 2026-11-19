@@ -85,6 +85,10 @@ class FakeGit:
         self.existing_worktrees = set()
         self.existing_branches = set()
         self.head_sha_value = "a" * 40
+        self.placed_tests = []
+        self.attack_runs = []
+        self.attack_results = []
+        self.removed_tests = []
 
     def fetch_main(self, repo_dir):
         self.events.append("fetch_main")
@@ -178,6 +182,16 @@ class FakeGit:
     def review_changed_files(self, worktree):
         return list(self.review_files)
 
+    def place_review_tests(self, worktree, tests):
+        self.placed_tests.append(dict(tests))
+
+    def run_review_tests(self, worktree, files):
+        self.attack_runs.append(tuple(files))
+        return self.attack_results.pop(0) if self.attack_results else ("held", "1 passed")
+
+    def remove_review_tests(self, worktree, relpaths):
+        self.removed_tests.append(tuple(relpaths))
+
     def worktree_fingerprint(self, worktree):
         if self.fingerprints:
             return self.fingerprints.pop(0)
@@ -229,7 +243,14 @@ class FakeGitHub:
         open_pr_branches=(),
         issue_label_errors=0,
         pr_label_error=None,
+        pr_bodies=None,
+        pr_body_error=None,
     ):
+        self.pr_bodies = dict(pr_bodies or {})
+        self.created_issues = []
+        self.issue_error = None
+        self.pr_body_error = pr_body_error
+        self.edited_bodies = []
         self.tickets = tickets or []
         # How many add_issue_label calls fail before one succeeds.
         self.issue_label_errors = issue_label_errors
@@ -321,6 +342,21 @@ class FakeGitHub:
     def comment(self, number, body, token):
         self.comments.append((number, body, token))
         return f"https://github.com/r/issues/{number}#comment-1"
+
+    def create_issue(self, *, title, body, token):
+        if self.issue_error is not None:
+            raise self.issue_error
+        self.created_issues.append((title, body, token))
+        return 200 + len(self.created_issues)
+
+    def pr_body(self, number, token):
+        if self.pr_body_error is not None:
+            raise self.pr_body_error
+        return self.pr_bodies.get(number, "Closes #7\n")
+
+    def edit_pr_body(self, number, body, token):
+        self.edited_bodies.append((number, body, token))
+        self.pr_bodies[number] = body
 
 
 class FakeTokenProvider:
@@ -645,6 +681,72 @@ def test_success_pr_body_carries_verification_risk_and_revert(tmp_path):
     assert "Agent steps: 1 of 5" in body
     assert "## Risk" in body
     assert "## How to revert" in body
+
+
+def test_success_pr_body_names_the_checked_commit_and_the_check_output(tmp_path):
+    git = FakeGit(check_passed=True, check_output="=== backend ===\n512 passed in 3.0s")
+    git.head_sha_value = "b" * 40
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})])
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    body = github.created_prs[0][2]
+    assert f"<!-- factory:verification sha={'b' * 40} -->" in body
+    assert "512 passed in 3.0s" in body
+
+
+def test_review_fix_updates_the_evidence_before_pushing(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.head_sha_value = "e" * 40
+    old_body = (
+        "Closes #7\n\n<!-- factory:verification sha=" + "c" * 40 + " -->\n"
+        "## Verification\n\nold\n<!-- /factory:verification -->\n\n## Risk\n"
+    )
+    github = FakeGitHub(review_fixes=[make_review_fix()], pr_bodies={101: old_body})
+    pushed_when_edited = []
+    record_edit = github.edit_pr_body
+
+    def edit(number, body, token):
+        pushed_when_edited.append(list(git.pushed))
+        record_edit(number, body, token)
+
+    github.edit_pr_body = edit
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    assert pushed_when_edited == [[]]
+    number, body, _token = github.edited_bodies[0]
+    assert number == 101
+    assert f"sha={'e' * 40}" in body
+    assert f"sha={'c' * 40}" not in body
+    assert "## Risk" in body
+    assert git.pushed == [("nf/7-ticket-7", "TOKEN")]
+
+
+def test_review_fix_whose_body_cannot_be_read_goes_stuck_without_push(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(
+        review_fixes=[make_review_fix()],
+        pr_body_error=GitHubError("gh api pulls/101 failed: HTTP 502"),
+    )
+    notifier = RecordingNotifier()
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=notifier
+    )
+
+    results = factory.run()
+
+    assert git.pushed == []
+    assert github.edited_bodies == []
+    assert results[0].ok is False
+    assert [number for number, _body, _token in github.comments] == [7]
+    assert "PR body evidence not updated" in github.comments[0][1]
 
 
 def test_fetch_failure_aborts_the_run_and_notifies(tmp_path):
@@ -1917,9 +2019,13 @@ def review_settings(tmp_path, **overrides):
     return replace(make_settings(tmp_path), **{"pre_pr_review": True, **overrides})
 
 
-def run_with_reviewer(tmp_path, reviews, *, labels=("ready-for-agent",), git=None, **settings):
+def run_with_reviewer(
+    tmp_path, reviews, *, labels=("ready-for-agent",), git=None, setup_github=None, **settings
+):
     git = git or FakeGit(check_passed=True, decisions=DECISIONS_DOC)
     github = FakeGitHub(tickets=[make_ticket(7, labels=set(labels))], pr_number=101)
+    if setup_github is not None:
+        setup_github(github)
     runner = ScriptedRunner(reviews)
     notifier = RecordingNotifier()
     factory = build_factory(
@@ -1999,6 +2105,135 @@ def test_nits_are_listed_in_the_pr_body_and_never_block(tmp_path):
     body = github.created_prs[0][2]
     assert "[Nit] `backend/apps/x/views.py:3` duplicated helper" in body
     assert "[Pre-existing] `backend/apps/y.py` old bug" in body
+
+
+SUGGESTED = AgentResult(
+    exit_code=0,
+    stdout=(
+        "REVIEW-FINDINGS-BEGIN\n"
+        "[Suggested ticket] backend/apps/x/views.py:9 | paginate the list @daedraMex | "
+        "a big store loads every row; fixes #12\n"
+        "[Suggested ticket] a.py | two | b\n"
+        "[Suggested ticket] a.py | three | b\n"
+        "[Suggested ticket] a.py | four | b\n"
+        "REVIEW-FINDINGS-END\n"
+    ),
+    stderr="",
+    timed_out=False,
+)
+
+
+def test_suggested_tickets_never_block_and_open_at_most_three_untriaged_issues(tmp_path):
+    results, _, github, runner, _ = run_with_reviewer(tmp_path, [SUGGESTED])
+
+    assert results[0].ok
+    assert len(runner.builder_prompts) == 1
+    assert len(github.created_issues) == 3
+    title, body, _token = github.created_issues[0]
+    assert title == "Suggested by review: paginate the list @\u200bdaedraMex"
+    assert "PR #101 (ticket #7)" in body
+    assert "untrusted model output" in body
+    assert "@daedraMex" not in body
+    assert "fixes #12" not in body
+    assert "[Suggested ticket] `backend/apps/x/views.py:9`" in github.created_prs[0][2]
+
+
+def test_a_failed_suggested_ticket_keeps_the_run_a_success(tmp_path, capsys):
+    def failing(github):
+        github.issue_error = GitHubError("HTTP 403")
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [SUGGESTED], setup_github=failing)
+
+    assert results[0].ok
+    assert github.created_issues == []
+    assert "suggested ticket not opened" in capsys.readouterr().err
+
+
+ATTACKED = AgentResult(
+    exit_code=0,
+    stdout=(
+        "REVIEW-FINDINGS-BEGIN\n"
+        "[Important] backend/apps/x/use_case.py:12 | link and save are not atomic | "
+        "save raises -> partial state\n"
+        "REVIEW-FINDINGS-END\n"
+        "REVIEW-TEST-BEGIN\n"
+        "```python\n"
+        "def test_attack_rollback():\n"
+        "    assert False\n"
+        "```\n"
+        "REVIEW-TEST-END\n"
+    ),
+    stderr="",
+    timed_out=False,
+)
+
+
+def test_a_failing_attack_test_sends_the_builder_back_with_the_test(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.attack_results = [("broke", "FAILED test_attack_rollback - assert False"), ("held", "")]
+
+    results, _, github, runner, _ = run_with_reviewer(
+        tmp_path, [ATTACKED, NO_FINDINGS], git=git, review_tests=True
+    )
+
+    assert results[0].ok
+    assert git.placed_tests[0] == {
+        "tests/review/test_review_7_1.py": "def test_attack_rollback():\n    assert False\n"
+    }
+    assert git.removed_tests[0] == ("tests/review/test_review_7_1.py",)
+    assert len(runner.builder_prompts) == 2
+    assert "FAILED test_attack_rollback" in runner.builder_prompts[1]
+    assert "def test_attack_rollback" in runner.builder_prompts[1]
+
+
+def test_an_important_finding_no_attack_proves_is_unproven_and_does_not_block(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.attack_results = [("held", "1 passed")]
+
+    results, _, github, runner, _ = run_with_reviewer(
+        tmp_path, [ATTACKED], git=git, review_tests=True
+    )
+
+    assert results[0].ok
+    assert len(runner.builder_prompts) == 1
+    body = github.created_prs[0][2]
+    assert "Attack tests: 1 written by the reviewer, all held." in body
+    assert "Unproven (attack tests held; read it)" in body
+    assert "link and save are not atomic" in body
+
+
+def test_attack_tests_that_cannot_run_fall_back_to_the_findings(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.attack_results = [("error", "ImportError"), ("error", "ImportError")]
+
+    results, _, _, runner, _ = run_with_reviewer(
+        tmp_path, [ATTACKED, NO_FINDINGS], git=git, review_tests=True
+    )
+
+    assert results[0].ok
+    assert len(runner.builder_prompts) == 2
+
+
+def test_attack_tests_that_leave_changes_behind_make_the_ticket_stuck(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.fingerprints = ["same", "same", "changed"]
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [ATTACKED], git=git, review_tests=True)
+
+    assert results[0].ok is False
+    assert github.created_prs == []
+    assert "attack tests left changes in the worktree" in github.comments[0][1]
+
+
+def test_attack_tests_stay_off_by_default_and_for_console_only_changes(tmp_path):
+    off = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    run_with_reviewer(tmp_path / "off", [ATTACKED, NO_FINDINGS], git=off)
+    console = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    console.review_files = ["web/console/src/app/page.tsx"]
+    run_with_reviewer(tmp_path / "console", [ATTACKED, NO_FINDINGS], git=console, review_tests=True)
+
+    assert off.attack_runs == []
+    assert console.attack_runs == []
 
 
 def test_strong_model_ticket_skips_the_reviewer(tmp_path):

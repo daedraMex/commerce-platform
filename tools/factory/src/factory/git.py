@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .areas import Area, select_areas
+from .areas import BACKEND, Area, select_areas
 from .diff import DiffStats, build_diff_stats
 from .runner import (
     build_check_env,
@@ -34,6 +34,7 @@ BOT_COMMIT_NAME = "xolo-bot[bot]"
 BOT_COMMIT_EMAIL_DOMAIN = "users.noreply.github.com"
 RM_BIN = "/usr/bin/rm"
 CHECK_TIMEOUT_SECONDS = 1800
+REVIEW_TESTS_TIMEOUT_SECONDS = 600
 CHECK_SCRIPT_RELATIVE = Path("backend") / "scripts" / "check.sh"
 CLEANUP_PROBE_RELATIVE = Path("backend") / ".cleanup-probe"
 CLEANUP_PROBE_SCRIPT = """#!/usr/bin/env bash
@@ -441,6 +442,68 @@ class Git:
             checked_areas=tuple(checked),
             skipped_areas=tuple(skipped),
         )
+
+    def run_review_tests(self, worktree: Path, files: tuple[str, ...]) -> tuple[str, str]:
+        """Run the reviewer's attack tests as the agent; return (status, output).
+
+        ``files`` are backend-relative paths the runner chose. The tests go through
+        ``backend/scripts/check.sh --review-tests``, the one backend entry the sudoers
+        rule allows, with the backend's check environment. pytest exit 0 means the
+        attacks held, 1 means one broke; anything else (refused path, import error,
+        no tests collected, timeout) gives no verdict.
+        """
+        script = worktree / BACKEND.script
+        if not script.is_file():
+            return "error", "backend/scripts/check.sh not found"
+        env = build_check_env(
+            self._base_env,
+            agent_user=self._agent_user,
+            agent_home=self._agent_home,
+            area=BACKEND,
+        )
+        # No bytecode: the runner deletes the tests afterwards, and an agent-owned
+        # __pycache__ beside them would outlive that cleanup.
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        argv = [str(script), "--review-tests", *files]
+        if self._agent_user:
+            argv = sudo_argv(self._agent_user, argv, env)
+        try:
+            result = self._run(
+                argv,
+                str(script.parent),
+                timeout=REVIEW_TESTS_TIMEOUT_SECONDS,
+                env=env,
+                replace_env=True,
+            )
+        except CommandTimeout:
+            kill_agent_processes(self._run, self._agent_user)
+            ensure_agent_cleanup(self._run, self._agent_user)
+            return "error", f"attack tests timed out after {REVIEW_TESTS_TIMEOUT_SECONDS}s"
+        ensure_agent_cleanup(self._run, self._agent_user)
+        output = result.stdout + (("\n" + result.stderr) if result.stderr else "")
+        if result.exit_code == 0:
+            return "held", output
+        if result.exit_code == 1:
+            return "broke", output
+        return "error", output
+
+    def place_review_tests(self, worktree: Path, tests: dict[str, str]) -> None:
+        """Write the attack tests at backend-relative paths the runner chose."""
+        for relpath, content in tests.items():
+            path = worktree / "backend" / relpath
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+
+    def remove_review_tests(self, worktree: Path, relpaths: tuple[str, ...]) -> None:
+        """Delete the attack tests, then their directory if nothing else is in it."""
+        parents = set()
+        for relpath in relpaths:
+            path = worktree / "backend" / relpath
+            path.unlink(missing_ok=True)
+            parents.add(path.parent)
+        for parent in parents:
+            if parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
 
     def head_sha(self, worktree: Path) -> str:
         result = self._run(["git", "rev-parse", "HEAD"], str(worktree), timeout=60)

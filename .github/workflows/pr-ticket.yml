@@ -2,7 +2,7 @@ name: PR ticket
 
 "on":
   pull_request:
-    types: [opened, edited, reopened, synchronize]
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -26,3 +26,37 @@ jobs:
             echo "::error::The PR body must contain 'Closes #<ticket>' or 'Part of #<ticket>'."
             exit 1
           fi
+
+  evidence:
+    # A factory PR merges only on evidence from its current head: the runner writes
+    # the checked commit into the body, and a later push makes that evidence stale.
+    name: Evidence
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require factory evidence for the head commit
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MANUAL: ${{ contains(github.event.pull_request.labels.*.name, 'evidence-manual') }}
+        run: |
+          set -euo pipefail
+          case "$HEAD_REF" in
+            nf/*) ;;
+            *) echo "Not a factory branch; skipping."; exit 0 ;;
+          esac
+          if [ "$MANUAL" = "true" ]; then
+            echo "::notice::evidence-manual: the owner reviews this head by hand."
+            exit 0
+          fi
+          shas=$(printf '%s' "$PR_BODY" | grep -Eo 'factory:verification sha=[0-9a-f]{40}' | sed 's/.*sha=//' || true)
+          count=$(printf '%s' "$shas" | grep -c . || true)
+          if [ "$count" -ne 1 ]; then
+            echo "::error::Expected one factory verification marker in the PR body, found $count."
+            exit 1
+          fi
+          if [ "$shas" != "$HEAD_SHA" ]; then
+            echo "::error::Evidence is for $shas but the PR head is $HEAD_SHA. Re-run the factory or add the evidence-manual label."
+            exit 1
+          fi
+          echo "Evidence matches head $HEAD_SHA."
