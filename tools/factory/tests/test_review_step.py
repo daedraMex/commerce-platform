@@ -202,3 +202,83 @@ def test_an_important_tag_that_says_none_is_no_finding():
 
     assert review.findings == ()
     assert review.unparsed == ()
+
+
+def test_suggested_tickets_parse_and_never_block():
+    result = parse_review(
+        "REVIEW-FINDINGS-BEGIN\n"
+        "[Suggested ticket] backend/apps/x.py:9 | paginate the list | big stores load all rows\n"
+        "REVIEW-FINDINGS-END\n"
+    )
+
+    assert result.ok
+    assert result.important == ()
+    assert [f.tag for f in result.suggested] == ["Suggested ticket"]
+    assert result.suggested[0].summary == "paginate the list"
+
+
+def test_the_reviewer_prompt_keeps_important_narrow():
+    from factory.tickets import Ticket
+
+    prompt = compose_reviewer_prompt(
+        Ticket(number=7, title="t", body="b", labels=frozenset()),
+        review_rules="rules",
+        diff="+x",
+        previous=(),
+    )
+
+    assert "If you doubt it is Important, it is not." in prompt
+    assert "[Suggested ticket]" in prompt
+
+
+def test_attack_tests_are_parsed_without_fences_capped_and_bounded():
+    from factory.review_step import MAX_ATTACK_TEST_CHARS, parse_attack_tests
+
+    blocks = "".join(
+        f"REVIEW-TEST-BEGIN\n```python\ndef test_{i}():\n    pass\n```\nREVIEW-TEST-END\n"
+        for i in range(5)
+    )
+    huge = "REVIEW-TEST-BEGIN\n" + "x" * (MAX_ATTACK_TEST_CHARS + 1) + "\nREVIEW-TEST-END\n"
+
+    tests = parse_attack_tests(huge + blocks)
+
+    assert tests == tuple(f"def test_{i}():\n    pass\n" for i in range(3))
+
+
+def _review(attack_status=None, important=True):
+    from factory.review_step import AttackRun, PrePrReview
+
+    line = "[Important] a.py:1 | broken | x -> y\n" if important else "NO FINDINGS\n"
+    review = PrePrReview.done(
+        "strong", parse_review(f"REVIEW-FINDINGS-BEGIN\n{line}REVIEW-FINDINGS-END\n")
+    )
+    if attack_status is None:
+        return review
+    return review.with_attack(AttackRun(attack_status, "FAILED x", ("def test_x(): ...\n",)))
+
+
+def test_a_broken_attack_blocks_even_without_an_important_finding():
+    assert _review("broke", important=False).blocking
+
+
+def test_held_attacks_make_important_findings_unproven():
+    review = _review("held")
+
+    assert not review.blocking
+    assert [f.summary for f in review.unproven] == ["broken"]
+    assert any("Unproven" in line for line in review.pr_lines())
+
+
+def test_attacks_that_cannot_run_keep_the_findings_blocking():
+    assert _review("error").blocking
+    assert _review(None).blocking
+
+
+def test_builder_feedback_carries_the_failing_attack_and_its_source():
+    review = _review("broke")
+
+    feedback = build_reviewer_feedback(review.findings, review.attack)
+
+    assert "FAILED x" in feedback
+    assert "def test_x()" in feedback
+    assert "the runner deletes the attack tests" in feedback
