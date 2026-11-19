@@ -39,6 +39,9 @@ jobs:
           HEAD_REF: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           MANUAL: ${{ contains(github.event.pull_request.labels.*.name, 'evidence-manual') }}
+          BASE_REF: ${{ github.base_ref }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           case "$HEAD_REF" in
@@ -55,8 +58,40 @@ jobs:
             echo "::error::Expected one factory verification marker in the PR body, found $count."
             exit 1
           fi
-          if [ "$shas" != "$HEAD_SHA" ]; then
-            echo "::error::Evidence is for $shas but the PR head is $HEAD_SHA. Re-run the factory or add the evidence-manual label."
-            exit 1
+          if [ "$shas" = "$HEAD_SHA" ]; then
+            echo "Evidence matches head $HEAD_SHA."
+            exit 0
           fi
-          echo "Evidence matches head $HEAD_SHA."
+          # "Update branch" adds GitHub-signed merges of the base into the branch.
+          # Walk back through them: each must have two parents, be committed by
+          # GitHub with a valid signature, and bring in a commit already on the
+          # base. The required checks run on that combination (ADR-0032), so the
+          # evidence still covers every change the factory made. Anything else
+          # (a push, a local merge, a third parent) is a head without evidence.
+          sha="$HEAD_SHA"
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            commit=$(gh api "repos/$REPO/commits/$sha") || {
+              echo "::error::Could not read commit $sha."; exit 1; }
+            parents=$(printf '%s' "$commit" | jq -r '[.parents[].sha] | join(" ")')
+            committer=$(printf '%s' "$commit" | jq -r '.committer.login // ""')
+            verified=$(printf '%s' "$commit" | jq -r '.commit.verification.verified')
+            read -r first second extra <<< "$parents"
+            if [ -z "${second:-}" ] || [ -n "${extra:-}" ] \
+              || [ "$committer" != "web-flow" ] || [ "$verified" != "true" ]; then
+              echo "::error::Evidence is for $shas but the PR head is $HEAD_SHA, and $sha is not a GitHub 'Update branch' merge. Re-run the factory or add the evidence-manual label."
+              exit 1
+            fi
+            status=$(gh api "repos/$REPO/compare/$BASE_REF...$second" --jq .status) || {
+              echo "::error::Could not compare $second with $BASE_REF."; exit 1; }
+            case "$status" in
+              behind | identical) ;;
+              *) echo "::error::Merge $sha brings in $second, which is not on $BASE_REF."; exit 1 ;;
+            esac
+            if [ "$first" = "$shas" ]; then
+              echo "::notice::Evidence is for $shas; the head adds only 'Update branch' merges of $BASE_REF."
+              exit 0
+            fi
+            sha="$first"
+          done
+          echo "::error::More than 10 merges between the evidence ($shas) and the head; re-run the factory."
+          exit 1
