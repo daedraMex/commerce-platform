@@ -150,3 +150,77 @@ export function resizeCrop(
     height: nextBottom - nextTop,
   };
 }
+
+export const GROUP_CROP_ASPECT = 4 / 5;
+
+/**
+ * Normalized height per normalized width that makes a crop 4:5 in pixels:
+ * (width * imageWidth) / (height * imageHeight) = aspect, so height = width * scale.
+ */
+export function cropAspectScale(
+  imageWidth: number,
+  imageHeight: number,
+  aspect: number,
+): number {
+  if (imageWidth <= 0 || imageHeight <= 0 || aspect <= 0) {
+    return 1;
+  }
+
+  return imageWidth / (aspect * imageHeight);
+}
+
+/** The largest centred crop at the target pixel aspect ratio inside the photo. */
+export function cropForAspect(
+  imageWidth: number,
+  imageHeight: number,
+  aspect: number,
+): NormalizedCrop {
+  const scale = cropAspectScale(imageWidth, imageHeight, aspect);
+  const width = Math.min(1, 1 / scale);
+  const height = width * scale;
+
+  return {
+    x: (1 - width) / 2,
+    y: (1 - height) / 2,
+    width,
+    height,
+  };
+}
+
+/** Resize a crop while keeping it at the target pixel aspect ratio. */
+export function resizeCropToAspect(
+  crop: NormalizedCrop,
+  handle: CropHandle,
+  dx: number,
+  dy: number,
+  aspectScale: number,
+): NormalizedCrop {
+  if (aspectScale <= 0) {
+    return crop;
+  }
+
+  const east = handle === "ne" || handle === "se";
+  const south = handle === "sw" || handle === "se";
+  const right = crop.x + crop.width;
+  const bottom = crop.y + crop.height;
+
+  let width = east ? crop.width + dx : crop.width - dx;
+  if (Math.abs(dy) > Math.abs(dx)) {
+    const height = south ? crop.height + dy : crop.height - dy;
+    width = height / aspectScale;
+  }
+
+  const maxWidthByX = east ? 1 - crop.x : right;
+  const maxWidthByY = (south ? 1 - crop.y : bottom) / aspectScale;
+  const maxWidth = Math.max(0.01, Math.min(maxWidthByX, maxWidthByY));
+  const minWidth = Math.min(0.1, maxWidth);
+  width = Math.min(maxWidth, Math.max(minWidth, width));
+
+  const height = width * aspectScale;
+  return {
+    x: east ? crop.x : right - width,
+    y: south ? crop.y : bottom - height,
+    width,
+    height,
+  };
+}

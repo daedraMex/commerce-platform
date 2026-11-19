@@ -354,6 +354,20 @@ function authorized(request: Request): boolean {
   );
 }
 
+function normalizeProductIds(value: unknown): number[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const ids = new Set<number>();
+  for (const item of value) {
+    if (typeof item !== "number" || !Number.isInteger(item) || item < 1) {
+      return null;
+    }
+    ids.add(item);
+  }
+  return [...ids].sort((a, b) => a - b);
+}
+
 export const handlers = [
   http.post("*/api/v1/staff/photos/", async ({ request }) => {
     if (!authorized(request)) {
@@ -466,7 +480,7 @@ export const handlers = [
     });
   }),
 
-  http.post("*/api/v1/staff/photos/:id/apply/", ({ request, params }) => {
+  http.post("*/api/v1/staff/photos/:id/apply/", async ({ request, params }) => {
     if (!authorized(request)) {
       return problem(
         401,
@@ -483,6 +497,39 @@ export const handlers = [
         "No photo submission matches this id in this store.",
       );
     }
+
+    if (submission.kind === "group") {
+      let body: { product_ids?: unknown } = {};
+      try {
+        body = (await request.json()) as { product_ids?: unknown };
+      } catch {
+        body = {};
+      }
+      const productIds = normalizeProductIds(body.product_ids);
+      if (
+        !productIds ||
+        productIds.length === 0 ||
+        submission.status !== "ready" ||
+        submission.discarded_at
+      ) {
+        return photoProblem(
+          409,
+          "submission_cannot_apply",
+          "Only a ready group photo with products can be applied.",
+        );
+      }
+
+      return HttpResponse.json(
+        saveSubmission({
+          ...submission,
+          applied_at: submission.applied_at ?? new Date().toISOString(),
+          linked_product_ids: productIds,
+          updated_at: new Date().toISOString(),
+          version: submission.version + 1,
+        }),
+      );
+    }
+
     if (
       submission.status !== "ready" ||
       submission.applied_at ||
@@ -499,6 +546,65 @@ export const handlers = [
       saveSubmission({
         ...submission,
         applied_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        version: submission.version + 1,
+      }),
+    );
+  }),
+
+  http.post("*/api/v1/staff/photos/:id/links/", async ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const submission = storedSubmission(Number(params.id));
+    if (!submission) {
+      return problem(
+        404,
+        "not_found",
+        "No photo submission matches this id in this store.",
+      );
+    }
+
+    let body: { product_ids?: unknown } = {};
+    try {
+      body = (await request.json()) as { product_ids?: unknown };
+    } catch {
+      return problem(
+        400,
+        "validation_error",
+        "The body must be a JSON object with product_ids.",
+      );
+    }
+    const productIds = normalizeProductIds(body.product_ids);
+    if (!productIds) {
+      return problem(
+        400,
+        "validation_error",
+        "product_ids must be a list of product ids.",
+      );
+    }
+    if (
+      submission.kind !== "group" ||
+      submission.status !== "ready" ||
+      !submission.applied_at ||
+      submission.discarded_at
+    ) {
+      return photoProblem(
+        409,
+        "submission_cannot_change_links",
+        "Only an applied group photo can change its links.",
+      );
+    }
+
+    return HttpResponse.json(
+      saveSubmission({
+        ...submission,
+        linked_product_ids: productIds,
         updated_at: new Date().toISOString(),
         version: submission.version + 1,
       }),
