@@ -1,5 +1,7 @@
 import * as React from "react";
 
+import { StoreQueryScope } from "@/components/providers/store-query-scope";
+import { StoreRoute } from "@/components/providers/store-route";
 import { SessionGate } from "@/features/auth/organisms/session-gate";
 
 export default async function StoreLayout({
@@ -11,5 +13,11 @@ export default async function StoreLayout({
 }) {
   const { store } = await params;
 
-  return <SessionGate store={store}>{children}</SessionGate>;
+  return (
+    <StoreRoute store={store}>
+      <SessionGate store={store}>
+        <StoreQueryScope store={store}>{children}</StoreQueryScope>
+      </SessionGate>
+    </StoreRoute>
+  );
 }

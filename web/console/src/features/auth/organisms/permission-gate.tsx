@@ -5,6 +5,9 @@ import { useTranslations } from "next-intl";
 
 import { useApiV1MeRetrieve } from "@commerce-platform/api-client";
 
+import { useGlobalQueryClient } from "@/lib/query/global-query-client";
+import { SESSION_STALE_TIME_MS } from "../lib/session-query";
+
 type PermissionGateProps = {
   store: string;
   permission: string;
@@ -17,9 +20,16 @@ export function PermissionGate({
   children,
 }: PermissionGateProps) {
   const t = useTranslations("Session");
-  const { data, isPending } = useApiV1MeRetrieve({
-    query: { retry: false },
-  });
+  const globalQueryClient = useGlobalQueryClient();
+  const { data, isPending } = useApiV1MeRetrieve(
+    {
+      query: {
+        retry: false,
+        staleTime: SESSION_STALE_TIME_MS,
+      },
+    },
+    globalQueryClient ?? undefined,
+  );
 
   const membership = data?.memberships.find(
     (item) => item.store.slug === store,

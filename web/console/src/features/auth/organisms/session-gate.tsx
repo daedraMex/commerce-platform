@@ -10,6 +10,7 @@ import { useApiV1MeRetrieve } from "@commerce-platform/api-client";
 import { Button } from "@/components/atoms/button";
 import { ConsoleShell } from "@/components/templates/console-shell";
 import { CSRF_HEADER, CSRF_HEADER_VALUE } from "@/lib/auth/constants";
+import { SESSION_STALE_TIME_MS } from "../lib/session-query";
 
 type SessionGateProps = {
   store: string;
@@ -32,7 +33,7 @@ export function SessionGate({ store, children }: SessionGateProps) {
   const signingOutRef = React.useRef(false);
 
   const { data, error, isPending } = useApiV1MeRetrieve({
-    query: { retry: false },
+    query: { retry: false, staleTime: SESSION_STALE_TIME_MS },
   });
 
   const memberships = React.useMemo(() => data?.memberships ?? [], [data]);

@@ -1,6 +1,6 @@
 import { axiosInstance } from "@commerce-platform/api-client";
 
-import { storeSlugFromPathname } from "@/lib/store-path";
+import { getCurrentStore } from "@/lib/api/store-source";
 
 let installed = false;
 
@@ -15,7 +15,7 @@ export function installStoreHeader(): void {
       return config;
     }
 
-    const store = storeSlugFromPathname(window.location.pathname);
+    const store = getCurrentStore();
     if (store) {
       config.headers.set("X-Store", store);
     }

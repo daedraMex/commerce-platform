@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { axiosInstance } from "@commerce-platform/api-client";
 
+import { setCurrentStore } from "@/lib/api/store-source";
 import { installStoreHeader } from "@/lib/api/store-header";
 
 const originalAdapter = axiosInstance.defaults.adapter;
@@ -27,16 +28,17 @@ function captureRequest() {
 
 beforeEach(() => {
   installStoreHeader();
+  setCurrentStore(undefined);
 });
 
 afterEach(() => {
   axiosInstance.defaults.adapter = originalAdapter;
-  window.history.replaceState({}, "", "/");
+  setCurrentStore(undefined);
 });
 
 describe("store header interceptor", () => {
-  it("turns the store segment into the X-Store header", async () => {
-    window.history.replaceState({}, "", "/anime/photos");
+  it("reads the store from the route-param source", async () => {
+    setCurrentStore("anime");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/staff/products/");
@@ -44,8 +46,8 @@ describe("store header interceptor", () => {
     expect(seen().headerValue).toBe("anime");
   });
 
-  it("follows the URL when the store segment changes", async () => {
-    window.history.replaceState({}, "", "/home/orders");
+  it("follows the source when the store route changes", async () => {
+    setCurrentStore("home");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/staff/products/");
@@ -54,7 +56,6 @@ describe("store header interceptor", () => {
   });
 
   it("does not send a store header outside a store route", async () => {
-    window.history.replaceState({}, "", "/sign-in");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/me/");
@@ -63,7 +64,7 @@ describe("store header interceptor", () => {
   });
 
   it("keeps an explicit X-Store header", async () => {
-    window.history.replaceState({}, "", "/anime");
+    setCurrentStore("anime");
     const seen = captureRequest();
 
     await axiosInstance.get("/api/v1/staff/products/", {

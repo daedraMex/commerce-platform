@@ -5,7 +5,11 @@ import { useTranslations } from "next-intl";
 
 import type { MeMembership } from "@commerce-platform/api-client";
 
-import { storeHref, swapStoreInPath } from "@/lib/store-path";
+import {
+  isStoreDetailPath,
+  storeHref,
+  swapStoreInPath,
+} from "@/lib/store-path";
 
 type StoreSwitcherProps = {
   store: string;
@@ -22,9 +26,10 @@ export function StoreSwitcher({ store, memberships }: StoreSwitcherProps) {
       return;
     }
 
-    const search = window.location.search;
-    const hash = window.location.hash;
-    router.push(`${swapStoreInPath(pathname, nextStore)}${search}${hash}`);
+    const suffix = isStoreDetailPath(pathname)
+      ? ""
+      : `${window.location.search}${window.location.hash}`;
+    router.push(`${swapStoreInPath(pathname, nextStore)}${suffix}`);
   };
 
   return (
