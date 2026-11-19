@@ -1,7 +1,7 @@
 """Django implementation of the PhotoSubmissionRepository port (ADR-0022)."""
 
 from django.db import IntegrityError, transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 
 from apps.photos.domain.errors import ConcurrentModification, DuplicateIdempotencyKey
@@ -126,6 +126,19 @@ class DjangoPhotoSubmissionRepository:
                 "This idempotency key was already used in this store."
             ) from error
         return _to_entity(row)
+
+    def list_for_product(
+        self,
+        store: StoreReference,
+        product_id: int,
+        media_ids: list[int],
+    ) -> list[PhotoSubmission]:
+        rows = (
+            PhotoSubmissionModel.objects.filter(store_id=store.id, discarded_at__isnull=True)
+            .filter(Q(target_product_id=product_id) | Q(result_media_id__in=media_ids))
+            .order_by("-created_at", "-pk")
+        )
+        return [_to_entity(row) for row in rows]
 
     def save(self, submission: PhotoSubmission) -> PhotoSubmission:
         changes = {field: getattr(submission, field) for field in _MAPPED_FIELDS}

@@ -43,6 +43,12 @@ class VariantNotFound(CatalogServiceError):
     code = "catalog_variant_not_found"
 
 
+class InvalidImageOrder(CatalogServiceError):
+    """A carousel order is not exactly the product's active image ids, once each."""
+
+    code = "catalog_invalid_image_order"
+
+
 class ProductImageRole(StrEnum):
     MAIN = "main"
     GALLERY = "gallery"
@@ -162,6 +168,10 @@ class CatalogRepository(Protocol):
         """Return the product's link to that media, active or retired, if any."""
         ...
 
+    def product_images(self, product_id: int) -> list[ProductImageRecord]:
+        """Return every link of the product, active or retired, ordered by position."""
+        ...
+
     def product_images_for_media(self, store_id: int, media_id: int) -> list[ProductImageRecord]:
         """Return the store's links to that media, active or retired."""
         ...
@@ -230,6 +240,11 @@ class CatalogService:
     ) -> list[ProductImageRecord]:
         """Return the store's product links to one media, active or retired."""
         return self._repository.product_images_for_media(store.id, media_id)
+
+    def product_images(self, store: StoreReference, product_id: int) -> list[ProductImageRecord]:
+        """Return every link of a product of the store, active or retired."""
+        self._require_product(store, product_id)
+        return self._repository.product_images(product_id)
 
     def create_product_image(
         self,
@@ -362,6 +377,49 @@ class CatalogService:
                         replace(active[0], role=ProductImageRole.MAIN)
                     )
             return removed
+
+    def reorder_carousel(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        image_ids: list[int],
+    ) -> list[ProductImageRecord]:
+        """Renumber the carousel and move the main role to the first image (ADR-0030).
+
+        ``image_ids`` must name exactly the product's active links, once each and in
+        the wanted order. Nothing is deleted or deactivated.
+        """
+        with self._transaction():
+            self._repository.lock_product(store.id, product_id)
+            product = self._require_product(store, product_id)
+            active = self._repository.active_product_images(product.id)
+            by_id = {image.id: image for image in active}
+            if (
+                len(image_ids) != len(by_id)
+                or len(set(image_ids)) != len(image_ids)
+                or set(image_ids) != set(by_id)
+            ):
+                raise InvalidImageOrder(
+                    "The order must list exactly this product's active image ids, once each."
+                )
+
+            for image in active:
+                if image.role is ProductImageRole.MAIN:
+                    self._repository.save_product_image(
+                        replace(image, role=ProductImageRole.GALLERY)
+                    )
+
+            reordered = []
+            for position, image_id in enumerate(image_ids, start=1):
+                image = by_id[image_id]
+                role = ProductImageRole.MAIN if position == 1 else ProductImageRole.GALLERY
+                reordered.append(
+                    self._repository.save_product_image(
+                        replace(image, position=position, role=role)
+                    )
+                )
+            return reordered
 
     def set_main_product_image(
         self,

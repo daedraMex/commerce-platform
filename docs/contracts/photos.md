@@ -61,8 +61,10 @@ class PhotoProcessingQueue(Protocol):
 | `get_media(store, media_id)` | `MediaRecord`, or `None` likewise |
 | `create_media(store, media: NewMedia)` | creates or reuses the content-addressed Media and its renditions |
 | `product_images_for_media(store, media_id)` | the product links to one Media, active or retired |
+| `product_images(store, product_id)` | every link of a product of the store, active or retired |
 | `append_to_carousel(store, *, product_id, media_id, variant_id=None)` | see below |
 | `remove_from_carousel(store, *, product_id, media_id)` | see below |
+| `reorder_carousel(store, *, product_id, image_ids)` | see below |
 
 **Append:**
 
@@ -77,11 +79,20 @@ class PhotoProcessingQueue(Protocol):
 - An already inactive link is a no-op.
 - When the removed image was the cover, the next image by position becomes the cover.
 
-**Errors from the two writes:**
+**Reorder:**
+
+- Takes the full list of the product's active link ids, once each, in the wanted order.
+- Renumbers positions from 1 and gives the first image the `main` role; every other
+  active link becomes `gallery`. Never deletes or deactivates a link.
+- Runs in one transaction, locking the product, so exactly one active `main` remains.
+
+**Errors from the writes:**
 
 - `catalog_store_mismatch` (404): the product or Media belongs to another store.
 - `catalog_variant_not_found`: the variant belongs to another product.
 - `catalog_product_image_not_found`: remove found no link.
+- `catalog_invalid_image_order` (400): the order omits, repeats or adds an id, or names
+  an inactive link or one from another product or store.
 
 ## photos.submission-states
 

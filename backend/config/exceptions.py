@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import exception_handler, set_rollback
 
 from apps.catalog.services import (
+    InvalidImageOrder,
     ProductImageConflict,
     ProductImageNotFound,
     StoreMismatch,
@@ -56,6 +57,7 @@ DOMAIN_ERROR_STATUS = {
     ProductImageNotFound: status.HTTP_404_NOT_FOUND,
     VariantNotFound: status.HTTP_404_NOT_FOUND,
     ProductImageConflict: status.HTTP_409_CONFLICT,
+    InvalidImageOrder: status.HTTP_400_BAD_REQUEST,
     IdempotencyConflict: status.HTTP_409_CONFLICT,
     DuplicateIdempotencyKey: status.HTTP_409_CONFLICT,
     InvalidSubmissionTarget: status.HTTP_400_BAD_REQUEST,

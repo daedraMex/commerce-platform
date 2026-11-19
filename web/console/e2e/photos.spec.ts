@@ -396,3 +396,60 @@ test("edits one photo with pointer corners, uploads it and approves it", async (
   await expect(card).toHaveAttribute("data-state", "pending");
   await expect(card).not.toHaveClass(/border-accent/);
 });
+
+test("reorders the product carousel by touch and shows the new cover", async ({
+  page,
+}, testInfo) => {
+  await signIn(page);
+  await page.goto("/anime/photos/new?product=12");
+
+  const panel = page.getByTestId("product-carousel-panel");
+  await expect(panel).toBeVisible();
+  const items = panel.getByTestId("carousel-image");
+  await expect(items.first()).toHaveAttribute(
+    "data-carousel-image-id",
+    "101",
+  );
+  await expect(panel.getByTestId("cover-badge")).toHaveText("Portada");
+  await attachScreenshot(page, testInfo, "photos-carousel-before.png");
+
+  const firstBox = await items.first().boundingBox();
+  if (!firstBox) {
+    throw new Error("The first carousel image has no bounding box");
+  }
+  const handle = panel.getByTestId("carousel-drag-handle").nth(1);
+
+  const reorderRequest = page.waitForRequest(
+    (request) =>
+      request.method() === "PUT" &&
+      request.url().includes("/api/v1/staff/products/12/images/order/"),
+  );
+  await handle.dispatchEvent("pointerdown", {
+    pointerType: "touch",
+    pointerId: 1,
+    button: 0,
+    clientX: firstBox.x + firstBox.width / 2,
+    clientY: firstBox.y + firstBox.height / 2,
+  });
+  await handle.dispatchEvent("pointermove", {
+    pointerType: "touch",
+    pointerId: 1,
+    clientX: firstBox.x + firstBox.width / 2,
+    clientY: firstBox.y + firstBox.height / 2,
+  });
+  await handle.dispatchEvent("pointerup", {
+    pointerType: "touch",
+    pointerId: 1,
+  });
+
+  const body = (await (await reorderRequest).postDataJSON()) as {
+    image_ids: number[];
+  };
+  expect(body.image_ids).toEqual([102, 101]);
+  await expect(items.first()).toHaveAttribute(
+    "data-carousel-image-id",
+    "102",
+  );
+  await expect(panel.getByTestId("cover-badge")).toHaveText("Portada");
+  await attachScreenshot(page, testInfo, "photos-carousel-after.png");
+});

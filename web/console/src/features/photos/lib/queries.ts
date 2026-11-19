@@ -1,6 +1,7 @@
 import {
   getApiV1CatalogCategoriesListQueryKey,
   getApiV1StaffPhotosRetrieveQueryKey,
+  getApiV1StaffProductsImagesRetrieveQueryKey,
   getApiV1StaffProductsListQueryKey,
   type ApiV1StaffProductsListParams,
 } from "@commerce-platform/api-client";
@@ -23,4 +24,11 @@ export function photoSubmissionQueryKey(
   attempt: number,
 ) {
   return [...getApiV1StaffPhotosRetrieveQueryKey(submissionId), store, attempt] as const;
+}
+
+export function photoCarouselQueryKey(store: string, productId: number) {
+  return [
+    ...getApiV1StaffProductsImagesRetrieveQueryKey(productId),
+    store,
+  ] as const;
 }
