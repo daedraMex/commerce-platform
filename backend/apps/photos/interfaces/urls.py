@@ -10,9 +10,21 @@ from apps.photos.interfaces.views import (
     StaffPhotoRemoveView,
     StaffPhotoRetryView,
     StaffPhotoUploadView,
+    StaffProductImageOrderView,
+    StaffProductImagesView,
 )
 
 urlpatterns = [
+    path(
+        "products/<int:pk>/images/",
+        StaffProductImagesView.as_view(),
+        name="staff-product-images",
+    ),
+    path(
+        "products/<int:pk>/images/order/",
+        StaffProductImageOrderView.as_view(),
+        name="staff-product-image-order",
+    ),
     path("photos/", StaffPhotoUploadView.as_view(), name="staff-photo-upload"),
     path("photos/<int:pk>/", StaffPhotoDetailView.as_view(), name="staff-photo-detail"),
     path(

@@ -74,6 +74,20 @@ class PhotoCatalog(Protocol):
         """Return the store's product links to one media, active or retired."""
         ...
 
+    def product_images(self, store: StoreReference, product_id: int) -> list[ProductImageRecord]:
+        """Return every link of a product of the store, active or retired."""
+        ...
+
+    def reorder_carousel(
+        self,
+        store: StoreReference,
+        *,
+        product_id: int,
+        image_ids: list[int],
+    ) -> list[ProductImageRecord]:
+        """Renumber the carousel and move the main role to the first image."""
+        ...
+
     def append_to_carousel(
         self,
         store: StoreReference,
@@ -154,4 +168,13 @@ class PhotoSubmissionRepository(Protocol):
 
     def save(self, submission: PhotoSubmission) -> PhotoSubmission:
         """Persist an existing submission's changes and return it refreshed."""
+        ...
+
+    def list_for_product(
+        self,
+        store: StoreReference,
+        product_id: int,
+        media_ids: list[int],
+    ) -> list[PhotoSubmission]:
+        """Return the store's live submissions targeting the product or producing its media."""
         ...

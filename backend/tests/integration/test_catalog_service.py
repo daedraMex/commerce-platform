@@ -9,6 +9,7 @@ from apps.catalog.models import Category, Media, Product, ProductMedia, ProductV
 from apps.catalog.repositories import DjangoCatalogRepository, DjangoMediaFiles
 from apps.catalog.services import (
     CatalogService,
+    InvalidImageOrder,
     NewMedia,
     ProductImageNotFound,
     ProductImageRole,
@@ -357,3 +358,62 @@ def test_create_media_reuses_the_media_a_concurrent_request_already_created(medi
     assert second.id == first.id
     assert after.id != first.id
     assert Media.objects.filter(store=home).count() == 2
+
+
+def test_reorder_renumbers_the_carousel_and_moves_the_cover_without_deleting(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    first = make_media(home, content_hash="first")
+    second = make_media(home, content_hash="second")
+    third = make_media(home, content_hash="third")
+    retired_media = make_media(home, content_hash="retired")
+    service = get_catalog_service()
+    store = StoreReference(id=home.pk, slug=home.slug)
+
+    cover = service.append_to_carousel(store, product_id=product.pk, media_id=first.pk)
+    middle = service.append_to_carousel(store, product_id=product.pk, media_id=second.pk)
+    last = service.append_to_carousel(store, product_id=product.pk, media_id=third.pk)
+    retired = service.append_to_carousel(store, product_id=product.pk, media_id=retired_media.pk)
+    service.remove_from_carousel(store, product_id=product.pk, media_id=retired_media.pk)
+    link_count = ProductMedia.objects.filter(product=product).count()
+
+    service.reorder_carousel(
+        store,
+        product_id=product.pk,
+        image_ids=[last.id, cover.id, middle.id],
+    )
+
+    assert ProductMedia.objects.get(pk=last.id).position == 1
+    assert ProductMedia.objects.get(pk=last.id).role == ProductMedia.Role.MAIN
+    assert ProductMedia.objects.get(pk=cover.id).position == 2
+    assert ProductMedia.objects.get(pk=cover.id).role == ProductMedia.Role.GALLERY
+    assert ProductMedia.objects.get(pk=middle.id).position == 3
+    assert ProductMedia.objects.get(pk=retired.id).is_active is False
+    assert (
+        ProductMedia.objects.filter(
+            product=product, role=ProductMedia.Role.MAIN, is_active=True
+        ).count()
+        == 1
+    )
+    assert ProductMedia.objects.filter(product=product).count() == link_count
+    assert (
+        Media.objects.filter(pk__in=[first.pk, second.pk, third.pk, retired_media.pk]).count() == 4
+    )
+
+
+def test_reorder_rejects_an_incomplete_list_and_leaves_the_order_unchanged(media_root):
+    home = make_store("home")
+    product = make_product(home)
+    first = make_media(home, content_hash="first-reject")
+    second = make_media(home, content_hash="second-reject")
+    service = get_catalog_service()
+    store = StoreReference(id=home.pk, slug=home.slug)
+    cover = service.append_to_carousel(store, product_id=product.pk, media_id=first.pk)
+    gallery = service.append_to_carousel(store, product_id=product.pk, media_id=second.pk)
+
+    with pytest.raises(InvalidImageOrder):
+        service.reorder_carousel(store, product_id=product.pk, image_ids=[gallery.id])
+
+    assert ProductMedia.objects.get(pk=cover.id).position == 1
+    assert ProductMedia.objects.get(pk=cover.id).role == ProductMedia.Role.MAIN
+    assert ProductMedia.objects.get(pk=gallery.id).position == 2

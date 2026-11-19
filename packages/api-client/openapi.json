@@ -22,6 +22,69 @@
         ],
         "type": "object"
       },
+      "CarouselImage": {
+        "description": "One staff carousel tile with its renditions and the photo submission behind it.",
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "alt_text": {
+            "type": "string"
+          },
+          "height": {
+            "type": "integer"
+          },
+          "id": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "media_id": {
+            "type": "integer"
+          },
+          "medium_url": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "photo_submission_id": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "position": {
+            "nullable": true,
+            "type": "integer"
+          },
+          "role": {
+            "nullable": true,
+            "type": "string"
+          },
+          "thumbnail_url": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "url": {
+            "readOnly": true,
+            "type": "string"
+          },
+          "width": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "active",
+          "alt_text",
+          "height",
+          "id",
+          "media_id",
+          "medium_url",
+          "photo_submission_id",
+          "position",
+          "role",
+          "thumbnail_url",
+          "url",
+          "width"
+        ],
+        "type": "object"
+      },
       "Category": {
         "properties": {
           "name": {
@@ -620,6 +683,25 @@
         ],
         "type": "object"
       },
+      "ProductCarousel": {
+        "description": "A product's carousel: active images in order, then inactive ones.",
+        "properties": {
+          "images": {
+            "items": {
+              "$ref": "#/components/schemas/CarouselImage"
+            },
+            "type": "array"
+          },
+          "product_id": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "images",
+          "product_id"
+        ],
+        "type": "object"
+      },
       "ProductDetail": {
         "properties": {
           "attributes": {
@@ -717,6 +799,22 @@
           "url",
           "variant",
           "width"
+        ],
+        "type": "object"
+      },
+      "ProductImageOrder": {
+        "description": "The full ordered list of a product's active image link ids.",
+        "properties": {
+          "image_ids": {
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "image_ids"
         ],
         "type": "object"
       },
@@ -4691,6 +4789,380 @@
               }
             },
             "description": "You do not have permission to manage the catalog."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/products/{id}/images/": {
+      "get": {
+        "description": "Return one product's carousel for staff review and ordering.",
+        "operationId": "api_v1_staff_products_images_retrieve",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ProductCarousel": {
+                    "summary": "Product carousel",
+                    "value": {
+                      "images": [
+                        {
+                          "active": true,
+                          "alt_text": "Blue flannel blanket with a moon pattern",
+                          "height": 1500,
+                          "id": 31,
+                          "media_id": 44,
+                          "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                          "photo_submission_id": 12,
+                          "position": 1,
+                          "role": "main",
+                          "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                          "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                          "width": 1200
+                        }
+                      ],
+                      "product_id": 7
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProductCarousel"
+                }
+              }
+            },
+            "description": "The product's active images in position order, then its removed links and ready unapproved photos, each with an active flag and renditions."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No product matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No product matches this id in this store."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
+    "/api/v1/staff/products/{id}/images/order/": {
+      "put": {
+        "description": "Save a product's full active image order, moving the cover to its first image.",
+        "operationId": "api_v1_staff_products_images_order_update",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductImageOrder"
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductImageOrder"
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductImageOrder"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "ProductCarousel": {
+                    "summary": "Product carousel",
+                    "value": {
+                      "images": [
+                        {
+                          "active": true,
+                          "alt_text": "Blue flannel blanket with a moon pattern",
+                          "height": 1500,
+                          "id": 31,
+                          "media_id": 44,
+                          "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                          "photo_submission_id": 12,
+                          "position": 1,
+                          "role": "main",
+                          "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                          "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                          "width": 1200
+                        }
+                      ],
+                      "product_id": 7
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProductCarousel"
+                }
+              }
+            },
+            "description": "The carousel after renumbering its positions and moving the cover to the first image in the sent order."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "CatalogInvalidImageOrder": {
+                    "summary": "catalog_invalid_image_order",
+                    "value": {
+                      "code": "catalog_invalid_image_order",
+                      "detail": "The order must list exactly this product's active image ids, once each.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The order must list exactly this product's active image ids, once each."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No product matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No product matches this id in this store."
           }
         },
         "security": [

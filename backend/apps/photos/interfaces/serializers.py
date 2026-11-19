@@ -10,6 +10,7 @@ from rest_framework import serializers
 
 from apps.catalog.media import media_url, rendition_url
 from apps.photos.application.get_photo_submission import PhotoSubmissionView
+from apps.photos.application.get_product_images import CarouselImage
 from apps.photos.domain.submission import SubmissionKind
 
 
@@ -159,6 +160,51 @@ class PhotoResultMediaSerializer(serializers.Serializer):
     @extend_schema_field(serializers.CharField())
     def get_medium_url(self, media):
         return rendition_url(media, "medium")
+
+
+class CarouselImageSerializer(serializers.Serializer):
+    """One staff carousel tile with its renditions and the photo submission behind it."""
+
+    id = serializers.IntegerField(allow_null=True)
+    media_id = serializers.IntegerField(source="media.id")
+    photo_submission_id = serializers.IntegerField(allow_null=True)
+    active = serializers.BooleanField()
+    role = serializers.CharField(allow_null=True)
+    position = serializers.IntegerField(allow_null=True)
+    url = serializers.SerializerMethodField()
+    thumbnail_url = serializers.SerializerMethodField()
+    medium_url = serializers.SerializerMethodField()
+    alt_text = serializers.CharField(source="media.alt_text")
+    width = serializers.IntegerField(source="media.width")
+    height = serializers.IntegerField(source="media.height")
+
+    @extend_schema_field(serializers.CharField())
+    def get_url(self, image: CarouselImage):
+        return media_url(image.media.storage_key)
+
+    @extend_schema_field(serializers.CharField())
+    def get_thumbnail_url(self, image: CarouselImage):
+        return rendition_url(image.media, "thumbnail")
+
+    @extend_schema_field(serializers.CharField())
+    def get_medium_url(self, image: CarouselImage):
+        return rendition_url(image.media, "medium")
+
+
+class ProductCarouselSerializer(serializers.Serializer):
+    """A product's carousel: active images in order, then inactive ones."""
+
+    product_id = serializers.IntegerField()
+    images = CarouselImageSerializer(many=True)
+
+
+class ProductImageOrderSerializer(serializers.Serializer):
+    """The full ordered list of a product's active image link ids."""
+
+    image_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1),
+        allow_empty=True,
+    )
 
 
 class PhotoSubmissionSerializer(serializers.Serializer):
