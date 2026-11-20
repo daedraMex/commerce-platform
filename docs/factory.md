@@ -711,6 +711,21 @@ unreachable" as before.
   worktrees directory contains entries that are not live git worktrees, and
   creates an agent-owned directory with group `factory-agent` and mode `0770`
   inside the throwaway worktree to prove the same cleanup removes it.
+  Before deleting, the cleanup kills every agent process, so nothing is still
+  writing into the worktree (`rm -rf` fails half-way with "Directory not empty"
+  otherwise). If that kill is refused, nothing is deleted.
+- **Interrupted runs.** Ctrl+C while a command runs also stops that command's
+  process group before the cleanup starts, since commands run in their own
+  session and never see the interrupt. `systemctl --user stop factory.service`
+  kills the whole service instead, and a bare `kill <pid>` ends the factory
+  without any cleanup; in both cases the next preflight removes what is left.
+  When a cleanup fails after a
+  step failed or the run was interrupted, the step's error still propagates and
+  Telegram gets a second "preflight cleanup failed after <step>" message. Any
+  `preflight-*` entry an earlier preflight left behind is deleted at the start
+  of the next preflight, with a "Night factory cleaned up" message; any other
+  leftover, such as an `nf-*`, still stops the run. Never run two preflights at
+  once: each one kills the other's agent processes and deletes its worktree.
 - **Protected paths.** Before the pre-PR review and again before pushing, the
   factory inspects the diff. If it touches `.github/`, `tools/factory/`,
   `backend/scripts/`, `backend/tests/architecture/`, `web/console/scripts/`,
@@ -818,7 +833,10 @@ merge before every review fix and the conflict, ordering and prompt tests in
 ## Answering a `needs-decision` ticket
 
 A stuck ticket gets a comment (open question + decisions so far + last log
-lines) and the `needs-decision` label. To unblock it:
+lines) and the `needs-decision` label. A ticket that was closed while the
+factory worked on it, usually by its own PR, gets no comment, no label and no
+push; the run logs the skip. If its state cannot be read, the factory goes on
+as if it were open. To unblock it:
 
 1. Open the issue and read the comment.
 2. Answer the open question (or edit the ticket).
@@ -854,8 +872,9 @@ message gives the `gh label create` command for each), creates a throwaway
 present area's `check.sh` in it as `factory-agent` with the real check
 environment, verifies isolation,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
-policy, fails if the worktrees directory contains entries that are not live git
-worktrees, then proves the cleanup removes an agent-owned
+policy, deletes any `preflight-*` entry an earlier preflight left behind, fails
+if the worktrees directory contains any other entry that is not a live git
+worktree, then proves the cleanup removes an agent-owned
 `factory-agent:factory-agent` 0770 directory and deletes the worktree and
 branch even on failure.
 Any failed step sends `preflight failed: <step>: <short error>` to Telegram
