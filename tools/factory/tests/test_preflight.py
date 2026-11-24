@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,8 @@ from factory.git import CheckResult
 from factory.github import GitHubError
 from factory.preflight import MAX_ERROR_CHARS, Preflight, PreflightError
 from factory.tickets import REQUIRED_LABELS, Ticket
+
+REVIEWER_CONFIG = '{"permission": {"edit": {"*": "deny"}}}'
 
 
 class FakeGit:
@@ -43,6 +46,11 @@ class FakeGit:
         self.calls.append(("verify_commit_identity", repo_dir))
         if self.identity_error is not None:
             raise self.identity_error
+
+    def read_file(self, worktree, relpath):
+        if relpath == "tools/factory/opencode.reviewer.json":
+            return REVIEWER_CONFIG
+        return ""
 
     def preflight_leftovers(self, worktrees_dir):
         return list(self.leftovers)
@@ -138,6 +146,7 @@ def make_settings(tmp_path):
         agent_user="factory-agent",
         secrets_file=tmp_path / "secrets.env",
         deploy_key=tmp_path / ".ssh" / "commerce_deploy",
+        state_dir=tmp_path / "state",
     )
 
 
@@ -431,9 +440,15 @@ def test_preflight_stops_when_a_leftover_cannot_be_removed(tmp_path):
 
 
 class SandboxRunner:
-    def __init__(self, events, error=None):
+    def __init__(self, events, error=None, model_errors=None):
         self.events = events
         self.error = error
+        self.model_errors = dict(model_errors or {})
+
+    def model_check(self, worktree, model, *, config_content):
+        self.events.append(("model_check", model, config_content))
+        if model in self.model_errors:
+            raise self.model_errors[model]
 
     def ensure_clean(self):
         self.events.append(("agent_cleanup",))
@@ -467,6 +482,68 @@ def test_preflight_fails_when_opencode_cannot_start_as_the_agent(tmp_path):
 
     with pytest.raises(PreflightError, match="verify agent sandbox"):
         preflight.run()
+
+
+def test_preflight_checks_each_configured_model_after_opencode_starts(tmp_path):
+    """A model whose provider login is missing must stop the run, not skip reviews (#202)."""
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events)
+
+    preflight.run()
+
+    checks = [event for event in events if event[0] == "model_check"]
+    assert [event[1] for event in checks] == ["m", "s"]
+    assert all(event[2] == REVIEWER_CONFIG for event in checks)
+    names = [event[0] for event in events]
+    assert names.index("opencode_smoke") < names.index("model_check")
+    assert names.index("model_check") < names.index("create_agent_cleanup_probe")
+
+
+def test_preflight_skips_a_model_that_answered_within_a_day(tmp_path):
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events)
+    preflight.run()
+    events.clear()
+
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events)
+    preflight.run()
+
+    assert [event for event in events if event[0] == "model_check"] == []
+
+
+def test_preflight_fails_naming_the_model_that_gives_no_answer(tmp_path):
+    from factory.runner import AgentSandboxError
+
+    events = []
+    notifier = RecordingNotifier()
+    preflight = build_preflight(tmp_path, events=events, notifier=notifier)
+    preflight.runner = SandboxRunner(
+        events, model_errors={"s": AgentSandboxError("s gave no answer (exit 0): no output")}
+    )
+
+    with pytest.raises(PreflightError, match="verify models"):
+        preflight.run()
+
+    assert "s gave no answer" in notifier.run_failed[0].reason
+    retry = []
+    preflight = build_preflight(tmp_path, events=retry)
+    preflight.runner = SandboxRunner(retry)
+    preflight.run()
+    assert [event[1] for event in retry if event[0] == "model_check"] == ["s"]
+
+
+def test_preflight_checks_one_model_once_when_both_settings_name_it(tmp_path):
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.settings = replace(preflight.settings, factory_strong_model="m")
+    preflight.runner = SandboxRunner(events)
+
+    preflight.run()
+
+    assert [event[1] for event in events if event[0] == "model_check"] == ["m"]
 
 
 def test_preflight_stops_with_the_create_commands_when_a_label_is_missing(tmp_path):

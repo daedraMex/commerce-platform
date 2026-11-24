@@ -399,6 +399,9 @@ class FakeRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     def __init__(self, result=None):
         self.result = result or AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
         self.calls = []
@@ -437,6 +440,9 @@ class ExplodingRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     def __init__(self, error):
         self.error = error
 
@@ -454,6 +460,9 @@ class BaseExceptionRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     def __init__(self, error):
         self.error = error
 
@@ -469,6 +478,10 @@ class RecordingNotifier:
         self.paused = []
         self.review_addressed = []
         self.review_skipped = []
+        self.reviewer_failing = []
+
+    def send_reviewer_failing(self, info):
+        self.reviewer_failing.append(info)
 
     def send_pr_ready(self, info):
         self.pr_ready.append(info)
@@ -1558,6 +1571,29 @@ def test_review_fix_protected_path_goes_stuck_without_push(tmp_path):
     assert notifier.stuck[0].failing_check == "protected path changed"
 
 
+def test_a_review_fix_appends_to_the_ticket_log_instead_of_starting_it_over(tmp_path):
+    """The #195 fix erased the original reviewer section of 134.log (#202)."""
+    settings = make_settings(tmp_path)
+    settings.logs_dir.mkdir(parents=True)
+    log = settings.logs_dir / "7.log"
+    log.write_text(
+        "=== step 1 (model m) ===\nbuilt\n=== review after step 1 (model s) ===\nfound\n"
+    )
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    runner = FakeRunner(AgentResult(exit_code=0, stdout="fixed it", stderr="", timed_out=False))
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    text = log.read_text()
+    assert text.startswith("=== step 1 (model m) ===\nbuilt\n=== review after step 1")
+    assert "found\n=== review fix step 1 (model " in text
+    assert text.endswith("fixed it\n")
+
+
 def test_review_fix_already_committed_by_the_agent_is_pushed_not_stuck(tmp_path):
     # The agent ran `git commit` itself: commit_all has nothing left (False),
     # but the diff since the fix's base carries its work (#137).
@@ -2176,6 +2212,9 @@ class ScriptedRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     """Builder calls always succeed; reviewer calls (with a config path) follow a script."""
 
     def __init__(self, reviews):
@@ -2444,6 +2483,52 @@ def test_an_unreadable_review_still_opens_the_pr_and_says_so(tmp_path):
     assert results[0].ok
     assert "automated review failed" in github.created_prs[0][2]
     assert "read in full" in github.created_prs[0][2]
+
+
+def test_an_empty_reviewer_output_says_so_with_its_exit_code(tmp_path):
+    """The reviewer without a provider login printed nothing (#202)."""
+    empty = AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [empty])
+
+    assert results[0].ok
+    body = github.created_prs[0][2]
+    assert "the reviewer produced no output (exit 0)" in body
+    assert "no REVIEW-FINDINGS block" not in body
+
+
+def test_an_empty_reviewer_output_keeps_its_stderr(tmp_path):
+    empty = AgentResult(
+        exit_code=1, stdout="  \n", stderr="ProviderAuthError: missing", timed_out=False
+    )
+
+    _, _, github, _, _ = run_with_reviewer(tmp_path, [empty])
+
+    assert "produced no output (exit 1): ProviderAuthError: missing" in github.created_prs[0][2]
+
+
+def test_a_second_reviewer_failure_in_a_row_reaches_telegram_once(tmp_path):
+    garbage = AgentResult(exit_code=0, stdout="LGTM", stderr="", timed_out=False)
+
+    _, _, _, _, first = run_with_reviewer(tmp_path, [garbage])
+    _, _, _, _, second = run_with_reviewer(tmp_path, [garbage])
+    _, _, _, _, third = run_with_reviewer(tmp_path, [garbage])
+
+    assert first.reviewer_failing == []
+    [info] = second.reviewer_failing
+    assert info.model == "deepseek/deepseek-v4-pro"
+    assert "no REVIEW-FINDINGS block" in info.reason
+    assert third.reviewer_failing == []
+
+
+def test_a_successful_review_resets_the_failure_count(tmp_path):
+    garbage = AgentResult(exit_code=0, stdout="LGTM", stderr="", timed_out=False)
+
+    run_with_reviewer(tmp_path, [garbage])
+    run_with_reviewer(tmp_path, [NO_FINDINGS])
+    _, _, _, _, notifier = run_with_reviewer(tmp_path, [garbage])
+
+    assert notifier.reviewer_failing == []
 
 
 def test_a_reviewer_that_changes_the_worktree_sends_the_ticket_to_stuck(tmp_path):

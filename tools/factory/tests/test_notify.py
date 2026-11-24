@@ -8,6 +8,7 @@ from factory.notify import (
     PausedInfo,
     PrReadyInfo,
     ReviewAddressedInfo,
+    ReviewerFailingInfo,
     ReviewSkippedInfo,
     RunFailedInfo,
     StuckInfo,
@@ -19,6 +20,7 @@ from factory.notify import (
     build_review_addressed_keyboard,
     build_review_addressed_message,
     build_review_skipped_message,
+    build_reviewer_failing_message,
     build_run_failed_message,
     build_stuck_message,
     escape_html,
@@ -147,6 +149,18 @@ def test_review_skipped_message_names_the_reason_and_escapes_html():
     )
     assert "Review fixes skipped" in msg
     assert "gh api reviews failed: HTTP 404 &lt;not found&gt;" in msg
+
+
+def test_reviewer_failing_message_names_the_model_and_the_reason():
+    msg = build_reviewer_failing_message(
+        ReviewerFailingInfo(
+            model="anthropic/claude-sonnet-5-5",
+            reason="the reviewer produced no output (exit 0) <x>",
+        )
+    )
+    assert "Pre-PR reviewer failing" in msg
+    assert "anthropic/claude-sonnet-5-5" in msg
+    assert "no output (exit 0) &lt;x&gt;" in msg
 
 
 def test_build_handoff_command_with_and_without_host():

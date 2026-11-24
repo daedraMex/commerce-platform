@@ -39,11 +39,19 @@ class Notifier(Protocol):
 
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None: ...
 
+    def send_reviewer_failing(self, info: ReviewerFailingInfo) -> None: ...
+
     def send_metrics(self, text: str) -> None: ...
 
 
 @dataclass(frozen=True)
 class ReviewSkippedInfo:
+    reason: str
+
+
+@dataclass(frozen=True)
+class ReviewerFailingInfo:
+    model: str
     reason: str
 
 
@@ -322,6 +330,19 @@ def build_review_skipped_message(info: ReviewSkippedInfo) -> str:
     )
 
 
+def build_reviewer_failing_message(info: ReviewerFailingInfo) -> str:
+    return _bound_message(
+        "\n".join(
+            [
+                "<b>Pre-PR reviewer failing</b>",
+                "Two reviews in a row produced no result; factory PRs open unreviewed.",
+                f"Model: <code>{escape_html(info.model)}</code>",
+                f"Reason: {escape_html(info.reason)}",
+            ]
+        )
+    )
+
+
 def build_review_addressed_message(info: ReviewAddressedInfo) -> str:
     return _bound_message(
         "\n".join(
@@ -427,6 +448,9 @@ class NullNotifier:
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
         return None
 
+    def send_reviewer_failing(self, info: ReviewerFailingInfo) -> None:
+        return None
+
     def send_metrics(self, text: str) -> None:
         pass
 
@@ -462,6 +486,9 @@ class TelegramNotifier:
 
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None:
         self._send(build_review_skipped_message(info), [])
+
+    def send_reviewer_failing(self, info: ReviewerFailingInfo) -> None:
+        self._send(build_reviewer_failing_message(info), [])
 
     def send_metrics(self, text: str) -> None:
         """Unlike alerts, a lost report must fail the command, so errors propagate."""

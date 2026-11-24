@@ -22,6 +22,7 @@ from .holds import LabelHolds
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
 from .metrics import MetricsGitHub, run_metrics
+from .model_health import REVIEWER_FAILURE_ALERT_AT, ReviewerFailures
 from .models import STRONG_MODEL_LABEL, select_model
 from .notify import (
     Notifier,
@@ -29,6 +30,7 @@ from .notify import (
     PausedInfo,
     PrReadyInfo,
     ReviewAddressedInfo,
+    ReviewerFailingInfo,
     ReviewSkippedInfo,
     RunFailedInfo,
     StuckInfo,
@@ -127,6 +129,7 @@ class Factory:
         review_attempts: ReviewAttemptLedger | None = None,
         pause_state: PauseState | None = None,
         label_holds: LabelHolds | None = None,
+        reviewer_failures: ReviewerFailures | None = None,
     ):
         self.settings = settings
         self.github = github
@@ -143,6 +146,7 @@ class Factory:
         self.review_attempts = review_attempts or ReviewAttemptLedger(settings.state_dir)
         self.pause_state = pause_state or PauseState(settings.state_dir)
         self.label_holds = label_holds or LabelHolds(settings.state_dir)
+        self.reviewer_failures = reviewer_failures or ReviewerFailures(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
         token, open_prs, paused_for = self._run_limits()
@@ -555,7 +559,7 @@ class Factory:
                 config_content=builder_config,
             )
             made += 1
-            self._write_log(ticket, result, step=_step, model=model)
+            self._write_log(ticket, result, step=_step, model=model, review_fix=True)
             decisions = self.git.read_file(worktree, DECISIONS_FILE)
             open_question = extract_open_question(decisions)
 
@@ -969,7 +973,14 @@ class Factory:
         return self.settings.logs_dir / f"{ticket.number}.log"
 
     def _write_log(
-        self, ticket: Ticket, result, *, step: int, model: str, review: bool = False
+        self,
+        ticket: Ticket,
+        result,
+        *,
+        step: int,
+        model: str,
+        review: bool = False,
+        review_fix: bool = False,
     ) -> Path:
         """Append one step's output under a header; step 1 starts a fresh file.
 
@@ -983,9 +994,17 @@ class Factory:
             content += ("\n" if content else "") + result.stderr
         if content and not content.endswith("\n"):
             content += "\n"
-        label = f"review after step {step}" if review else f"step {step}"
+        if review:
+            label = f"review after step {step}"
+        elif review_fix:
+            label = f"review fix step {step}"
+        else:
+            label = f"step {step}"
         header = f"=== {label} (model {model}) ===\n"
-        with log_path.open("w" if step == 1 and not review else "a") as log:
+        # A review fix keeps the run it fixes: the #195 fix erased the original
+        # reviewer output of 134.log (#202).
+        fresh = step == 1 and not review and not review_fix
+        with log_path.open("w" if fresh else "a") as log:
             log.write(header + content)
         return log_path
 
@@ -1038,7 +1057,29 @@ class Factory:
         config["default_agent"] = "build"
         return json.dumps(config)
 
-    def _pre_pr_review(
+    def _pre_pr_review(self, ticket: Ticket, **kwargs) -> PrePrReview:
+        review = self._run_pre_pr_review(ticket, **kwargs)
+        self._track_reviewer(review)
+        return review
+
+    def _track_reviewer(self, review: PrePrReview) -> None:
+        """Alert once when the reviewer fails twice in a row (#202).
+
+        A failed review still opens the PR, flagged; without this, a reviewer that
+        never works again looks the same as one hiccup.
+        """
+        if review.status == "done":
+            self.reviewer_failures.succeeded()
+            return
+        if review.status != "failed":
+            return
+        if self.reviewer_failures.failed() == REVIEWER_FAILURE_ALERT_AT:
+            self._notify(
+                self.notifier.send_reviewer_failing,
+                ReviewerFailingInfo(model=review.reviewer, reason=review.reason),
+            )
+
+    def _run_pre_pr_review(
         self,
         ticket: Ticket,
         *,
@@ -1085,6 +1126,11 @@ class Factory:
             return PrePrReview.tampered(reviewer)
         if result.timed_out:
             return PrePrReview.failed(reviewer, "the reviewer timed out")
+        if not result.stdout.strip():
+            # A model without a provider login prints nothing at all (#202).
+            said = " ".join(result.stderr.split())[:200]
+            reason = f"the reviewer produced no output (exit {result.exit_code})"
+            return PrePrReview.failed(reviewer, f"{reason}: {said}" if said else reason)
         review = PrePrReview.done(reviewer, parse_review(result.stdout))
         if (
             not self.settings.review_tests
