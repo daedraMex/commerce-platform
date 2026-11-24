@@ -14,6 +14,9 @@ const email = process.env.E2E_STAFF_EMAIL ?? "e2e@example.com";
 const password = process.env.E2E_STAFF_PASSWORD;
 
 const GROUP_PRODUCTS = ["Notebooks Star Map", "Notebooks Forest Walk"];
+// The individual flow targets a product seeded by e2e_seed, never whatever the
+// store holds: a local stack with a real catalog must not change what is tested.
+const INDIVIDUAL_CATEGORY = "demo-sticker-sheets";
 
 type ProductSummary = { name: string; slug: string };
 
@@ -128,9 +131,13 @@ async function publicProductDetail(
 
 async function findTargetProduct(page: Page): Promise<StaffProduct> {
   const body = await page.evaluate(
-    async ({ storeSlug, csrfHeader, csrfValue }) => {
+    async ({ storeSlug, category, csrfHeader, csrfValue }) => {
+      const query = new URLSearchParams({
+        category,
+        needs_main_image: "true",
+      });
       const response = await fetch(
-        "/api/backend/api/v1/staff/products/?page_size=100",
+        `/api/backend/api/v1/staff/products/?${query.toString()}`,
         {
           headers: {
             "X-Store": storeSlug,
@@ -147,15 +154,18 @@ async function findTargetProduct(page: Page): Promise<StaffProduct> {
     },
     {
       storeSlug: store,
+      category: INDIVIDUAL_CATEGORY,
       csrfHeader: CSRF_HEADER,
       csrfValue: CSRF_HEADER_VALUE,
     },
   );
 
-  const product = body.results.find((item) => item.needs_main_image);
+  // Ordered by name, so the first run always picks the same product; a retry
+  // picks the next one, because the first already has its main image.
+  const product = body.results[0];
   if (!product) {
     throw new Error(
-      "No product without a main image is available in the photo workflow.",
+      `Every ${INDIVIDUAL_CATEGORY} product already has a main image: re-run e2e_seed on a fresh database.`,
     );
   }
   return product;
