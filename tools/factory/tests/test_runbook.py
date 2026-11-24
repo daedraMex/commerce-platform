@@ -86,6 +86,27 @@ def test_runbook_documents_agent_owned_worktree_cleanup():
     assert "PYTEST_ADDOPTS=-p no:cacheprovider" in text
 
 
+def test_runbook_documents_the_self_update():
+    text = RUNBOOK.read_text()
+    flat = " ".join(text.split())
+
+    assert "## Updating the factory" in text
+    assert "preflight ok at <sha> (N tickets listed)" in flat
+    assert "It never resets or discards anything there" in flat
+    assert "FACTORY_SELF_UPDATE=0" in text
+
+
+def test_runbook_documents_fresh_run_homes():
+    text = RUNBOOK.read_text()
+    flat = " ".join(text.split())
+
+    assert "/usr/bin/rm -rf /srv/factory/agent-homes/*" in text
+    assert "sudo install -d -m 2770 -o factory -g factory-work /srv/factory/agent-homes" in text
+    assert "sudo apt install ripgrep" in text
+    assert "/home/factory/factory/agent-auth.json" in text
+    assert "run that `install` line again" in flat
+
+
 def test_runbook_documents_the_undeclared_contract_check():
     flat = " ".join(RUNBOOK.read_text().split())
 
@@ -159,6 +180,7 @@ def test_runbook_documents_the_final_sudoers_file_exactly():
         "/srv/factory/worktrees/*/backend/scripts/check.sh, "
         "/srv/factory/worktrees/*/web/console/scripts/check.sh, "
         "/usr/bin/rm -rf /srv/factory/worktrees/*, "
+        "/usr/bin/rm -rf /srv/factory/agent-homes/*, "
         "/usr/bin/pkill -KILL -u factory-agent",
     )
     sudoers = "\n".join(f"    {line}" for line in lines)

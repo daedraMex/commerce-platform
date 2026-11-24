@@ -443,11 +443,34 @@ def test_preflight_stops_when_a_leftover_cannot_be_removed(tmp_path):
     assert "create_worktree" not in [call[0] for call in git.calls]
 
 
+class FakeRunHomes:
+    def __init__(self, events, leftovers=(), create_error=None):
+        self.events = events
+        self._leftovers = list(leftovers)
+        self.create_error = create_error
+
+    def leftovers(self):
+        return list(self._leftovers)
+
+    def create(self, label):
+        self.events.append(("run_home_create", label))
+        if self.create_error is not None:
+            raise self.create_error
+        return Path(f"/srv/factory/agent-homes/{label}-x")
+
+    def remove(self, home):
+        self.events.append(("run_home_remove", str(home)))
+
+    def remove_leftover(self, entry):
+        self.remove(entry)
+
+
 class SandboxRunner:
-    def __init__(self, events, error=None, model_errors=None):
+    def __init__(self, events, error=None, model_errors=None, run_homes=None):
         self.events = events
         self.error = error
         self.model_errors = dict(model_errors or {})
+        self.run_homes = run_homes
 
     def model_check(self, worktree, model, *, config_content):
         self.events.append(("model_check", model, config_content))
@@ -590,6 +613,51 @@ def test_preflight_checks_one_model_once_when_both_settings_name_it(tmp_path):
     preflight.run()
 
     assert [event[1] for event in events if event[0] == "model_check"] == ["m"]
+
+
+def test_preflight_removes_leftover_run_homes_and_proves_a_fresh_one(tmp_path):
+    """A killed run leaves its home; the auth copy must be valid before any ticket (#158)."""
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    homes = FakeRunHomes(events, leftovers=[Path("/srv/factory/agent-homes/builder-old")])
+    preflight.runner = SandboxRunner(events, run_homes=homes)
+    preflight._which = lambda name, path=None: "/usr/bin/rg"
+
+    preflight.run()
+
+    names = [event[0] for event in events]
+    assert events[names.index("run_home_remove")] == (
+        "run_home_remove",
+        "/srv/factory/agent-homes/builder-old",
+    )
+    assert ("run_home_create", "preflight") in events
+    assert ("run_home_remove", "/srv/factory/agent-homes/preflight-x") in events
+    assert names.index("run_home_create") < names.index("model_check")
+
+
+def test_preflight_fails_when_a_run_home_cannot_be_made(tmp_path):
+    from factory.run_home import RunHomeError
+
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    homes = FakeRunHomes(
+        events, create_error=RunHomeError("agent-auth.json: 'x' is not an API key")
+    )
+    preflight.runner = SandboxRunner(events, run_homes=homes)
+    preflight._which = lambda name, path=None: "/usr/bin/rg"
+
+    with pytest.raises(PreflightError, match="verify run homes: .*not an API key"):
+        preflight.run()
+
+
+def test_preflight_requires_a_system_ripgrep_with_run_homes(tmp_path):
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events, run_homes=FakeRunHomes(events))
+    preflight._which = lambda name, path=None: None
+
+    with pytest.raises(PreflightError, match="verify run homes: ripgrep"):
+        preflight.run()
 
 
 def test_preflight_stops_with_the_create_commands_when_a_label_is_missing(tmp_path):

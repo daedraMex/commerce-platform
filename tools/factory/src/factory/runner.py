@@ -7,6 +7,7 @@ full environment — so nothing except the approved variables reaches the model.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -225,6 +226,7 @@ class AgentRunner:
         agent_home: str | None = None,
         base_env: dict[str, str] | None = None,
         config_home: str | None = None,
+        run_homes=None,
     ):
         self._run = run
         self.agent_user = agent_user
@@ -233,6 +235,8 @@ class AgentRunner:
         # XDG_CONFIG_HOME for OpenCode: a factory-owned directory the agent can read
         # but not write, so nothing the agent runs can plant global config (#153).
         self.config_home = config_home
+        # A fresh home per OpenCode run (#158); None keeps the agent's own home.
+        self.run_homes = run_homes
 
     def run(
         self,
@@ -265,7 +269,28 @@ class AgentRunner:
             env["OPENCODE_DISABLE_PROJECT_CONFIG"] = "1"
         if self.config_home:
             env["XDG_CONFIG_HOME"] = self.config_home
-        self.verify_home_is_clean()
+        home = None
+        if self.run_homes is not None:
+            home = self.run_homes.create("reviewer" if disable_project_config else "builder")
+            env.update(self.run_homes.env(home, shared_home=self._shared_home()))
+        try:
+            return self._run_opencode(env, worktree, model, prompt, timeout_seconds, home)
+        finally:
+            if home is not None:
+                self._remove_home(home)
+
+    def _shared_home(self) -> str:
+        return self.agent_home or f"/home/{self.agent_user}"
+
+    def _remove_home(self, home: Path) -> None:
+        """Best effort: a home left behind is deleted by the next preflight."""
+        try:
+            self.run_homes.remove(home)
+        except Exception as exc:
+            print(f"run home not deleted, the next preflight will: {exc}", file=sys.stderr)
+
+    def _run_opencode(self, env, worktree, model, prompt, timeout_seconds, home) -> AgentResult:
+        self.verify_home_is_clean(home)
         argv: list[str] = [OPENCODE_BIN, "run", "--model", model, prompt]
         if self.agent_user:
             argv = sudo_argv(self.agent_user, argv, env)
@@ -314,7 +339,7 @@ class AgentRunner:
             said = " ".join((result.stderr or result.stdout).split())[:300] or "no output"
             raise AgentSandboxError(f"{model} gave no answer (exit {result.exit_code}): {said}")
 
-    def verify_home_is_clean(self) -> None:
+    def verify_home_is_clean(self, home: Path | None = None) -> None:
         """Refuse to start OpenCode when the agent's home holds a config source.
 
         OpenCode loads ``~/.opencode`` (config, plugins) even with project config
@@ -323,7 +348,7 @@ class AgentRunner:
         """
         if not self.agent_user:
             return
-        home = self.agent_home or f"/home/{self.agent_user}"
+        home = str(home) if home is not None else self._shared_home()
         for name in AGENT_HOME_PLANTS:
             path = f"{home}/{name}"
             result = self._run(
