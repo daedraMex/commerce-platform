@@ -35,10 +35,13 @@ never links Media to a product (ADR-0030).
 
 **Retries exhausted:** the last retry records `failed` with
 `photo_processing_unavailable` through the `FailExhaustedProcessing` use case and the
-repository, leaving `attempts` unchanged, so retry is allowed while `attempts` < 3. A
-submission discarded meanwhile still records `failed` with `photo_submission_discarded`. If
-recording the failure itself fails, the task logs the error with the store and submission id
-(#171).
+repository. A submission still `processing` keeps its `attempts`, so retry is allowed while
+`attempts` < 3. A submission still `uploaded` (the worker's start never saved) records the
+attempt it did make (`attempts` + 1) before the failure; when the start is refused because
+the attempts are used up or the submission is applied, it is left unchanged and the task
+logs the refusal like any failure to record. A submission discarded meanwhile still records
+`failed` with `photo_submission_discarded`. If recording the failure itself fails, the task
+logs the error with the store and submission id (#171).
 
 ## photos.processing-queue
 

@@ -60,6 +60,20 @@ def test_a_discarded_submission_still_ends_failed_as_discarded():
     assert saved.failure_code == "photo_submission_discarded"
 
 
+def test_an_exhausted_uploaded_submission_records_the_attempt_that_never_saved():
+    repository = FakePhotoSubmissionRepository(
+        rows=[make_submission(status=SubmissionStatus.UPLOADED, attempts=0)]
+    )
+    use_case = FailExhaustedProcessing(repository=repository)
+
+    saved = use_case(HOME, submission_id=1)
+
+    assert saved.status is SubmissionStatus.FAILED
+    assert saved.failure_code == "photo_processing_unavailable"
+    assert saved.failure_message
+    assert saved.attempts == 1
+
+
 def test_a_submission_that_is_no_longer_processing_is_left_unchanged():
     repository = FakePhotoSubmissionRepository(
         rows=[make_submission(status=SubmissionStatus.READY, result_media_id=30)]

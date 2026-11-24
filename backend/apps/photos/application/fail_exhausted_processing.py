@@ -13,7 +13,11 @@ from apps.shared.domain.store import StoreReference
 
 
 class FailExhaustedProcessing:
-    """Mark a still-processing submission failed without spending another attempt."""
+    """Mark a submission whose retries ran out as failed.
+
+    A still-processing submission keeps its attempt count; an uploaded one never got
+    its start saved, so this records the attempt the worker did make.
+    """
 
     def __init__(self, *, repository: PhotoSubmissionRepository):
         self._repository = repository
@@ -27,7 +31,9 @@ class FailExhaustedProcessing:
             submission.mark_failed(DISCARDED_FAILURE_CODE, DISCARDED_FAILURE_MESSAGE)
             return self._repository.save(submission)
 
-        if submission.status is not SubmissionStatus.PROCESSING:
+        if submission.status is SubmissionStatus.UPLOADED:
+            submission.start_processing()
+        elif submission.status is not SubmissionStatus.PROCESSING:
             return submission
 
         submission.mark_failed(PROCESSING_UNAVAILABLE_CODE, PROCESSING_UNAVAILABLE_MESSAGE)
