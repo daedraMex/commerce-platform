@@ -86,6 +86,14 @@ def test_runbook_documents_agent_owned_worktree_cleanup():
     assert "PYTEST_ADDOPTS=-p no:cacheprovider" in text
 
 
+def test_runbook_documents_the_undeclared_contract_check():
+    flat = " ".join(RUNBOOK.read_text().split())
+
+    assert "edits but the ticket does not declare as changed" in flat
+    assert "declared as consumed" in flat
+    assert "Review fixes are not checked again" in flat
+
+
 def test_runbook_documents_model_checks_and_reviewer_failures():
     flat = " ".join(RUNBOOK.read_text().split())
 
@@ -100,6 +108,7 @@ def test_runbook_documents_interrupted_runs_and_closed_tickets():
     flat = " ".join(RUNBOOK.read_text().split())
 
     assert "kills every agent process" in flat
+    assert "the group kill is refused and ignored" in flat
     assert "preflight cleanup failed after <step>" in flat
     assert "Night factory cleaned up" in flat
     assert "Never run two preflights at once" in flat

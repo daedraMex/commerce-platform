@@ -282,3 +282,23 @@ def test_builder_feedback_carries_the_failing_attack_and_its_source():
     assert "FAILED x" in feedback
     assert "def test_x()" in feedback
     assert "the runner deletes the attack tests" in feedback
+
+
+def test_reviewer_prompt_names_contracts_changed_without_being_declared():
+    prompt = compose_reviewer_prompt(
+        ticket(),
+        review_rules="r",
+        diff="d",
+        previous=(),
+        undeclared_contracts=(("photos.catalog-port", "declared as consumed"),),
+    )
+
+    section = prompt.split("## Contracts changed without being declared", 1)[1]
+    assert "`photos.catalog-port` (declared as consumed)" in section.split("##", 1)[0]
+    assert "every consumer" in section.split("##", 1)[0]
+
+
+def test_reviewer_prompt_has_no_contract_section_when_all_are_declared():
+    prompt = compose_reviewer_prompt(ticket(), review_rules="r", diff="d", previous=())
+
+    assert "Contracts changed without being declared" not in prompt

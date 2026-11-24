@@ -456,6 +456,14 @@ To upgrade an existing machine to this version:
   `#<n> skipped: <contract> held by PR #<pr> (#<ticket>)` for a ticket that
   would otherwise be ready, and one run never takes two tickets that conflict
   on a contract.
+- The conflict check trusts the ticket's **Contracts** section, so a new ticket's
+  PR is also checked against its diff: every `## <module>.<name>` section of
+  `docs/contracts/` that the change edits but the ticket does not declare as
+  changed is listed in the PR's **Risk** ("declared as consumed" or "not
+  declared") and named to the pre-PR reviewer, which checks every consumer of
+  it. An unreadable `docs/contracts/` diff is flagged in **Risk** and the PR
+  still opens. Review fixes are not checked again. If one is listed, fix the
+  ticket's Contracts section before another ticket on that contract runs.
 - Add `strong-model` to a ticket that touches security, money, migrations or
   otherwise tricky logic; it runs with `FACTORY_STRONG_MODEL` instead of the
   default. The builder model is never the reviewer of its own work. Prefer a
@@ -720,7 +728,11 @@ unreachable" as before.
   otherwise). If that kill is refused, nothing is deleted.
 - **Interrupted runs.** Ctrl+C while a command runs also stops that command's
   process group before the cleanup starts, since commands run in their own
-  session and never see the interrupt. `systemctl --user stop factory.service`
+  session and never see the interrupt. When only `factory-agent` processes are
+  left in that group (sudo already gone), the group kill is refused and
+  ignored, so the timeout or the interrupt is still reported; an agent run, a
+  check or an attack-test run then kills every agent process with the agent
+  `pkill` before the interrupt propagates. `systemctl --user stop factory.service`
   kills the whole service instead, and a bare `kill <pid>` ends the factory
   without any cleanup; in both cases the next preflight removes what is left.
   When a cleanup fails after a

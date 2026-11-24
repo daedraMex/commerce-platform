@@ -280,6 +280,10 @@ class AgentRunner:
         except CommandTimeout:
             kill_agent_processes(self._run, self.agent_user)
             return AgentResult(exit_code=None, stdout="", stderr="", timed_out=True)
+        except BaseException:
+            # Ctrl+C or a stop: the agent's own processes never saw it (#197).
+            kill_agent_processes(self._run, self.agent_user)
+            raise
         # A normal exit can leave background processes (nohup, servers) that would
         # change files after the checks or the review; none may outlive the step.
         ensure_agent_cleanup(self._run, self.agent_user)
