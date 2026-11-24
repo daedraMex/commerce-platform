@@ -7,6 +7,7 @@ from apps.catalog.services import (
     CatalogService,
     CatalogServiceError,
     CategoryReference,
+    InvalidImageOrder,
     MediaRecord,
     NewMedia,
     ProductImageConflict,
@@ -88,6 +89,12 @@ class FakeCatalogRepository:
                 if image.product_id == product_id and image.media_id == media_id
             ),
             None,
+        )
+
+    def product_images(self, product_id):
+        return sorted(
+            (image for image in self.images.values() if image.product_id == product_id),
+            key=lambda image: (image.position, image.id),
         )
 
     def active_main_image(self, product_id):
@@ -628,3 +635,83 @@ def test_catalog_service_errors_are_domain_errors_with_stable_codes(error_class,
     assert error.code == code
     assert error.message == str(error) == "boom"
     assert _domain_error_status(error) == status_code
+
+
+def test_reorder_renumbers_positions_and_moves_the_main_role(service, repository):
+    repository.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.media[32] = make_media(media_id=32, content_hash="hash-3")
+    repository.images[40] = make_image(
+        image_id=40, media_id=30, role=ProductImageRole.MAIN, position=1
+    )
+    repository.images[41] = make_image(
+        image_id=41, media_id=31, role=ProductImageRole.GALLERY, position=2
+    )
+    repository.images[42] = make_image(
+        image_id=42, media_id=32, role=ProductImageRole.GALLERY, position=3
+    )
+
+    reordered = service.reorder_carousel(HOME, product_id=10, image_ids=[42, 40, 41])
+
+    assert [image.id for image in reordered] == [42, 40, 41]
+    assert [repository.images[image_id].position for image_id in (42, 40, 41)] == [1, 2, 3]
+    assert repository.images[42].role is ProductImageRole.MAIN
+    assert repository.images[40].role is ProductImageRole.GALLERY
+    assert repository.images[41].role is ProductImageRole.GALLERY
+
+
+def test_reorder_allows_an_empty_carousel(service, repository):
+    assert service.reorder_carousel(HOME, product_id=10, image_ids=[]) == []
+    assert repository.images == {}
+
+
+@pytest.mark.parametrize(
+    "image_ids",
+    [
+        [40],
+        [40, 40, 41],
+        [40, 41, 99],
+        [40, 41, 42],
+    ],
+    ids=["omits", "repeats", "adds", "inactive"],
+)
+def test_reorder_rejects_a_list_that_is_not_the_exact_active_set(service, repository, image_ids):
+    repository.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.images[40] = make_image(
+        image_id=40, media_id=30, role=ProductImageRole.MAIN, position=1
+    )
+    repository.images[41] = make_image(
+        image_id=41, media_id=31, role=ProductImageRole.GALLERY, position=2
+    )
+    repository.images[42] = make_image(
+        image_id=42, media_id=31, role=ProductImageRole.GALLERY, position=3, is_active=False
+    )
+
+    with pytest.raises(InvalidImageOrder):
+        service.reorder_carousel(HOME, product_id=10, image_ids=image_ids)
+
+    assert repository.images[40].position == 1
+    assert repository.images[40].role is ProductImageRole.MAIN
+
+
+def test_reorder_rejects_an_image_of_another_product_or_store(service, repository):
+    repository.products[11] = make_product(product_id=11)
+    repository.media[31] = make_media(media_id=31, content_hash="hash-2")
+    repository.images[40] = make_image(
+        image_id=40, media_id=30, role=ProductImageRole.MAIN, position=1
+    )
+    repository.images[41] = make_image(
+        image_id=41, product_id=11, media_id=31, role=ProductImageRole.MAIN, position=1
+    )
+
+    with pytest.raises(InvalidImageOrder):
+        service.reorder_carousel(HOME, product_id=10, image_ids=[40, 41])
+
+
+def test_reorder_runs_in_a_transaction_and_locks_the_product(service, repository, transaction):
+    repository.images[40] = make_image(position=1)
+
+    service.reorder_carousel(HOME, product_id=10, image_ids=[40])
+
+    assert transaction.entered == 1
+    assert transaction.committed == 1
+    assert repository.locked_products == [(HOME.id, 10)]

@@ -15,8 +15,10 @@ from apps.photos.application.get_photo_submission import (
     GetPhotoSubmission,
     build_submission_view,
 )
+from apps.photos.application.get_product_images import GetProductImages
 from apps.photos.application.redo_photo import RedoPhoto
 from apps.photos.application.remove_photo import RemovePhoto
+from apps.photos.application.reorder_product_images import ReorderProductImages
 from apps.photos.application.retry_photo import RetryPhoto
 from apps.photos.application.upload_photo import UploadPhoto, UploadPhotoCommand
 from apps.photos.domain.errors import ImageTooLarge
@@ -25,6 +27,8 @@ from apps.photos.interfaces.serializers import (
     GroupPhotoApplySerializer,
     GroupPhotoLinksSerializer,
     PhotoSubmissionSerializer,
+    ProductCarouselSerializer,
+    ProductImageOrderSerializer,
     RedoPhotoSerializer,
     UploadPhotoSerializer,
 )
@@ -570,3 +574,99 @@ class StaffPhotoDiscardView(StoreScopedMixin, APIView):
             authorizer=get_authorizer(),
         )(request.store, user_id=request.user.id, submission_id=pk)
         return Response(_action_body(request, submission))
+
+
+CAROUSEL_IMAGE_EXAMPLE = {
+    "id": 31,
+    "media_id": 44,
+    "photo_submission_id": 12,
+    "active": True,
+    "role": "main",
+    "position": 1,
+    "url": "https://media.example.com/stores/1/media/abc123.jpg",
+    "thumbnail_url": ("https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp"),
+    "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+    "alt_text": "Blue flannel blanket with a moon pattern",
+    "width": 1200,
+    "height": 1500,
+}
+
+CAROUSEL_EXAMPLE = OpenApiExample(
+    "Product carousel",
+    value={"product_id": 7, "images": [CAROUSEL_IMAGE_EXAMPLE]},
+    response_only=True,
+)
+
+
+@extend_schema(
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=ProductCarouselSerializer,
+            description=(
+                "The product's active images in position order, then its removed links and "
+                "ready unapproved photos, each with an active flag and renditions."
+            ),
+            examples=[CAROUSEL_EXAMPLE],
+        ),
+        **STORE_ERRORS,
+        **AUTH_ERRORS,
+        **MANAGE_CATALOG_ERRORS,
+        **problem_response(404, ("not_found", "No product matches this id in this store.")),
+    },
+)
+class StaffProductImagesView(StoreScopedMixin, APIView):
+    """Return one product's carousel for staff review and ordering."""
+
+    def get(self, request, pk, *args, **kwargs):
+        carousel = GetProductImages(
+            catalog=get_catalog_service(),
+            repository=get_photo_submission_repository(),
+            authorizer=get_authorizer(),
+        )(request.store, user_id=request.user.id, product_id=pk)
+        return Response(ProductCarouselSerializer(carousel).data)
+
+
+@extend_schema(
+    request=ProductImageOrderSerializer,
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=ProductCarouselSerializer,
+            description=(
+                "The carousel after renumbering its positions and moving the cover to the "
+                "first image in the sent order."
+            ),
+            examples=[CAROUSEL_EXAMPLE],
+        ),
+        **STORE_ERRORS,
+        **AUTH_ERRORS,
+        **MANAGE_CATALOG_ERRORS,
+        **problem_response(400, ("validation_error", "Validation failed.")),
+        **problem_response(
+            400,
+            (
+                "catalog_invalid_image_order",
+                "The order must list exactly this product's active image ids, once each.",
+            ),
+        ),
+        **problem_response(404, ("not_found", "No product matches this id in this store.")),
+    },
+)
+class StaffProductImageOrderView(StoreScopedMixin, APIView):
+    """Save a product's full active image order, moving the cover to its first image."""
+
+    def put(self, request, pk, *args, **kwargs):
+        serializer = ProductImageOrderSerializer(data=request.data or {})
+        serializer.is_valid(raise_exception=True)
+        carousel = ReorderProductImages(
+            catalog=get_catalog_service(),
+            repository=get_photo_submission_repository(),
+            authorizer=get_authorizer(),
+        )(
+            request.store,
+            user_id=request.user.id,
+            product_id=pk,
+            image_ids=serializer.validated_data["image_ids"],
+        )
+        return Response(ProductCarouselSerializer(carousel).data)

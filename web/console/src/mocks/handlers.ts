@@ -1,6 +1,7 @@
 import { HttpResponse, http } from "msw";
 
 import type {
+  CarouselImage,
   Category,
   Me,
   PhotoSubmission,
@@ -195,14 +196,80 @@ type PhotoMockState = {
   submissions: Map<number, PhotoSubmission>;
   polls: Map<number, number>;
   previews: Map<number, MockPreview>;
+  carousels: Map<number, CarouselImage[]>;
   nextId: number;
 };
+
+const REMOVED_IMAGE: CarouselImage = {
+  id: 103,
+  media_id: 203,
+  photo_submission_id: 1003,
+  active: false,
+  role: "gallery",
+  position: 3,
+  alt_text: "Frazada retirada del carrusel",
+  url: "https://media.example.test/stores/1/media/frazada-retirada.jpg",
+  thumbnail_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-retirada-320w-v1.webp",
+  medium_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-retirada-800w-v1.webp",
+  width: 1200,
+  height: 800,
+};
+
+const PENDING_IMAGE: CarouselImage = {
+  id: null,
+  media_id: 204,
+  photo_submission_id: 1004,
+  active: false,
+  role: null,
+  position: null,
+  alt_text: "Frazada esperando aprobación",
+  url: "https://media.example.test/stores/1/media/frazada-espera.jpg",
+  thumbnail_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-espera-320w-v1.webp",
+  medium_url:
+    "https://media.example.test/stores/1/media/renditions/frazada-espera-800w-v1.webp",
+  width: 1200,
+  height: 800,
+};
+
+function initialCarousels(): Map<number, CarouselImage[]> {
+  return new Map([
+    [
+      12,
+      [
+        {
+          ...MAIN_IMAGE,
+          id: 101,
+          media_id: 201,
+          photo_submission_id: 1001,
+          active: true,
+          role: "main",
+          position: 1,
+        },
+        {
+          ...AUTUMN_IMAGE,
+          id: 102,
+          media_id: 202,
+          photo_submission_id: 1002,
+          active: true,
+          role: "gallery",
+          position: 2,
+        },
+        REMOVED_IMAGE,
+        PENDING_IMAGE,
+      ],
+    ],
+  ]);
+}
 
 function initialPhotoState(): PhotoMockState {
   return {
     submissions: new Map(),
     polls: new Map(),
     previews: new Map(),
+    carousels: initialCarousels(),
     nextId: 100,
   };
 }
@@ -397,6 +464,74 @@ function normalizeProductIds(value: unknown): number[] | null {
 }
 
 export const handlers = [
+  http.get("*/api/v1/staff/products/:id/images/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const productId = Number(params.id);
+    const images = photoState.carousels.get(productId) ?? [];
+    return HttpResponse.json({ product_id: productId, images });
+  }),
+
+  http.put(
+    "*/api/v1/staff/products/:id/images/order/",
+    async ({ request, params }) => {
+      if (!authorized(request)) {
+        return problem(
+          401,
+          "not_authenticated",
+          "Authentication credentials were not provided.",
+        );
+      }
+
+      const productId = Number(params.id);
+      let body: { image_ids?: unknown } = {};
+      try {
+        body = (await request.json()) as { image_ids?: unknown };
+      } catch {
+        return problem(400, "validation_error", "The body must be JSON.");
+      }
+      const imageIds = body.image_ids;
+      if (!Array.isArray(imageIds) || imageIds.some((id) => typeof id !== "number")) {
+        return problem(
+          400,
+          "catalog_invalid_image_order",
+          "The order must list the active image ids.",
+        );
+      }
+
+      const current = photoState.carousels.get(productId) ?? [];
+      const active = current.filter((image) => image.active);
+      const inactive = current.filter((image) => !image.active);
+      const byId = new Map(active.map((image) => [image.id, image]));
+      if (
+        imageIds.length !== active.length ||
+        new Set(imageIds).size !== imageIds.length ||
+        imageIds.some((id) => !byId.has(id))
+      ) {
+        return problem(
+          400,
+          "catalog_invalid_image_order",
+          "The order must list exactly this product's active image ids, once each.",
+        );
+      }
+
+      const reordered = imageIds.map((id, index) => ({
+        ...(byId.get(id) as CarouselImage),
+        position: index + 1,
+        role: index === 0 ? "main" : "gallery",
+      }));
+      const images = [...reordered, ...inactive];
+      photoState.carousels.set(productId, images);
+      return HttpResponse.json({ product_id: productId, images });
+    },
+  ),
+
   http.post("*/api/v1/staff/photos/", async ({ request }) => {
     if (!authorized(request)) {
       return problem(
