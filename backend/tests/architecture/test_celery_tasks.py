@@ -1,4 +1,10 @@
-"""Every Celery task has an explicit name and receives its store (AGENTS.md)."""
+"""Every Celery task has an explicit name and receives its store (AGENTS.md).
+
+The checks read decorated functions, so a task must be registered with a
+decorator: ``t = shared_task(fn)`` or ``app.task(fn)`` would hide it from them
+and is refused (#178). Class-based tasks (``class T(celery.Task)``) are not used
+here and are not checked: the worker-registration test below still sees them.
+"""
 
 import ast
 import json
@@ -37,6 +43,38 @@ def _explicit_name(decorator):
         if keyword.arg == "name" and isinstance(keyword.value, ast.Constant):
             return keyword.value.value
     return None
+
+
+def call_registrations(path):
+    """Tasks registered by calling the decorator on a function instead of decorating it."""
+    for node in ast.walk(parse(path)):
+        if isinstance(node, ast.Call) and _is_task_decorator(node) and node.args:
+            yield node.lineno
+
+
+def test_the_scan_sees_a_task_registered_with_a_call(tmp_path):
+    planted = tmp_path / "tasks.py"
+    planted.write_text(
+        "from celery import shared_task\n"
+        "from config.celery import app\n"
+        "def run(store_id): ...\n"
+        "t = shared_task(run)\n"
+        "u = app.task(run, name='x')\n"
+        "@shared_task(name='ok')\n"
+        "def fine(store_id): ...\n"
+    )
+
+    assert list(call_registrations(planted)) == [4, 5]
+
+
+def test_every_task_is_registered_with_a_decorator():
+    found = [
+        f"{relative(path)}:{line}"
+        for path in source_files(BACKEND_DIR / "apps") + source_files(BACKEND_DIR / "config")
+        for line in call_registrations(path)
+    ]
+
+    assert found == [], "Register tasks with @shared_task(name=...), so these checks see them."
 
 
 def test_the_task_scan_finds_the_known_tasks():
