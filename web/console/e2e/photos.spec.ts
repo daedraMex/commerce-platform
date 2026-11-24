@@ -418,29 +418,42 @@ test("reorders the product carousel by touch and shows the new cover", async ({
     throw new Error("The first carousel image has no bounding box");
   }
   const handle = panel.getByTestId("carousel-drag-handle").nth(1);
+  const handleBox = await handle.boundingBox();
+  if (!handleBox) {
+    throw new Error("The second carousel drag handle has no bounding box");
+  }
 
   const reorderRequest = page.waitForRequest(
     (request) =>
       request.method() === "PUT" &&
       request.url().includes("/api/v1/staff/products/12/images/order/"),
   );
-  await handle.dispatchEvent("pointerdown", {
-    pointerType: "touch",
-    pointerId: 1,
-    button: 0,
-    clientX: firstBox.x + firstBox.width / 2,
-    clientY: firstBox.y + firstBox.height / 2,
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [
+      {
+        x: handleBox.x + handleBox.width / 2,
+        y: handleBox.y + handleBox.height / 2,
+        id: 1,
+      },
+    ],
   });
-  await handle.dispatchEvent("pointermove", {
-    pointerType: "touch",
-    pointerId: 1,
-    clientX: firstBox.x + firstBox.width / 2,
-    clientY: firstBox.y + firstBox.height / 2,
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [
+      {
+        x: firstBox.x + firstBox.width / 2,
+        y: firstBox.y + firstBox.height / 2,
+        id: 1,
+      },
+    ],
   });
-  await handle.dispatchEvent("pointerup", {
-    pointerType: "touch",
-    pointerId: 1,
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
   });
+  await cdp.detach();
 
   const body = (await (await reorderRequest).postDataJSON()) as {
     image_ids: number[];

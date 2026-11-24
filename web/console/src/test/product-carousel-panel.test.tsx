@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { HttpResponse, delay, http } from "msw";
 import { NextIntlClientProvider } from "next-intl";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { CarouselImage } from "@commerce-platform/api-client";
 
@@ -84,6 +84,21 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, "setPointerCapture", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  Object.defineProperty(HTMLElement.prototype, "releasePointerCapture", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  Object.defineProperty(HTMLElement.prototype, "hasPointerCapture", {
+    configurable: true,
+    value: vi.fn(() => true),
+  });
+});
+
 describe("ProductCarouselPanel", () => {
   it("shows the accent border and Portada on active images and grey borders on inactive ones", async () => {
     server.use(
@@ -160,6 +175,63 @@ describe("ProductCarouselPanel", () => {
     );
     expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
       "Primera foto",
+    );
+  });
+
+  it("ends the drag and sends the order when pointer capture is lost", async () => {
+    let orderedIds: number[] | null = null;
+    server.use(
+      http.get(CAROUSEL_URL, () =>
+        HttpResponse.json({ product_id: 12, images: IMAGES.slice(0, 2) }),
+      ),
+      http.put(ORDER_URL, async ({ request }) => {
+        const body = (await request.json()) as { image_ids: number[] };
+        orderedIds = body.image_ids;
+        return HttpResponse.json({
+          product_id: 12,
+          images: [IMAGES[1], IMAGES[0]],
+        });
+      }),
+    );
+
+    renderPanel();
+
+    const items = await screen.findAllByTestId("carousel-image");
+    const handles = screen.getAllByTestId("carousel-drag-handle");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => items[0] ?? null),
+    });
+
+    fireEvent.pointerDown(handles[1] as HTMLElement, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(handles[1] as HTMLElement, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
+        "Segunda foto",
+      ),
+    );
+
+    fireEvent.lostPointerCapture(handles[1] as HTMLElement, { pointerId: 1 });
+
+    await waitFor(() => expect(orderedIds).toEqual([102, 101]));
+    await waitFor(() =>
+      expect(screen.getAllByTestId("carousel-image")[0]).not.toHaveClass(
+        "opacity-60",
+      ),
+    );
+    expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
+      "Segunda foto",
     );
   });
 });

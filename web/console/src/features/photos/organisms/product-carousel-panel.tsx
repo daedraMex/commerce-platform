@@ -135,11 +135,7 @@ export function ProductCarouselPanel({
     dragRef.current = { id, startIds, startImages, moved: false };
     setDraggingId(id);
     setReorderError(null);
-    try {
-      event.currentTarget.setPointerCapture?.(event.pointerId);
-    } catch {
-      // A synthetic touch pointer is not active, so it has nothing to capture.
-    }
+    event.currentTarget.setPointerCapture(event.pointerId);
     event.preventDefault();
   };
 
@@ -337,6 +333,7 @@ export function ProductCarouselPanel({
                         onPointerMove={moveDrag}
                         onPointerUp={endDrag}
                         onPointerCancel={endDrag}
+                        onLostPointerCapture={endDrag}
                         className="touch-none rounded-md border border-border p-1.5 text-foreground/60 disabled:opacity-40"
                       >
                         <GripVertical aria-hidden="true" className="size-4" />
