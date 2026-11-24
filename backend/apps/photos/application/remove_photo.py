@@ -6,7 +6,7 @@ from apps.photos.application.ports import (
     UnitOfWork,
 )
 from apps.photos.domain.errors import CannotRemove
-from apps.photos.domain.submission import PhotoSubmission
+from apps.photos.domain.submission import PhotoSubmission, SubmissionKind
 from apps.shared.domain.exceptions import NotFoundError
 from apps.shared.domain.permissions import MANAGE_CATALOG
 from apps.shared.domain.ports import Authorizer
@@ -39,6 +39,11 @@ class RemovePhoto:
             raise NotFoundError("No photo submission matches this id in this store.")
         if submission.applied_at is None:
             raise CannotRemove("Only an applied photo can be removed.")
+        if submission.kind is SubmissionKind.GROUP:
+            raise CannotRemove(
+                "A group photo has no carousel link of its own; change its links through "
+                "the links endpoint instead."
+            )
 
         submission.remove()
         with self._unit_of_work():
