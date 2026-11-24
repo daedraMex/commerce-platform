@@ -1049,6 +1049,42 @@ export const handlers = [
     return HttpResponse.json(PHOTO_CATEGORIES);
   }),
 
+  http.get("*/api/v1/staff/products/:id/", ({ request, params }) => {
+    if (!authorized(request)) {
+      return problem(
+        401,
+        "not_authenticated",
+        "Authentication credentials were not provided.",
+      );
+    }
+
+    const store = request.headers.get("X-Store");
+    const storeProducts = store ? PHOTO_PRODUCTS_BY_STORE[store] : undefined;
+    if (!store) {
+      return problem(
+        400,
+        "store_header_missing",
+        "The X-Store header is required.",
+      );
+    }
+    if (!storeProducts) {
+      return problem(400, "store_not_found", "No store matches this slug.");
+    }
+
+    const product = storeProducts.find(
+      (item) => item.id === Number(params.id),
+    );
+    if (!product) {
+      return problem(
+        404,
+        "not_found",
+        "No active product matches this id in this store.",
+      );
+    }
+
+    return HttpResponse.json(product);
+  }),
+
   http.get("*/api/v1/staff/products/", ({ request }) => {
     if (!authorized(request)) {
       return problem(

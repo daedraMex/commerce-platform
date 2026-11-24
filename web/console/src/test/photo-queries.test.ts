@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   photoCategoriesQueryKey,
+  photoProductQueryKey,
   photoProductsQueryKey,
 } from "@/features/photos/lib/queries";
 
@@ -20,6 +21,10 @@ describe("photo query keys", () => {
     expect(photoProductsQueryKey("anime", { page_size: 100 })).not.toContain(
       "kawaii",
     );
+    expect(photoProductQueryKey("anime", 12)).not.toEqual(
+      photoProductQueryKey("kawaii", 12),
+    );
+    expect(photoProductQueryKey("anime", 12)).toContain("anime");
   });
 
   it("keeps the same key for the same store and filters", () => {
