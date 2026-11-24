@@ -189,3 +189,13 @@ def test_runbook_documents_the_final_sudoers_file_exactly():
     assert "Sudo's `*` does not cross `/`" in flat
     assert "a sudoers glob is not a security boundary for `rm`" in flat
     assert "/usr/bin/install" not in text
+
+
+def test_runbook_says_to_copy_the_locked_service_units_and_reload():
+    text = RUNBOOK.read_text()
+
+    section = text.split("## Migrating an existing machine", 1)[1].split("\n## ", 1)[0]
+    assert "uv run --locked" in section
+    assert "cp /srv/factory/repo/tools/factory/systemd/factory.service" in section
+    assert "cp /srv/factory/repo/tools/factory/systemd/factory-metrics.service" in section
+    assert "systemctl --user daemon-reload" in section

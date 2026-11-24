@@ -10,5 +10,5 @@ Type=oneshot
 EnvironmentFile=%h/factory/secrets.env
 WorkingDirectory=/srv/factory/repo/tools/factory
 UMask=0007
-ExecStart=/usr/local/bin/uv run factory
+ExecStart=/usr/local/bin/uv run --locked factory
 TimeoutStartSec=4h

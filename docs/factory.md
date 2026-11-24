@@ -425,7 +425,8 @@ Run these once, as the admin user unless a step says `factory`.
       requests always go through her approval.
     - **main checks**: require the "Backend", "Console", "Level 2 E2E",
       "Celery broker" and "Ticket link" checks, with **Require branches to be
-      up to date before merging**. No bypass actors.
+      up to date before merging**. No bypass actors. Add "Factory" once it
+      has been green on `main` for a week (#216).
 
     In the repository settings, turn on **Always suggest updating pull request
     branches**. Do not give the factory or any agent a bypass. Agents (the
@@ -462,6 +463,17 @@ To upgrade an existing machine to this version:
    ```
    Then run `factory preflight` by hand: it makes a run home and asks both
    models to answer from one.
+8. Locked services (#216), as `factory`: both services now run
+   `uv run --locked`, so a stale `uv.lock` stops the run instead of being
+   rewritten in the checkout. The self-update does not copy unit files, so copy
+   them and reload:
+   ```bash
+   cp /srv/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
+   cp /srv/factory/repo/tools/factory/systemd/factory-metrics.service ~/.config/systemd/user/
+   systemctl --user daemon-reload && systemctl --user restart factory.timer
+   ```
+   The next hourly run should start; check it with
+   `journalctl --user -u factory.service -n 20`.
 
 ## Updating the factory
 
