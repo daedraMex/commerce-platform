@@ -516,3 +516,75 @@ def test_cleanup_that_is_killed_on_every_pass_fails_loudly():
 
     with pytest.raises(AgentSandboxError, match="still running"):
         ensure_agent_cleanup(run, "factory-agent")
+
+
+def _model_check_runner(answer):
+    def rule(argv):
+        if "run" in argv and "--model" in argv:
+            return answer
+        return CommandResult(1, "", "")  # test -e: no plant; pkill: nothing left
+
+    run = ScriptedRun(rule)
+    runner = AgentRunner(
+        run=run,
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        base_env={},
+        config_home="/srv/factory/agent-config",
+    )
+    return runner, run
+
+
+def test_model_check_asks_the_model_for_a_token_with_the_read_only_config(tmp_path):
+    from factory.runner import MODEL_CHECK_TOKEN
+
+    runner, run = _model_check_runner(CommandResult(0, f"> build\n\n{MODEL_CHECK_TOKEN}\n", ""))
+
+    runner.model_check(tmp_path, "anthropic/claude-sonnet-5-5", config_content='{"a": 1}')
+
+    argv, cwd, env, _ = next(call for call in run.calls if "run" in call[0])
+    assert argv[argv.index("--model") + 1] == "anthropic/claude-sonnet-5-5"
+    assert cwd == str(tmp_path)
+    assert env["OPENCODE_CONFIG_CONTENT"] == '{"a": 1}'
+    assert env["OPENCODE_DISABLE_PROJECT_CONFIG"] == "1"
+    assert env["XDG_CONFIG_HOME"] == "/srv/factory/agent-config"
+
+
+def test_model_check_fails_naming_the_model_when_it_gives_no_output(tmp_path):
+    """The reviewer ran without its provider login and printed nothing (#202)."""
+    from factory.runner import AgentSandboxError
+
+    runner, _ = _model_check_runner(CommandResult(0, "", ""))
+
+    with pytest.raises(
+        AgentSandboxError, match=r"anthropic/claude-sonnet-5-5 gave no answer \(exit 0\)"
+    ):
+        runner.model_check(tmp_path, "anthropic/claude-sonnet-5-5", config_content="{}")
+
+
+def test_model_check_reports_what_the_model_said_instead(tmp_path):
+    from factory.runner import AgentSandboxError
+
+    runner, _ = _model_check_runner(CommandResult(1, "", "ProviderAuthError: no credentials"))
+
+    with pytest.raises(AgentSandboxError, match="exit 1.*ProviderAuthError"):
+        runner.model_check(tmp_path, "anthropic/claude-sonnet-5-5", config_content="{}")
+
+
+def test_an_interrupted_agent_run_kills_every_agent_process_before_it_propagates(tmp_path):
+    """Ctrl+C reaches only the factory; the agent's own processes need the pkill (#197)."""
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        if "/usr/bin/opencode" in argv:
+            raise KeyboardInterrupt
+        return CommandResult(exit_code=1, stdout="", stderr="")
+
+    runner = AgentRunner(run=run, agent_user="factory-agent", base_env={"PATH": "/usr/bin"})
+
+    with pytest.raises(KeyboardInterrupt):
+        runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+
+    opencode = next(i for i, argv in enumerate(calls) if "/usr/bin/opencode" in argv)
+    assert "/usr/bin/pkill" in calls[opencode + 1]

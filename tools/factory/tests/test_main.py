@@ -168,6 +168,8 @@ class FakeGit:
 
     def read_ref_file(self, repo_dir, ref, path):
         self.ref_reads.append((str(repo_dir), ref, path))
+        if getattr(self, "ref_read_error", None) is not None and path == "REVIEW.md":
+            raise self.ref_read_error
         if path in self.dependency_old:
             old = self.dependency_old[path]
             if old is None:
@@ -181,6 +183,14 @@ class FakeGit:
 
     def review_diff(self, worktree):
         return "diff --git a/x.py b/x.py\n+x = 1\n"
+
+    contract_diff_text = ""
+    contract_diff_error = None
+
+    def contract_diff(self, worktree):
+        if self.contract_diff_error is not None:
+            raise self.contract_diff_error
+        return self.contract_diff_text
 
     def review_changed_files(self, worktree):
         return list(self.review_files)
@@ -399,6 +409,9 @@ class FakeRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     def __init__(self, result=None):
         self.result = result or AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
         self.calls = []
@@ -437,6 +450,9 @@ class ExplodingRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     def __init__(self, error):
         self.error = error
 
@@ -454,6 +470,9 @@ class BaseExceptionRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     def __init__(self, error):
         self.error = error
 
@@ -469,6 +488,10 @@ class RecordingNotifier:
         self.paused = []
         self.review_addressed = []
         self.review_skipped = []
+        self.reviewer_failing = []
+
+    def send_reviewer_failing(self, info):
+        self.reviewer_failing.append(info)
 
     def send_pr_ready(self, info):
         self.pr_ready.append(info)
@@ -1295,7 +1318,8 @@ class FakePreflightFactory:
         self.error = error
         self.run_error = run_error
 
-    def run_preflight(self):
+    def run_preflight(self, *, recheck_models=False):
+        self.recheck_models = recheck_models
         if self.error is not None:
             raise self.error
         return self.tickets
@@ -1317,6 +1341,7 @@ def test_preflight_cli_reports_success(monkeypatch, capsys, tmp_path):
 
     assert main_module.main(["preflight"]) == 0
     assert "preflight ok (1 tickets listed)" in capsys.readouterr().out
+    assert fake.recheck_models is True  # by hand, every model is asked again
 
 
 def test_preflight_cli_reports_failure_and_exits_nonzero(monkeypatch, capsys, tmp_path):
@@ -1556,6 +1581,29 @@ def test_review_fix_protected_path_goes_stuck_without_push(tmp_path):
     assert len(results) == 1 and not results[0].ok
     assert git.pushed == []
     assert notifier.stuck[0].failing_check == "protected path changed"
+
+
+def test_a_review_fix_appends_to_the_ticket_log_instead_of_starting_it_over(tmp_path):
+    """The #195 fix erased the original reviewer section of 134.log (#202)."""
+    settings = make_settings(tmp_path)
+    settings.logs_dir.mkdir(parents=True)
+    log = settings.logs_dir / "7.log"
+    log.write_text(
+        "=== step 1 (model m) ===\nbuilt\n=== review after step 1 (model s) ===\nfound\n"
+    )
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    github = FakeGitHub(review_fixes=[make_review_fix()])
+    runner = FakeRunner(AgentResult(exit_code=0, stdout="fixed it", stderr="", timed_out=False))
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=runner, notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    text = log.read_text()
+    assert text.startswith("=== step 1 (model m) ===\nbuilt\n=== review after step 1")
+    assert "found\n=== review fix step 1 (model " in text
+    assert text.endswith("fixed it\n")
 
 
 def test_review_fix_already_committed_by_the_agent_is_pushed_not_stuck(tmp_path):
@@ -2176,6 +2224,9 @@ class ScriptedRunner:
     def smoke_check(self, worktree):
         pass
 
+    def model_check(self, worktree, model, *, config_content):
+        pass
+
     """Builder calls always succeed; reviewer calls (with a config path) follow a script."""
 
     def __init__(self, reviews):
@@ -2426,6 +2477,68 @@ def test_attack_tests_stay_off_by_default_and_for_console_only_changes(tmp_path)
     assert console.attack_runs == []
 
 
+CATALOG_PORT_DIFF = (
+    "diff --git a/docs/contracts/photos.md b/docs/contracts/photos.md\n"
+    "--- a/docs/contracts/photos.md\n"
+    "+++ b/docs/contracts/photos.md\n"
+    "@@ -1,3 +1,4 @@\n"
+    " ## photos.catalog-port\n"
+    " \n"
+    "+| `reorder_carousel(store, *, product_id, image_ids)` | see below |\n"
+)
+
+
+def _consuming_ticket(github):
+    github.tickets = [
+        replace(
+            github.tickets[0],
+            body="## Contracts\n\nConsumes `photos.catalog-port`.\n",
+        )
+    ]
+
+
+def test_an_undeclared_contract_change_reaches_the_reviewer_and_the_pr_risk(tmp_path):
+    """#134 consumed photos.catalog-port and PR #195 changed it (#203)."""
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.contract_diff_text = CATALOG_PORT_DIFF
+
+    _, _, github, runner, _ = run_with_reviewer(
+        tmp_path, [NO_FINDINGS], git=git, setup_github=_consuming_ticket
+    )
+
+    assert "`photos.catalog-port` (declared as consumed)" in runner.review_calls[0]["prompt"]
+    risk = github.created_prs[0][2].split("## Risk", 1)[1].split("## How to revert", 1)[0]
+    assert "`photos.catalog-port`: declared as consumed" in risk
+
+
+def test_a_declared_contract_change_adds_nothing(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.contract_diff_text = CATALOG_PORT_DIFF
+
+    def changing_ticket(github):
+        github.tickets = [
+            replace(github.tickets[0], body="## Contracts\n\nChanges `photos.catalog-port`.\n")
+        ]
+
+    _, _, github, runner, _ = run_with_reviewer(
+        tmp_path, [NO_FINDINGS], git=git, setup_github=changing_ticket
+    )
+
+    assert "Contracts changed without being declared" not in runner.review_calls[0]["prompt"]
+    assert "None flagged" in github.created_prs[0][2]
+
+
+def test_an_unreadable_contract_diff_is_flagged_and_the_pr_still_opens(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.contract_diff_error = RuntimeError("git diff failed")
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [NO_FINDINGS], git=git)
+
+    assert results[0].ok
+    risk = github.created_prs[0][2].split("## Risk", 1)[1]
+    assert "could not read the docs/contracts/ diff" in risk
+
+
 def test_strong_model_ticket_skips_the_reviewer(tmp_path):
     results, _, github, runner, _ = run_with_reviewer(
         tmp_path, [], labels=("ready-for-agent", "strong-model")
@@ -2444,6 +2557,65 @@ def test_an_unreadable_review_still_opens_the_pr_and_says_so(tmp_path):
     assert results[0].ok
     assert "automated review failed" in github.created_prs[0][2]
     assert "read in full" in github.created_prs[0][2]
+
+
+def test_an_empty_reviewer_output_says_so_with_its_exit_code(tmp_path):
+    """The reviewer without a provider login printed nothing (#202)."""
+    empty = AgentResult(exit_code=0, stdout="", stderr="", timed_out=False)
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [empty])
+
+    assert results[0].ok
+    body = github.created_prs[0][2]
+    assert "the reviewer produced no output (exit 0)" in body
+    assert "no REVIEW-FINDINGS block" not in body
+
+
+def test_an_empty_reviewer_output_keeps_its_stderr(tmp_path):
+    empty = AgentResult(
+        exit_code=1, stdout="  \n", stderr="ProviderAuthError: missing", timed_out=False
+    )
+
+    _, _, github, _, _ = run_with_reviewer(tmp_path, [empty])
+
+    assert "produced no output (exit 1): ProviderAuthError: missing" in github.created_prs[0][2]
+
+
+def test_a_second_reviewer_failure_in_a_row_reaches_telegram_once(tmp_path):
+    garbage = AgentResult(exit_code=0, stdout="LGTM", stderr="", timed_out=False)
+
+    _, _, _, _, first = run_with_reviewer(tmp_path, [garbage])
+    _, _, _, _, second = run_with_reviewer(tmp_path, [garbage])
+    _, _, _, _, third = run_with_reviewer(tmp_path, [garbage])
+
+    assert first.reviewer_failing == []
+    [info] = second.reviewer_failing
+    assert info.model == "deepseek/deepseek-v4-pro"
+    assert "no REVIEW-FINDINGS block" in info.reason
+    assert third.reviewer_failing == []
+
+
+def test_a_review_the_model_never_ran_does_not_count_against_it(tmp_path):
+    """Two budget overruns before the review must not blame the reviewer model."""
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.ref_read_error = RuntimeError("git show failed")
+
+    run_with_reviewer(tmp_path, [], git=git)
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.ref_read_error = RuntimeError("git show failed")
+    _, _, _, _, notifier = run_with_reviewer(tmp_path, [], git=git)
+
+    assert notifier.reviewer_failing == []
+
+
+def test_a_successful_review_resets_the_failure_count(tmp_path):
+    garbage = AgentResult(exit_code=0, stdout="LGTM", stderr="", timed_out=False)
+
+    run_with_reviewer(tmp_path, [garbage])
+    run_with_reviewer(tmp_path, [NO_FINDINGS])
+    _, _, _, _, notifier = run_with_reviewer(tmp_path, [garbage])
+
+    assert notifier.reviewer_failing == []
 
 
 def test_a_reviewer_that_changes_the_worktree_sends_the_ticket_to_stuck(tmp_path):

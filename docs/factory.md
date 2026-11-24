@@ -456,6 +456,14 @@ To upgrade an existing machine to this version:
   `#<n> skipped: <contract> held by PR #<pr> (#<ticket>)` for a ticket that
   would otherwise be ready, and one run never takes two tickets that conflict
   on a contract.
+- The conflict check trusts the ticket's **Contracts** section, so a new ticket's
+  PR is also checked against its diff: every `## <module>.<name>` section of
+  `docs/contracts/` that the change edits but the ticket does not declare as
+  changed is listed in the PR's **Risk** ("declared as consumed" or "not
+  declared") and named to the pre-PR reviewer, which checks every consumer of
+  it. An unreadable `docs/contracts/` diff is flagged in **Risk** and the PR
+  still opens. Review fixes are not checked again. If one is listed, fix the
+  ticket's Contracts section before another ticket on that contract runs.
 - Add `strong-model` to a ticket that touches security, money, migrations or
   otherwise tricky logic; it runs with `FACTORY_STRONG_MODEL` instead of the
   default. The builder model is never the reviewer of its own work. Prefer a
@@ -625,8 +633,12 @@ unreachable" as before.
   ends with one open, the ticket goes stuck as `review: <file:line> <summary>`.
   Nits, Pre-existing findings and unparsed reviewer lines go to the PR body. A
   reviewer that changes the worktree sends the ticket to stuck; a reviewer that
-  times out or answers without a findings block is reported in the PR body
-  ("read in full") and the PR still opens. `strong-model` tickets skip the
+  times out, prints nothing ("the reviewer produced no output (exit N)") or
+  answers without a findings block is reported in the PR body ("read in full")
+  and the PR still opens. The second such failure in a row sends a "Pre-PR
+  reviewer failing" Telegram message with the model and the reason, once; a
+  review that works resets the count. A review that never reached the model (no
+  time left in the budget, REVIEW.md or the config unreadable) does not count. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
   `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#158): the agent's home
   (`/home/factory-agent`) is still its own and is reused across runs, and
@@ -716,7 +728,11 @@ unreachable" as before.
   otherwise). If that kill is refused, nothing is deleted.
 - **Interrupted runs.** Ctrl+C while a command runs also stops that command's
   process group before the cleanup starts, since commands run in their own
-  session and never see the interrupt. `systemctl --user stop factory.service`
+  session and never see the interrupt. When only `factory-agent` processes are
+  left in that group (sudo already gone), the group kill is refused and
+  ignored, so the timeout or the interrupt is still reported; an agent run, a
+  check or an attack-test run then kills every agent process with the agent
+  `pkill` before the interrupt propagates. `systemctl --user stop factory.service`
   kills the whole service instead, and a bare `kill <pid>` ends the factory
   without any cleanup; in both cases the next preflight removes what is left.
   When a cleanup fails after a
@@ -822,7 +838,9 @@ merge before every review fix and the conflict, ordering and prompt tests in
 ## Reading logs and decisions
 
 - Each run writes `~/factory/logs/<ticket>.log`. Read the tail of the log to
-  see what the agent did and why it failed.
+  see what the agent did and why it failed. A ticket's first step starts the
+  file over; its reviews and every later review fix (`=== review fix step N`)
+  are appended, so the original review is still there after a fix.
 - The agent keeps a running decision log in `DECISIONS.md` at the worktree
   root (git-ignored, never committed). It holds every choice, the rejected
   alternative, and why. If the agent could not decide safely it writes the open
@@ -872,7 +890,13 @@ message gives the `gh label create` command for each), creates a throwaway
 present area's `check.sh` in it as `factory-agent` with the real check
 environment, verifies isolation,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
-policy, deletes any `preflight-*` entry an earlier preflight left behind, fails
+policy, asks `FACTORY_MODEL` and, with the review on, `FACTORY_STRONG_MODEL`
+for a fixed answer with the reviewer's read-only config (hourly runs at most
+once a day per model, keeping the last success in the state directory,
+`model-checks.json`; `factory preflight` by hand asks every time, so it proves a
+rotated key) and fails naming a model that gives none, which is how a missing
+provider login shows up (step 8),
+deletes any `preflight-*` entry an earlier preflight left behind, fails
 if the worktrees directory contains any other entry that is not a live git
 worktree, then proves the cleanup removes an agent-owned
 `factory-agent:factory-agent` 0770 directory and deletes the worktree and

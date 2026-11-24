@@ -32,6 +32,14 @@ TEST_SETTINGS = {
 }
 
 
+# The preflight's model check (#202): a fixed token proves the model answered.
+MODEL_CHECK_TOKEN = "FACTORY-MODEL-OK"
+MODEL_CHECK_PROMPT = (
+    f"Reply with exactly {MODEL_CHECK_TOKEN} and nothing else. Do not use any tool."
+)
+MODEL_CHECK_TIMEOUT_SECONDS = 180
+
+
 def agent_cleanup_argv(agent_user: str) -> list[str]:
     """The sudo-gated command that kills every process the agent still owns.
 
@@ -272,6 +280,10 @@ class AgentRunner:
         except CommandTimeout:
             kill_agent_processes(self._run, self.agent_user)
             return AgentResult(exit_code=None, stdout="", stderr="", timed_out=True)
+        except BaseException:
+            # Ctrl+C or a stop: the agent's own processes never saw it (#197).
+            kill_agent_processes(self._run, self.agent_user)
+            raise
         # A normal exit can leave background processes (nohup, servers) that would
         # change files after the checks or the review; none may outlive the step.
         ensure_agent_cleanup(self._run, self.agent_user)
@@ -281,6 +293,26 @@ class AgentRunner:
             stderr=result.stderr,
             timed_out=False,
         )
+
+    def model_check(self, worktree: Path, model: str, *, config_content: str) -> None:
+        """Ask ``model`` for a fixed token, as the reviewer runs, and fail if it does not answer.
+
+        A model without a provider login makes OpenCode exit with no output at
+        all, which the reviewer step used to report as a missing findings block.
+        """
+        result = self.run(
+            worktree=worktree,
+            model=model,
+            prompt=MODEL_CHECK_PROMPT,
+            timeout_seconds=MODEL_CHECK_TIMEOUT_SECONDS,
+            config_content=config_content,
+            disable_project_config=True,
+        )
+        if result.timed_out:
+            raise AgentSandboxError(f"{model} gave no answer within {MODEL_CHECK_TIMEOUT_SECONDS}s")
+        if MODEL_CHECK_TOKEN not in result.stdout:
+            said = " ".join((result.stderr or result.stdout).split())[:300] or "no output"
+            raise AgentSandboxError(f"{model} gave no answer (exit {result.exit_code}): {said}")
 
     def verify_home_is_clean(self) -> None:
         """Refuse to start OpenCode when the agent's home holds a config source.

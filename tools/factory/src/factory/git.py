@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .areas import BACKEND, Area, select_areas
+from .contract_diff import CONTRACT_DIFF_CONTEXT, CONTRACTS_DIR
 from .diff import DiffStats, build_diff_stats
 from .runner import (
     build_check_env,
@@ -438,6 +439,10 @@ class Git:
                 failed.append(area)
                 chunks.append(f"=== {label}: timed out after {CHECK_TIMEOUT_SECONDS}s ===")
                 continue
+            except BaseException:
+                # Ctrl+C or a stop: the check's agent processes never saw it (#197).
+                kill_agent_processes(self._run, self._agent_user)
+                raise
             output = result.stdout
             if result.stderr:
                 output += ("\n" if output else "") + result.stderr
@@ -492,6 +497,10 @@ class Git:
             kill_agent_processes(self._run, self._agent_user)
             ensure_agent_cleanup(self._run, self._agent_user)
             return "error", f"attack tests timed out after {REVIEW_TESTS_TIMEOUT_SECONDS}s"
+        except BaseException:
+            # Ctrl+C or a stop: the tests' agent processes never saw it (#197).
+            kill_agent_processes(self._run, self._agent_user)
+            raise
         ensure_agent_cleanup(self._run, self._agent_user)
         output = result.stdout + (("\n" + result.stderr) if result.stderr else "")
         if result.exit_code == 0:
@@ -579,6 +588,25 @@ class Git:
     def review_diff(self, worktree: Path) -> str:
         """Everything the builder changed against origin/main, new files included."""
         return self._with_temp_index(worktree, ["git", "diff", "--cached", "origin/main"])
+
+    def contract_diff(self, worktree: Path) -> str:
+        """The change to ``docs/contracts/`` against origin/main, whole files as context.
+
+        Every changed line then has its ``## <module>.<name>`` heading in the same
+        hunk, which is how the factory tells which contracts a change edits (#203).
+        """
+        return self._with_temp_index(
+            worktree,
+            [
+                "git",
+                "diff",
+                "--cached",
+                f"--unified={CONTRACT_DIFF_CONTEXT}",
+                "origin/main",
+                "--",
+                CONTRACTS_DIR,
+            ],
+        )
 
     def review_changed_files(self, worktree: Path) -> list[str]:
         """Every path the builder changed against origin/main, new files included."""
