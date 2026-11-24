@@ -1287,9 +1287,16 @@ def _start(settings: Settings, notifier: Notifier) -> tuple[str, int | None]:
     Returns the short commit the factory runs ("" with self-update off), and an
     exit code when the run must stop.
     """
+    updater = _build_self_update(settings)
     if not settings.self_update:
-        return "", None
-    outcome = _build_self_update(settings).run()
+        try:
+            commit = updater.head()[:7]  # still named: testing a branch is when it matters
+        except Exception:
+            commit = ""
+        if hasattr(notifier, "commit"):
+            notifier.commit = commit
+        return commit, None
+    outcome = updater.run()
     commit = outcome.head[:7]
     if hasattr(notifier, "commit"):
         notifier.commit = commit

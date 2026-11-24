@@ -95,7 +95,9 @@ def test_a_clean_main_behind_origin_fast_forwards_syncs_and_reexecs():
         ["git", "merge", "--ff-only", "origin/main"]
     ]
     sync = [(argv, cwd) for argv, cwd in machine.calls if argv[:2] == ["uv", "sync"]]
-    assert sync == [(["uv", "sync", "--quiet"], str(TOOLS))]
+    # --locked: a stale uv.lock fails the sync instead of being rewritten, which
+    # would leave "local changes" and stop every later run.
+    assert sync == [(["uv", "sync", "--locked", "--quiet"], str(TOOLS))]
     python = "/srv/factory/repo/tools/factory/.venv/bin/python"
     assert execs == [(python, [python, "-m", "factory.main", "preflight"])]
     assert env[REEXEC_ENV] == NEW
@@ -166,11 +168,25 @@ def test_a_failed_sync_blocks_and_does_not_reexec():
     assert execs == []
 
 
-def test_a_failed_fetch_blocks_the_run():
+def test_a_failed_fetch_blocks_the_run_and_still_names_the_commit():
     outcome = make(Machine(fetch_ok=False))[0].run()
 
     assert outcome.status == "blocked"
     assert "network down" in outcome.reason
+    assert outcome.head == OLD
+
+
+def test_an_update_is_written_to_the_journal_before_the_reexec(capsys):
+    make(Machine())[0].run()
+
+    assert f"self-update {OLD[:7]} -> {NEW[:7]}" in capsys.readouterr().err
+
+
+def test_head_names_the_commit_without_updating():
+    machine = Machine()
+
+    assert make(machine)[0].head() == OLD
+    assert machine.ran(["git", "fetch"]) == []
 
 
 def test_the_default_command_reruns_the_same_subcommand_with_the_venv_python(monkeypatch):

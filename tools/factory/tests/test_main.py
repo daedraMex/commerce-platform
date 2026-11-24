@@ -1413,20 +1413,26 @@ def test_a_blocked_self_update_stops_the_run_with_its_reason(monkeypatch, capsys
     assert info.reason == "self-update stopped: local changes"
 
 
-def test_without_self_update_the_cli_runs_as_before(monkeypatch, capsys, tmp_path):
+def test_with_self_update_off_the_commit_is_still_named(monkeypatch, capsys, tmp_path):
+    """FACTORY_SELF_UPDATE=0 is for testing a branch: exactly when the commit matters."""
     import factory.main as main_module
+
+    class HeadOnly:
+        def run(self):
+            raise AssertionError("self-update is off")
+
+        def head(self):
+            return "c0ffee1" + "0" * 33
 
     fake = FakePreflightFactory(tickets=[make_ticket(7)])
     monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
-    monkeypatch.setattr(
-        main_module, "_build_self_update", lambda settings: (_ for _ in ()).throw(AssertionError)
-    )
+    monkeypatch.setattr(main_module, "_build_self_update", lambda settings: HeadOnly())
     monkeypatch.setattr(
         main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
     )
 
     assert main_module.main(["preflight"]) == 0
-    assert "preflight ok (1 tickets listed)" in capsys.readouterr().out
+    assert "preflight ok at c0ffee1 (1 tickets listed)" in capsys.readouterr().out
 
 
 def test_metrics_cli_routes_to_the_metrics_command(monkeypatch, tmp_path):

@@ -68,15 +68,20 @@ class SelfUpdate:
     def _rev(self, ref: str) -> str:
         return self._git("rev-parse", ref).stdout.strip()
 
+    def head(self) -> str:
+        """The commit the checkout is on, without fetching or changing anything."""
+        return self._rev("HEAD")
+
     def run(self) -> UpdateOutcome:
         """Move the checkout to origin/main if it is safe; re-exec when it moved."""
+        head = self.head()
         if self._env.get(REEXEC_ENV):
             # The process that pulled this code just fetched and synced.
-            return UpdateOutcome("current", head=self._rev("HEAD"))
+            return UpdateOutcome("current", head=head)
         fetched = self._git("fetch", "origin", "main")
         if fetched.exit_code != 0:
-            return UpdateOutcome("blocked", reason=f"git fetch failed: {_said(fetched)}")
-        head, target = self._rev("HEAD"), self._rev("origin/main")
+            return UpdateOutcome("blocked", head=head, reason=f"git fetch failed: {_said(fetched)}")
+        target = self._rev("origin/main")
         if head == target:
             return UpdateOutcome("current", head=head)
         moving = f"{_short(head)} -> {_short(target)}"
@@ -90,10 +95,15 @@ class SelfUpdate:
         merged = self._git("merge", "--ff-only", "origin/main")
         if merged.exit_code != 0:
             return self._blocked(head, f"fast-forward failed, {moving}: {_said(merged)}")
-        synced = self._run([UV_BIN, "sync", "--quiet"], str(self.tools_dir), timeout=600)
+        # --locked: a stale uv.lock fails here instead of being rewritten, which
+        # would leave "local changes" and stop every later run.
+        synced = self._run(
+            [UV_BIN, "sync", "--locked", "--quiet"], str(self.tools_dir), timeout=600
+        )
         if synced.exit_code != 0:
             return self._blocked(target, f"uv sync failed after {moving}: {_said(synced)}")
         self._env[REEXEC_ENV] = target
+        print(f"self-update {moving}", file=sys.stderr, flush=True)  # the journal's record
         self._execv(self._command[0], self._command)
         return UpdateOutcome("updated", head=target)
 
