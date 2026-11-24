@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
@@ -22,6 +21,7 @@ from .holds import LabelHolds
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
 from .metrics import MetricsGitHub, run_metrics
+from .model_health import REVIEWER_FAILURE_ALERT_AT, ReviewerFailures
 from .models import STRONG_MODEL_LABEL, select_model
 from .notify import (
     Notifier,
@@ -29,6 +29,7 @@ from .notify import (
     PausedInfo,
     PrReadyInfo,
     ReviewAddressedInfo,
+    ReviewerFailingInfo,
     ReviewSkippedInfo,
     RunFailedInfo,
     StuckInfo,
@@ -50,6 +51,7 @@ from .review_step import (
     attack_test_paths,
     build_reviewer_feedback,
     compose_reviewer_prompt,
+    inline_opencode_config,
     parse_review,
     stuck_reason,
     suggested_ticket_body,
@@ -127,6 +129,7 @@ class Factory:
         review_attempts: ReviewAttemptLedger | None = None,
         pause_state: PauseState | None = None,
         label_holds: LabelHolds | None = None,
+        reviewer_failures: ReviewerFailures | None = None,
     ):
         self.settings = settings
         self.github = github
@@ -143,6 +146,7 @@ class Factory:
         self.review_attempts = review_attempts or ReviewAttemptLedger(settings.state_dir)
         self.pause_state = pause_state or PauseState(settings.state_dir)
         self.label_holds = label_holds or LabelHolds(settings.state_dir)
+        self.reviewer_failures = reviewer_failures or ReviewerFailures(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
         token, open_prs, paused_for = self._run_limits()
@@ -276,8 +280,14 @@ class Factory:
                 return fix
         return None
 
-    def run_preflight(self, token: str | None = None) -> list[Ticket]:
-        """Run the real-tool preflight and return the tickets it listed."""
+    def run_preflight(
+        self, token: str | None = None, *, recheck_models: bool = False
+    ) -> list[Ticket]:
+        """Run the real-tool preflight and return the tickets it listed.
+
+        ``factory preflight`` by hand asks every model again (``recheck_models``),
+        so it proves a rotated key; hourly runs use the daily cache.
+        """
         return Preflight(
             self.settings,
             git=self.git,
@@ -289,6 +299,7 @@ class Factory:
             verify_git_version_fn=self._preflight_verify_git_version,
             verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
             runner=self.runner,
+            recheck_models=recheck_models,
         ).run(token=token)
 
     def _remove_expired_worktree(self, worktree: Path) -> None:
@@ -555,7 +566,7 @@ class Factory:
                 config_content=builder_config,
             )
             made += 1
-            self._write_log(ticket, result, step=_step, model=model)
+            self._write_log(ticket, result, step=_step, model=model, review_fix=True)
             decisions = self.git.read_file(worktree, DECISIONS_FILE)
             open_question = extract_open_question(decisions)
 
@@ -969,7 +980,14 @@ class Factory:
         return self.settings.logs_dir / f"{ticket.number}.log"
 
     def _write_log(
-        self, ticket: Ticket, result, *, step: int, model: str, review: bool = False
+        self,
+        ticket: Ticket,
+        result,
+        *,
+        step: int,
+        model: str,
+        review: bool = False,
+        review_fix: bool = False,
     ) -> Path:
         """Append one step's output under a header; step 1 starts a fresh file.
 
@@ -983,9 +1001,17 @@ class Factory:
             content += ("\n" if content else "") + result.stderr
         if content and not content.endswith("\n"):
             content += "\n"
-        label = f"review after step {step}" if review else f"step {step}"
+        if review:
+            label = f"review after step {step}"
+        elif review_fix:
+            label = f"review fix step {step}"
+        else:
+            label = f"step {step}"
         header = f"=== {label} (model {model}) ===\n"
-        with log_path.open("w" if step == 1 and not review else "a") as log:
+        # A review fix keeps the run it fixes: the #195 fix erased the original
+        # reviewer output of 134.log (#202).
+        fresh = step == 1 and not review and not review_fix
+        with log_path.open("w" if fresh else "a") as log:
             log.write(header + content)
         return log_path
 
@@ -1017,28 +1043,33 @@ class Factory:
         return self._inline_config(OPENCODE_CONFIG_PATH)
 
     def _inline_config(self, path: str) -> str:
-        """An OpenCode config from origin/main, ready to pass inline.
-
-        A blank or invalid file fails closed: OpenCode would silently skip it and run
-        with the repo's own permissions. The top-level permissions are also set as the
-        ``build`` agent's, because agent-level permissions are merged after top-level
-        ones and the repo's opencode.json defines that agent.
-        """
+        """An OpenCode config from origin/main, ready to pass inline (fails closed)."""
         text = self.git.read_ref_file(self.settings.repo_dir, "origin/main", path)
-        try:
-            config = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"{path} on origin/main is not valid JSON") from exc
-        if not isinstance(config, dict) or not isinstance(config.get("permission"), dict):
-            raise RuntimeError(f"{path} on origin/main has no permission block")
-        build = config.setdefault("agent", {}).setdefault("build", {})
-        build["permission"] = config["permission"]
-        # Pin the agent: a planted .opencode/opencode.json (project config, ranked
-        # below inline) cannot switch the run to an agent with wider permissions.
-        config["default_agent"] = "build"
-        return json.dumps(config)
+        return inline_opencode_config(text, path)
 
-    def _pre_pr_review(
+    def _pre_pr_review(self, ticket: Ticket, **kwargs) -> PrePrReview:
+        review = self._run_pre_pr_review(ticket, **kwargs)
+        self._track_reviewer(review)
+        return review
+
+    def _track_reviewer(self, review: PrePrReview) -> None:
+        """Alert once when the reviewer fails twice in a row (#202).
+
+        A failed review still opens the PR, flagged; without this, a reviewer that
+        never works again looks the same as one hiccup.
+        """
+        if not review.from_model:
+            return
+        if review.status == "done":
+            self.reviewer_failures.succeeded()
+            return
+        if self.reviewer_failures.failed() == REVIEWER_FAILURE_ALERT_AT:
+            self._notify(
+                self.notifier.send_reviewer_failing,
+                ReviewerFailingInfo(model=review.reviewer, reason=review.reason),
+            )
+
+    def _run_pre_pr_review(
         self,
         ticket: Ticket,
         *,
@@ -1084,7 +1115,12 @@ class Factory:
         if self.git.worktree_fingerprint(worktree) != before:
             return PrePrReview.tampered(reviewer)
         if result.timed_out:
-            return PrePrReview.failed(reviewer, "the reviewer timed out")
+            return PrePrReview.model_failed(reviewer, "the reviewer timed out")
+        if not result.stdout.strip():
+            # A model without a provider login prints nothing at all (#202).
+            said = " ".join(result.stderr.split())[:200]
+            reason = f"the reviewer produced no output (exit {result.exit_code})"
+            return PrePrReview.model_failed(reviewer, f"{reason}: {said}" if said else reason)
         review = PrePrReview.done(reviewer, parse_review(result.stdout))
         if (
             not self.settings.review_tests
@@ -1209,7 +1245,7 @@ def preflight_main() -> int:
     try:
         settings = Settings.from_env()
         notifier = _build_notifier(settings)
-        tickets = _build_factory(settings, notifier=notifier).run_preflight()
+        tickets = _build_factory(settings, notifier=notifier).run_preflight(recheck_models=True)
     except PreflightError as exc:
         print(f"preflight failed: {exc}")
         return 1

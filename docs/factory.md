@@ -625,8 +625,12 @@ unreachable" as before.
   ends with one open, the ticket goes stuck as `review: <file:line> <summary>`.
   Nits, Pre-existing findings and unparsed reviewer lines go to the PR body. A
   reviewer that changes the worktree sends the ticket to stuck; a reviewer that
-  times out or answers without a findings block is reported in the PR body
-  ("read in full") and the PR still opens. `strong-model` tickets skip the
+  times out, prints nothing ("the reviewer produced no output (exit N)") or
+  answers without a findings block is reported in the PR body ("read in full")
+  and the PR still opens. The second such failure in a row sends a "Pre-PR
+  reviewer failing" Telegram message with the model and the reason, once; a
+  review that works resets the count. A review that never reached the model (no
+  time left in the budget, REVIEW.md or the config unreadable) does not count. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
   `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#158): the agent's home
   (`/home/factory-agent`) is still its own and is reused across runs, and
@@ -822,7 +826,9 @@ merge before every review fix and the conflict, ordering and prompt tests in
 ## Reading logs and decisions
 
 - Each run writes `~/factory/logs/<ticket>.log`. Read the tail of the log to
-  see what the agent did and why it failed.
+  see what the agent did and why it failed. A ticket's first step starts the
+  file over; its reviews and every later review fix (`=== review fix step N`)
+  are appended, so the original review is still there after a fix.
 - The agent keeps a running decision log in `DECISIONS.md` at the worktree
   root (git-ignored, never committed). It holds every choice, the rejected
   alternative, and why. If the agent could not decide safely it writes the open
@@ -872,7 +878,13 @@ message gives the `gh label create` command for each), creates a throwaway
 present area's `check.sh` in it as `factory-agent` with the real check
 environment, verifies isolation,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
-policy, deletes any `preflight-*` entry an earlier preflight left behind, fails
+policy, asks `FACTORY_MODEL` and, with the review on, `FACTORY_STRONG_MODEL`
+for a fixed answer with the reviewer's read-only config (hourly runs at most
+once a day per model, keeping the last success in the state directory,
+`model-checks.json`; `factory preflight` by hand asks every time, so it proves a
+rotated key) and fails naming a model that gives none, which is how a missing
+provider login shows up (step 8),
+deletes any `preflight-*` entry an earlier preflight left behind, fails
 if the worktrees directory contains any other entry that is not a live git
 worktree, then proves the cleanup removes an agent-owned
 `factory-agent:factory-agent` 0770 directory and deletes the worktree and

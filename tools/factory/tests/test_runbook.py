@@ -86,6 +86,16 @@ def test_runbook_documents_agent_owned_worktree_cleanup():
     assert "PYTEST_ADDOPTS=-p no:cacheprovider" in text
 
 
+def test_runbook_documents_model_checks_and_reviewer_failures():
+    flat = " ".join(RUNBOOK.read_text().split())
+
+    assert "fails naming a model that gives none" in flat
+    assert "model-checks.json" in flat
+    assert "the reviewer produced no output (exit N)" in flat
+    assert "Pre-PR reviewer failing" in flat
+    assert "review fix step N" in flat
+
+
 def test_runbook_documents_interrupted_runs_and_closed_tickets():
     flat = " ".join(RUNBOOK.read_text().split())
 
