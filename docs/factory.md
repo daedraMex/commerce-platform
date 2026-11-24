@@ -97,9 +97,11 @@ Run these once, as the admin user unless a step says `factory`.
     ```
 
     The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
-    cross `/`, so the two worktree globs match exactly one flat worktree
-    directory. The code still validates every cleanup path itself: a sudoers
-    glob is not a security boundary for `rm`.
+    cross `/` in a command's path, so the two check-script globs match one
+    flat worktree directory. In arguments it does: the `rm -rf` globs also
+    match a second path after a space. The code validates every cleanup path
+    itself, and only `factory` can use these rules: a sudoers glob is not a
+    security boundary for `rm`.
 
     `Defaults:factory !log_allowed` stops sudo from writing the successful
     downgrade commands to the journal, including the environment named in
@@ -291,6 +293,7 @@ Run these once, as the admin user unless a step says `factory`.
    ```bash
    sudo -u factory-agent -H /usr/bin/opencode auth login   # choose the provider, paste the key
    sudo -u factory-agent -H /usr/bin/opencode auth list    # expect the provider to be listed
+   sudo install -d -m 700 -o factory -g factory /home/factory/factory
    sudo install -m 600 -o factory -g factory /home/factory-agent/.local/share/opencode/auth.json /home/factory/factory/agent-auth.json
    ```
    The last line gives the factory its own copy of the keys (`FACTORY_AGENT_AUTH_FILE`,
@@ -302,8 +305,9 @@ Run these once, as the admin user unless a step says `factory`.
    (`{"type": "api", "key": ...}`): a `wellknown` entry would make OpenCode fetch
    and merge a remote config. **After every `auth login` (a new or rotated key),
    run that `install` line again**; the preflight fails with the reason until the
-   copy is valid. The tool caches (uv, pnpm, Playwright) stay shared in
-   `/home/factory-agent`, which OpenCode no longer reads. Do **not** put the key in `secrets.env` and do
+   copy is valid. The tool caches (uv and its Pythons, pnpm, corepack,
+   Playwright) stay shared in `/home/factory-agent`, which OpenCode no longer
+   reads. Do **not** put the key in `secrets.env` and do
    **not** set `FACTORY_PROVIDER_ENV_VARS`: passing it through
    `sudo --preserve-env` is exactly what used to write it to the journal. On an
    existing machine, delete any `DEEPSEEK_API_KEY`/`FACTORY_PROVIDER_ENV_VARS`
@@ -448,6 +452,16 @@ To upgrade an existing machine to this version:
    systemctl --user daemon-reload && systemctl --user restart factory.timer
    ```
 6. Clean any leftover worktrees, then run `factory preflight`.
+7. Fresh OpenCode homes (#158), as admin: create the homes directory, install
+   ripgrep, add `/usr/bin/rm -rf /srv/factory/agent-homes/*` to the sudoers
+   file (step 1) and give the factory its copy of the keys:
+   ```bash
+   sudo install -d -m 2770 -o factory -g factory-work /srv/factory/agent-homes
+   sudo apt install ripgrep
+   sudo install -m 600 -o factory -g factory /home/factory-agent/.local/share/opencode/auth.json /home/factory/factory/agent-auth.json
+   ```
+   Then run `factory preflight` by hand: it makes a run home and asks both
+   models to answer from one.
 
 ## How tickets become agent-ready
 
@@ -582,8 +596,11 @@ unreachable" as before.
   closed.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
-  ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
-  `DATABASE_URL`, `XDG_CONFIG_HOME` (the read-only config home),
+  ...` with an explicit environment — `PATH`, `HOME` and `XDG_DATA_HOME`,
+  `XDG_CACHE_HOME`, `XDG_STATE_HOME` (the run's fresh home, #158), `LANG`,
+  `DATABASE_URL`, `XDG_CONFIG_HOME` (the read-only config home), the shared tool
+  caches in the agent's own home (`UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`,
+  `npm_config_store_dir`, `COREPACK_HOME`, `PLAYWRIGHT_BROWSERS_PATH`),
   `OPENCODE_DISABLE_CLAUDE_CODE`, `OPENCODE_DISABLE_EXTERNAL_SKILLS` and
   `OPENCODE_CONFIG_CONTENT` (main's `opencode.factory.json` for the builder,
   `opencode.reviewer.json` plus `OPENCODE_DISABLE_PROJECT_CONFIG` for the
@@ -596,8 +613,8 @@ unreachable" as before.
   cleanup sudo refuses fails the run, so nothing the agent started can change
   files later. The model
   provider key is
-  not in it: the agent reads its own OpenCode auth store from its home, so the
-  key never crosses sudo. The backend check runner gets the same downgrade with
+  not in it: OpenCode reads it from the run home's auth store, a copy of the
+  factory's `agent-auth.json`, so the key never crosses sudo. The backend check runner gets the same downgrade with
   only `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret
   test settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`,
   `PYTEST_ADDOPTS=-p no:cacheprovider`) that match CI's backend job so Django

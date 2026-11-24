@@ -86,6 +86,10 @@ def test_the_run_home_env_points_every_opencode_store_inside_it(tmp_path):
     assert env["UV_CACHE_DIR"] == "/home/factory-agent/.cache/uv"
     assert env["npm_config_store_dir"] == "/home/factory-agent/.local/share/pnpm/store"
     assert env["PLAYWRIGHT_BROWSERS_PATH"] == "/home/factory-agent/.cache/ms-playwright"
+    # A .venv pointing at a Python inside a deleted home would break; corepack's
+    # pnpm download would repeat on every run.
+    assert env["UV_PYTHON_INSTALL_DIR"] == "/home/factory-agent/.local/share/uv/python"
+    assert env["COREPACK_HOME"] == "/home/factory-agent/.cache/node/corepack"
 
 
 def test_a_run_home_is_removed_as_the_agent(tmp_path):
@@ -144,3 +148,24 @@ def test_a_missing_auth_file_names_the_install_step(tmp_path):
 
     with pytest.raises(RunHomeError, match="agent-auth.json.*step 8"):
         homes.create("builder")
+
+
+def test_a_planted_symlink_among_the_leftovers_is_unlinked_not_followed(tmp_path):
+    """The parent is group-writable: a builder can plant `ln -s / agent-homes/x` (#158)."""
+    run = RecordingRun()
+    homes = make_homes(tmp_path, run=run)
+    target = tmp_path / "keep"
+    target.mkdir()
+    (target / "file").write_text("x")
+    link = tmp_path / "agent-homes" / "x"
+    link.symlink_to(target)
+    planted_file = tmp_path / "agent-homes" / "stray"
+    planted_file.write_text("x")
+
+    for leftover in homes.leftovers():
+        homes.remove_leftover(leftover)
+
+    assert not link.exists() and not link.is_symlink()
+    assert not planted_file.exists()
+    assert (target / "file").exists()
+    assert run.calls == []  # no rm -rf ran on either

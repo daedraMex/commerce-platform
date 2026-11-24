@@ -461,6 +461,9 @@ class FakeRunHomes:
     def remove(self, home):
         self.events.append(("run_home_remove", str(home)))
 
+    def remove_leftover(self, entry):
+        self.remove(entry)
+
 
 class SandboxRunner:
     def __init__(self, events, error=None, model_errors=None, run_homes=None):

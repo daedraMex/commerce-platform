@@ -206,7 +206,7 @@ class Preflight:
         if homes is None:
             return
         for leftover in homes.leftovers():
-            homes.remove(leftover)
+            homes.remove_leftover(leftover)
         homes.remove(homes.create("preflight"))
         if self._which("rg", path=SYSTEM_BIN_PATH) is None:
             raise RuntimeError(

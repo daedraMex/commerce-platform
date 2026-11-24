@@ -11,8 +11,8 @@ only two files: the provider keys, copied from a factory-owned file after checki
 every entry is a plain API key, and a gitconfig that trusts the worktrees. The
 directory is setgid ``factory-work`` and group-writable, so the agent can write in
 it; the agent deletes it after the run (its files can be ``0755``). Tool caches
-(uv, pnpm, Playwright) stay shared in the agent's own home: OpenCode never reads
-them, and keeping them warm keeps tickets fast.
+(uv and its Pythons, pnpm, corepack, Playwright) stay shared in the agent's own
+home: OpenCode never reads them, and keeping them warm keeps tickets fast.
 """
 
 from __future__ import annotations
@@ -114,6 +114,9 @@ class RunHomes:
             "UV_CACHE_DIR": str(shared / ".cache" / "uv"),
             "npm_config_store_dir": str(shared / ".local" / "share" / "pnpm" / "store"),
             "PLAYWRIGHT_BROWSERS_PATH": str(shared / ".cache" / "ms-playwright"),
+            # uv-managed Pythons: a .venv points into this, so it must outlive the run.
+            "UV_PYTHON_INSTALL_DIR": str(shared / ".local" / "share" / "uv" / "python"),
+            "COREPACK_HOME": str(shared / ".cache" / "node" / "corepack"),
         }
 
     def remove(self, home: Path) -> None:
@@ -128,6 +131,18 @@ class RunHomes:
         if result.exit_code != 0:
             detail = " ".join((result.stderr or result.stdout).split())[:300]
             raise RunHomeError(f"could not delete run home {home}: {detail}")
+
+    def remove_leftover(self, entry: Path) -> None:
+        """Delete what a killed run, or a builder, left in the homes directory.
+
+        The directory is group-writable, so a builder can plant a symlink or a
+        file there. Those are unlinked by the factory, which owns the directory,
+        and never followed; only real directories go through the agent's rm.
+        """
+        if entry.is_symlink() or not entry.is_dir():
+            entry.unlink()
+        else:
+            self.remove(entry)
 
     def leftovers(self) -> list[Path]:
         """Run homes a killed run never deleted."""
