@@ -128,6 +128,13 @@ def test_stuck_message_includes_handoff_command():
     assert "ssh factory@host &amp;&amp; cd /home/factory/factory/worktrees/nf/7-add-widget" in msg
 
 
+def test_run_failed_message_names_the_commit_the_factory_runs():
+    msg = build_run_failed_message(RunFailedInfo(reason="preflight failed: x"), commit="1e82e6d")
+
+    assert "Night factory aborted" in msg
+    assert "Commit: <code>1e82e6d</code>" in msg
+
+
 def test_run_failed_message_names_the_reason_and_escapes_html():
     msg = build_run_failed_message(
         RunFailedInfo(reason="could not fetch origin/main: fatal <no network>")

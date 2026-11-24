@@ -86,6 +86,16 @@ def test_runbook_documents_agent_owned_worktree_cleanup():
     assert "PYTEST_ADDOPTS=-p no:cacheprovider" in text
 
 
+def test_runbook_documents_the_self_update():
+    text = RUNBOOK.read_text()
+    flat = " ".join(text.split())
+
+    assert "## Updating the factory" in text
+    assert "preflight ok at <sha> (N tickets listed)" in flat
+    assert "It never resets or discards anything there" in flat
+    assert "FACTORY_SELF_UPDATE=0" in text
+
+
 def test_runbook_documents_fresh_run_homes():
     text = RUNBOOK.read_text()
     flat = " ".join(text.split())

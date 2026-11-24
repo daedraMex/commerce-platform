@@ -1357,6 +1357,84 @@ def test_preflight_cli_reports_failure_and_exits_nonzero(monkeypatch, capsys, tm
     assert "preflight failed: check.sh: check.sh failed" in capsys.readouterr().out
 
 
+class FakeSelfUpdate:
+    def __init__(self, outcome):
+        self.outcome = outcome
+        self.ran = 0
+
+    def run(self):
+        self.ran += 1
+        return self.outcome
+
+
+def _cli(monkeypatch, tmp_path, *, outcome, factory, notifier=None):
+    import factory.main as main_module
+    from factory.self_update import UpdateOutcome  # noqa: F401  (used by callers)
+
+    updater = FakeSelfUpdate(outcome)
+    notifier = notifier or RecordingNotifier()
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: factory)
+    monkeypatch.setattr(main_module, "_build_notifier", lambda settings: notifier)
+    monkeypatch.setattr(main_module, "_build_self_update", lambda settings: updater)
+    monkeypatch.setattr(
+        main_module.Settings,
+        "from_env",
+        classmethod(lambda cls: replace(make_settings(tmp_path), self_update=True)),
+    )
+    return main_module, updater, notifier
+
+
+def test_the_preflight_updates_itself_first_and_names_its_commit(monkeypatch, capsys, tmp_path):
+    """The machine ran #190 code, 48 commits behind, and nothing said so (#215)."""
+    from factory.self_update import UpdateOutcome
+
+    fake = FakePreflightFactory(tickets=[make_ticket(7)])
+    main_module, updater, _ = _cli(
+        monkeypatch,
+        tmp_path,
+        outcome=UpdateOutcome("current", head="1e82e6d" + "0" * 33),
+        factory=fake,
+    )
+
+    assert main_module.main(["preflight"]) == 0
+    assert updater.ran == 1
+    assert "preflight ok at 1e82e6d (1 tickets listed)" in capsys.readouterr().out
+
+
+def test_a_blocked_self_update_stops_the_run_with_its_reason(monkeypatch, capsys, tmp_path):
+    from factory.self_update import UpdateOutcome
+
+    fake = FakePreflightFactory(run_error=AssertionError("must not run"))
+    blocked = UpdateOutcome("blocked", head="a" * 40, reason="self-update stopped: local changes")
+    main_module, _, notifier = _cli(monkeypatch, tmp_path, outcome=blocked, factory=fake)
+
+    assert main_module.main([]) == 1
+    [info] = notifier.run_failed
+    assert info.reason == "self-update stopped: local changes"
+
+
+def test_with_self_update_off_the_commit_is_still_named(monkeypatch, capsys, tmp_path):
+    """FACTORY_SELF_UPDATE=0 is for testing a branch: exactly when the commit matters."""
+    import factory.main as main_module
+
+    class HeadOnly:
+        def run(self):
+            raise AssertionError("self-update is off")
+
+        def head(self):
+            return "c0ffee1" + "0" * 33
+
+    fake = FakePreflightFactory(tickets=[make_ticket(7)])
+    monkeypatch.setattr(main_module, "_build_factory", lambda settings, notifier=None: fake)
+    monkeypatch.setattr(main_module, "_build_self_update", lambda settings: HeadOnly())
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+
+    assert main_module.main(["preflight"]) == 0
+    assert "preflight ok at c0ffee1 (1 tickets listed)" in capsys.readouterr().out
+
+
 def test_metrics_cli_routes_to_the_metrics_command(monkeypatch, tmp_path):
     import factory.main as main_module
 
