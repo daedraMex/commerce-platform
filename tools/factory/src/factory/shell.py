@@ -94,7 +94,10 @@ def _terminate_process_group(proc: subprocess.Popen, *, grace_seconds: int) -> N
         pass
     try:
         os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
+    except (ProcessLookupError, PermissionError):
+        # PermissionError: sudo already exited and only agent-user processes are
+        # left in the group. Raising here would replace the timeout or interrupt
+        # and skip the caller's agent pkill, the one thing that reaches them (#197).
         pass
     try:
         proc.wait(timeout=5)

@@ -100,6 +100,7 @@ def test_runbook_documents_interrupted_runs_and_closed_tickets():
     flat = " ".join(RUNBOOK.read_text().split())
 
     assert "kills every agent process" in flat
+    assert "the group kill is refused and ignored" in flat
     assert "preflight cleanup failed after <step>" in flat
     assert "Night factory cleaned up" in flat
     assert "Never run two preflights at once" in flat
