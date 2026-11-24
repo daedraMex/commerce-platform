@@ -184,6 +184,14 @@ class FakeGit:
     def review_diff(self, worktree):
         return "diff --git a/x.py b/x.py\n+x = 1\n"
 
+    contract_diff_text = ""
+    contract_diff_error = None
+
+    def contract_diff(self, worktree):
+        if self.contract_diff_error is not None:
+            raise self.contract_diff_error
+        return self.contract_diff_text
+
     def review_changed_files(self, worktree):
         return list(self.review_files)
 
@@ -2467,6 +2475,68 @@ def test_attack_tests_stay_off_by_default_and_for_console_only_changes(tmp_path)
 
     assert off.attack_runs == []
     assert console.attack_runs == []
+
+
+CATALOG_PORT_DIFF = (
+    "diff --git a/docs/contracts/photos.md b/docs/contracts/photos.md\n"
+    "--- a/docs/contracts/photos.md\n"
+    "+++ b/docs/contracts/photos.md\n"
+    "@@ -1,3 +1,4 @@\n"
+    " ## photos.catalog-port\n"
+    " \n"
+    "+| `reorder_carousel(store, *, product_id, image_ids)` | see below |\n"
+)
+
+
+def _consuming_ticket(github):
+    github.tickets = [
+        replace(
+            github.tickets[0],
+            body="## Contracts\n\nConsumes `photos.catalog-port`.\n",
+        )
+    ]
+
+
+def test_an_undeclared_contract_change_reaches_the_reviewer_and_the_pr_risk(tmp_path):
+    """#134 consumed photos.catalog-port and PR #195 changed it (#203)."""
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.contract_diff_text = CATALOG_PORT_DIFF
+
+    _, _, github, runner, _ = run_with_reviewer(
+        tmp_path, [NO_FINDINGS], git=git, setup_github=_consuming_ticket
+    )
+
+    assert "`photos.catalog-port` (declared as consumed)" in runner.review_calls[0]["prompt"]
+    risk = github.created_prs[0][2].split("## Risk", 1)[1].split("## How to revert", 1)[0]
+    assert "`photos.catalog-port`: declared as consumed" in risk
+
+
+def test_a_declared_contract_change_adds_nothing(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.contract_diff_text = CATALOG_PORT_DIFF
+
+    def changing_ticket(github):
+        github.tickets = [
+            replace(github.tickets[0], body="## Contracts\n\nChanges `photos.catalog-port`.\n")
+        ]
+
+    _, _, github, runner, _ = run_with_reviewer(
+        tmp_path, [NO_FINDINGS], git=git, setup_github=changing_ticket
+    )
+
+    assert "Contracts changed without being declared" not in runner.review_calls[0]["prompt"]
+    assert "None flagged" in github.created_prs[0][2]
+
+
+def test_an_unreadable_contract_diff_is_flagged_and_the_pr_still_opens(tmp_path):
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.contract_diff_error = RuntimeError("git diff failed")
+
+    results, _, github, _, _ = run_with_reviewer(tmp_path, [NO_FINDINGS], git=git)
+
+    assert results[0].ok
+    risk = github.created_prs[0][2].split("## Risk", 1)[1]
+    assert "could not read the docs/contracts/ diff" in risk
 
 
 def test_strong_model_ticket_skips_the_reviewer(tmp_path):

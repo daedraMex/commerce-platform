@@ -1127,3 +1127,14 @@ def test_interrupted_attack_tests_kill_every_agent_process_before_it_propagates(
 
     attack = next(i for i, argv in enumerate(calls) if "--review-tests" in argv)
     assert "/usr/bin/pkill" in calls[attack + 1]
+
+
+def test_contract_diff_takes_the_whole_contract_files_as_context(tmp_path):
+    run = RecordingRun(CommandResult(0, "diff --git a/docs/contracts/photos.md ...", ""))
+
+    out = Git(run=run).contract_diff(tmp_path)
+
+    assert out.startswith("diff --git a/docs/contracts/photos.md")
+    diff_call = next(call for call in run.calls if call[0][:3] == ["git", "diff", "--cached"])
+    assert "--unified=100000" in diff_call[0]
+    assert diff_call[0][-3:] == ["origin/main", "--", "docs/contracts/"]

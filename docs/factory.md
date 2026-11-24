@@ -456,6 +456,14 @@ To upgrade an existing machine to this version:
   `#<n> skipped: <contract> held by PR #<pr> (#<ticket>)` for a ticket that
   would otherwise be ready, and one run never takes two tickets that conflict
   on a contract.
+- The conflict check trusts the ticket's **Contracts** section, so a new ticket's
+  PR is also checked against its diff: every `## <module>.<name>` section of
+  `docs/contracts/` that the change edits but the ticket does not declare as
+  changed is listed in the PR's **Risk** ("declared as consumed" or "not
+  declared") and named to the pre-PR reviewer, which checks every consumer of
+  it. An unreadable `docs/contracts/` diff is flagged in **Risk** and the PR
+  still opens. Review fixes are not checked again. If one is listed, fix the
+  ticket's Contracts section before another ticket on that contract runs.
 - Add `strong-model` to a ticket that touches security, money, migrations or
   otherwise tricky logic; it runs with `FACTORY_STRONG_MODEL` instead of the
   default. The builder model is never the reviewer of its own work. Prefer a

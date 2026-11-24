@@ -184,3 +184,23 @@ def test_replace_verification_appends_to_a_body_without_markers():
 
     assert updated.startswith("Closes #7")
     assert f"sha={NEW_SHA}" in updated
+
+
+def test_pr_body_risk_lists_contracts_the_ticket_did_not_declare_as_changed():
+    """#134 declared photos.catalog-port as consumed; PR #195 changed it (#203)."""
+    body = _body(
+        undeclared_contracts=(
+            ("photos.catalog-port", "declared as consumed"),
+            ("photos.processing-queue", "not declared"),
+        )
+    )
+
+    risk = body.split("## Risk", 1)[1].split("## How to revert", 1)[0]
+    assert "Contracts changed that the ticket does not declare as changed" in risk
+    assert "`photos.catalog-port`: declared as consumed" in risk
+    assert "`photos.processing-queue`: not declared" in risk
+    assert "None flagged" not in risk
+
+
+def test_pr_body_risk_is_unchanged_when_every_changed_contract_is_declared():
+    assert _body(undeclared_contracts=()) == _body()
