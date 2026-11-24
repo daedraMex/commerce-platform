@@ -12,10 +12,7 @@ from tests.architecture.support import APPS_DIR, parse, relative, source_files
 # across modules (accounts registers the Store admin with its memberships).
 ALLOWED_FILE_NAMES = {"models.py", "admin.py"}
 # Existing violations, each tracked by an issue. Remove an entry when it is fixed.
-EXCEPTIONS = {
-    "apps/catalog/management/support.py": "#177",
-    "apps/accounts/management/commands/e2e_seed.py": "#177",
-}
+EXCEPTIONS: dict[str, str] = {}
 
 
 def _is_foreign_internal(name, own_module):
