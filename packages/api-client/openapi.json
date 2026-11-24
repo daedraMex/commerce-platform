@@ -4103,7 +4103,7 @@
     },
     "/api/v1/staff/photos/{id}/remove/": {
       "post": {
-        "description": "Remove an applied photo from the product's carousel without deleting it.",
+        "description": "Remove an applied individual photo from the carousel without deleting it.\n\nOnly individual photos are removed here; a group photo has no target product and\nchanges its product links through the links endpoint instead.",
         "operationId": "api_v1_staff_photos_remove_create",
         "parameters": [
           {
@@ -4189,7 +4189,7 @@
                 }
               }
             },
-            "description": "The removed submission, no longer applied, with its Media kept."
+            "description": "The removed individual photo submission, no longer applied, with its Media kept."
           },
           "400": {
             "content": {
@@ -4317,7 +4317,7 @@
                     "summary": "submission_cannot_remove",
                     "value": {
                       "code": "submission_cannot_remove",
-                      "detail": "Only an applied photo can be removed from the carousel.",
+                      "detail": "Only an applied individual photo can be removed from the carousel; a group photo changes its links through the links endpoint.",
                       "status": 409,
                       "title": "Conflict",
                       "type": "about:blank"
@@ -4329,7 +4329,7 @@
                 }
               }
             },
-            "description": "Only an applied photo can be removed from the carousel."
+            "description": "Only an applied individual photo can be removed from the carousel; a group photo changes its links through the links endpoint."
           }
         },
         "security": [

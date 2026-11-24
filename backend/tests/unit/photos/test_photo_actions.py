@@ -327,6 +327,21 @@ def test_remove_refuses_a_submission_that_is_not_applied(
     assert catalog.remove_calls == []
 
 
+def test_remove_refuses_an_applied_group_photo_before_touching_the_catalog(
+    repository, catalog, authorizer, unit_of_work
+):
+    repository.rows[1] = make_submission(kind=SubmissionKind.GROUP, applied_at=NOW, applied_by_id=7)
+
+    with pytest.raises(CannotRemove) as error:
+        remove_photo(repository, catalog, authorizer, unit_of_work)(
+            HOME, user_id=7, submission_id=1
+        )
+
+    assert "links" in str(error.value)
+    assert catalog.remove_calls == []
+    assert repository.rows[1].applied_at == NOW
+
+
 def test_remove_never_finds_another_stores_submission(
     repository, catalog, authorizer, unit_of_work
 ):

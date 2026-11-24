@@ -776,6 +776,25 @@ def test_remove_never_reaches_another_stores_applied_submission(client, home, an
     assert submission.applied_at is not None
 
 
+def test_remove_refuses_an_applied_group_photo_and_keeps_its_links(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home, key="stores/1/media/group.jpg", content_hash="group")
+    submission = make_group_submission(home, user, result_media=media)
+    post_action(client, user, "apply", submission.pk, data={"product_ids": [product.pk]})
+    link = ProductMedia.objects.get(product=product, media=media)
+    assert link.is_active is True
+
+    response = post_action(client, user, "remove", submission.pk)
+
+    body = assert_problem_details(response, status=409, code="submission_cannot_remove")
+    assert "links" in body["detail"]
+    link.refresh_from_db()
+    submission.refresh_from_db()
+    assert link.is_active is True
+    assert submission.applied_at is not None
+
+
 def test_apply_requires_a_ready_individual_photo(client, home, user):
     grant_membership(user=user, store=home, role_name="content_editor")
     product = make_product(home)

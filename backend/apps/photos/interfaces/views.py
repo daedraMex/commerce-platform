@@ -439,7 +439,9 @@ class StaffPhotoLinksView(StoreScopedMixin, APIView):
     responses={
         200: OpenApiResponse(
             response=PhotoSubmissionSerializer,
-            description=("The removed submission, no longer applied, with its Media kept."),
+            description=(
+                "The removed individual photo submission, no longer applied, with its Media kept."
+            ),
             examples=[PHOTO_SUBMISSION_EXAMPLE],
         ),
         **ACTION_ERRORS,
@@ -447,13 +449,18 @@ class StaffPhotoLinksView(StoreScopedMixin, APIView):
             409,
             (
                 "submission_cannot_remove",
-                "Only an applied photo can be removed from the carousel.",
+                "Only an applied individual photo can be removed from the carousel; a "
+                "group photo changes its links through the links endpoint.",
             ),
         ),
     },
 )
 class StaffPhotoRemoveView(StoreScopedMixin, APIView):
-    """Remove an applied photo from the product's carousel without deleting it."""
+    """Remove an applied individual photo from the carousel without deleting it.
+
+    Only individual photos are removed here; a group photo has no target product and
+    changes its product links through the links endpoint instead.
+    """
 
     def post(self, request, pk, *args, **kwargs):
         submission = RemovePhoto(

@@ -133,6 +133,9 @@ timestamps that are not states: **applied** (`applied_at`) and **discarded**
 - Every save checks `version`. A save on a stale one fails with
   `submission_concurrent_modification`.
 - Apply and remove change the carousel through `photos.catalog-port`.
+- Remove applies to individual photos only. An applied group photo is refused with
+  `submission_cannot_remove` (409) before the catalog is touched; its product links are
+  changed through `/links/` instead.
 
 **Upload:**
 
