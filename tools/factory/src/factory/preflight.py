@@ -9,6 +9,7 @@ short, secret-free description and aborts the run before ticket selection.
 
 from __future__ import annotations
 
+import shutil
 import time
 from collections.abc import Callable
 
@@ -44,6 +45,9 @@ def short_error(text: str, *, limit: int = MAX_ERROR_CHARS) -> str:
     return collapsed[: limit - 1] + "…"
 
 
+SYSTEM_BIN_PATH = "/usr/bin:/bin"
+
+
 class Preflight:
     def __init__(
         self,
@@ -77,6 +81,7 @@ class Preflight:
         # By hand (`factory preflight`) every model is asked again, ignoring the
         # daily cache, so the command proves a key that was just rotated.
         self.recheck_models = recheck_models
+        self._which = shutil.which
 
     def run(self, token: str | None = None) -> list[Ticket]:
         run_id = str(self._clock())
@@ -140,6 +145,9 @@ class Preflight:
                 self.runner.verify_home_is_clean()
                 self.runner.smoke_check(worktree)
 
+                step = "verify run homes"
+                self._verify_run_homes()
+
                 step = "verify models"
                 self._verify_models(worktree)
 
@@ -185,6 +193,26 @@ class Preflight:
     def _write_check_log(self, log_path, output: str) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(output)
+
+    def _verify_run_homes(self) -> None:
+        """Fresh OpenCode homes work before any ticket runs (#158).
+
+        Deletes homes a killed run left (no run is active during the preflight),
+        makes and deletes one, which validates the factory's copy of the provider
+        keys, and requires a system ripgrep: OpenCode would otherwise download its
+        own ``rg`` into the run's cache on every run.
+        """
+        homes = getattr(self.runner, "run_homes", None)
+        if homes is None:
+            return
+        for leftover in homes.leftovers():
+            homes.remove(leftover)
+        homes.remove(homes.create("preflight"))
+        if self._which("rg", path=SYSTEM_BIN_PATH) is None:
+            raise RuntimeError(
+                "ripgrep is not installed system-wide (sudo apt install ripgrep); "
+                "OpenCode would fetch its own rg into every run home"
+            )
 
     def _verify_models(self, worktree) -> None:
         """Every configured model answers, as the reviewer runs it, once a day (#202).

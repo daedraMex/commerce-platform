@@ -93,7 +93,7 @@ Run these once, as the admin user unless a step says `factory`.
     Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
-    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/pkill -KILL -u factory-agent
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/rm -rf /srv/factory/agent-homes/*, /usr/bin/pkill -KILL -u factory-agent
     ```
 
     The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
@@ -135,6 +135,8 @@ Run these once, as the admin user unless a step says `factory`.
     ```bash
     sudo install -d -m 755 -o factory -g factory /srv/factory
     sudo install -d -m 2770 -o factory -g factory-work /srv/factory/worktrees
+    sudo install -d -m 2770 -o factory -g factory-work /srv/factory/agent-homes   # one fresh OpenCode home per run (#158)
+    sudo apt install ripgrep   # OpenCode uses the system rg instead of fetching one into each run home
     sudo install -d -m 700 -o factory -g factory /home/factory/state
     sudo chmod 700 /home/factory
     ```
@@ -289,9 +291,19 @@ Run these once, as the admin user unless a step says `factory`.
    ```bash
    sudo -u factory-agent -H /usr/bin/opencode auth login   # choose the provider, paste the key
    sudo -u factory-agent -H /usr/bin/opencode auth list    # expect the provider to be listed
+   sudo install -m 600 -o factory -g factory /home/factory-agent/.local/share/opencode/auth.json /home/factory/factory/agent-auth.json
    ```
-   The factory starts OpenCode with `HOME=/home/factory-agent`, so it finds
-   that store on every run. Do **not** put the key in `secrets.env` and do
+   The last line gives the factory its own copy of the keys (`FACTORY_AGENT_AUTH_FILE`,
+   default `~/factory/agent-auth.json`), which the agent cannot write. Every
+   OpenCode run (builder, reviewer, the preflight's model check) gets a fresh home
+   under `/srv/factory/agent-homes/` (`FACTORY_AGENT_HOMES_DIR`) holding only that
+   copy and a gitconfig that trusts the worktrees, and the home is deleted after
+   the run (#158). The copy is refused unless every entry is a plain API key
+   (`{"type": "api", "key": ...}`): a `wellknown` entry would make OpenCode fetch
+   and merge a remote config. **After every `auth login` (a new or rotated key),
+   run that `install` line again**; the preflight fails with the reason until the
+   copy is valid. The tool caches (uv, pnpm, Playwright) stay shared in
+   `/home/factory-agent`, which OpenCode no longer reads. Do **not** put the key in `secrets.env` and do
    **not** set `FACTORY_PROVIDER_ENV_VARS`: passing it through
    `sudo --preserve-env` is exactly what used to write it to the journal. On an
    existing machine, delete any `DEEPSEEK_API_KEY`/`FACTORY_PROVIDER_ENV_VARS`
@@ -613,7 +625,8 @@ unreachable" as before.
   token or the xolo-bot private key) ever appears in the journal, a log file, a
   pull request or anywhere else it should not, treat it as compromised and
   **rotate it**: re-run `sudo -u factory-agent -H /usr/bin/opencode auth login`
-  for the provider key, issue a new Telegram token and update `secrets.env`, or
+  for the provider key (then copy it again into `~/factory/agent-auth.json`,
+  step 8), issue a new Telegram token and update `secrets.env`, or
   regenerate the xolo-bot key and replace `xolo-bot.pem`, then restart the
   timer. Deleting the log line is not enough.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`,
@@ -640,12 +653,10 @@ unreachable" as before.
   review that works resets the count. A review that never reached the model (no
   time left in the budget, REVIEW.md or the config unreadable) does not count. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
-  `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#158): the agent's home
-  (`/home/factory-agent`) is still its own and is reused across runs, and
-  OpenCode reads from it at every start (`auth.json`, its local database, the
-  cached `rg`, `~/.gitconfig`). A builder could use it to blind the reviewer in
-  later runs; the reviewer is advisory, and the owner's approval, the
-  protected-path guard and the worktree fingerprint still gate every PR.
+  `FACTORY_PRE_PR_REVIEW=0` turns it off. Each OpenCode run has its own fresh
+  home (#158), so nothing a builder writes there (`auth.json`, OpenCode's
+  database, a cached `rg`, `~/.gitconfig`) is loaded by the reviewer or a later
+  run.
 - **Important is narrow; the rest becomes a ticket.** `REVIEW.md` limits
   Important to an unmet acceptance criterion or something the change introduces
   that crashes, corrupts data, opens a security hole or leaks across stores. Work
@@ -888,7 +899,9 @@ factory reads or writes is missing (`REQUIRED_LABELS` in `tickets.py`; the
 message gives the `gh label create` command for each), creates a throwaway
 `preflight-<timestamp>` worktree from the fresh `origin/main`, runs every
 present area's `check.sh` in it as `factory-agent` with the real check
-environment, verifies isolation,
+environment, verifies isolation, deletes run homes a killed run left in
+`/srv/factory/agent-homes/`, makes and deletes one (which validates the
+factory's copy of the provider keys) and requires a system `rg`,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
 policy, asks `FACTORY_MODEL` and, with the review on, `FACTORY_STRONG_MODEL`
 for a fixed answer with the reviewer's read-only config (hourly runs at most
