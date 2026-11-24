@@ -1108,3 +1108,22 @@ def test_review_tests_are_placed_and_removed_with_their_directory(tmp_path):
     git.remove_review_tests(tmp_path, paths)
     assert not (tmp_path / "backend" / "tests" / "review").exists()
     assert (tmp_path / "backend" / "tests").is_dir()
+
+
+def test_interrupted_attack_tests_kill_every_agent_process_before_it_propagates(tmp_path):
+    write_script(tmp_path, BACKEND)
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        if "--review-tests" in argv:
+            raise KeyboardInterrupt
+        return CommandResult(exit_code=1, stdout="", stderr="")
+
+    with pytest.raises(KeyboardInterrupt):
+        Git(run=run, agent_user="factory-agent").run_review_tests(
+            tmp_path, ("tests/review/test_review_7_1.py",)
+        )
+
+    attack = next(i for i, argv in enumerate(calls) if "--review-tests" in argv)
+    assert "/usr/bin/pkill" in calls[attack + 1]
