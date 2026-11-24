@@ -149,7 +149,8 @@ jobs:
           fetch-depth: 0
 
       # The check steps are skipped, not the job, so "Factory" still reports and
-      # can be a required check (#216). The runbook tests read docs/factory.md.
+      # can be a required check (#216). The factory tests also read docs/factory.md
+      # and the workflows.
       - name: Detect factory changes
         id: changes
         working-directory: .

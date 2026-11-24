@@ -34,7 +34,9 @@ def test_factory_job_runs_only_for_factory_changes():
     job = _factory_job()
     assert "^(tools/factory/|docs/factory\\.md$|\\.github/workflows/)" in job
     # Every check step is gated, so the job still reports (and passes) when skipped.
-    for step in re.findall(r"- name: (?:Lock file|Lint|Format|Tests)\n(.*?)run:", job, re.DOTALL):
+    steps = re.findall(r"- name: (?:Lock file|Lint|Format|Tests)\n(.*?)run:", job, re.DOTALL)
+    assert len(steps) == 4
+    for step in steps:
         assert "if: steps.changes.outputs.relevant == 'true'" in step
 
 
