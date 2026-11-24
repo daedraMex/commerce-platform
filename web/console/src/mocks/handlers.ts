@@ -602,6 +602,8 @@ export const handlers = [
       linked_product_ids: [],
       pipeline_version: "2026-11-11.2",
       attempts: 0,
+      redos: 0,
+      redos_remaining: 5,
       version: 1,
       applied_at: null,
       discarded_at: null,

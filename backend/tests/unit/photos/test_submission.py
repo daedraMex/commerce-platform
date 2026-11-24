@@ -14,9 +14,11 @@ from apps.photos.domain.errors import (
     ConcurrentModification,
     IdempotencyConflict,
     InvalidSubmissionTarget,
+    RedoExhausted,
 )
 from apps.photos.domain.submission import (
     MAX_ATTEMPTS,
+    MAX_REDOS,
     PhotoSubmission,
     SubmissionKind,
     SubmissionStatus,
@@ -209,11 +211,70 @@ def test_redo_returns_the_previous_result_and_moves_to_processing():
     assert submission.crop == CROP
 
 
+def test_redo_from_failed_replaces_the_corners_and_counts_a_redo_not_an_attempt():
+    submission = make_submission(
+        status=SubmissionStatus.FAILED,
+        attempts=2,
+        failure_code="quad_out_of_bounds",
+        failure_message="Corners outside the photo.",
+    )
+
+    previous_result = submission.redo(corners=CORNERS, crop=CROP)
+
+    assert previous_result is None
+    assert submission.status is SubmissionStatus.PROCESSING
+    assert submission.corners == CORNERS
+    assert submission.crop == CROP
+    assert submission.failure_code == ""
+    assert submission.failure_message == ""
+    assert submission.redos == 1
+    assert submission.attempts == 2
+
+
+def test_redo_from_ready_counts_a_redo_not_an_attempt():
+    submission = make_submission(status=SubmissionStatus.READY, result_media_id=99, attempts=1)
+
+    submission.redo(corners=CORNERS, crop=CROP)
+
+    assert submission.redos == 1
+    assert submission.attempts == 1
+
+
+@pytest.mark.parametrize("status", [SubmissionStatus.READY, SubmissionStatus.FAILED])
+def test_the_redo_after_the_fifth_is_refused(status):
+    submission = make_submission(status=status, redos=MAX_REDOS, result_media_id=99)
+
+    with pytest.raises(RedoExhausted) as error:
+        submission.redo(corners=CORNERS, crop=CROP)
+
+    assert error.value.code == "submission_redo_exhausted"
+    assert "discard" in error.value.message.lower()
+    assert submission.status is status
+    assert submission.redos == MAX_REDOS
+    assert submission.result_media_id == 99
+
+
+def test_the_fifth_redo_is_allowed():
+    submission = make_submission(status=SubmissionStatus.READY, redos=MAX_REDOS - 1)
+
+    submission.redo(corners=CORNERS, crop=CROP)
+
+    assert submission.redos == MAX_REDOS
+
+
+def test_start_processing_leaves_redos_unchanged():
+    submission = make_submission(status=SubmissionStatus.FAILED, attempts=1, redos=2)
+
+    submission.start_processing()
+
+    assert submission.redos == 2
+
+
 @pytest.mark.parametrize(
     "status",
-    [SubmissionStatus.UPLOADED, SubmissionStatus.PROCESSING, SubmissionStatus.FAILED],
+    [SubmissionStatus.UPLOADED, SubmissionStatus.PROCESSING],
 )
-def test_redo_refuses_non_ready_submissions(status):
+def test_redo_refuses_submissions_that_are_neither_ready_nor_failed(status):
     submission = make_submission(status=status, result_media_id=99)
 
     with pytest.raises(CannotRedo) as error:
@@ -225,9 +286,10 @@ def test_redo_refuses_non_ready_submissions(status):
 
 
 @pytest.mark.parametrize("terminal", ["applied_at", "discarded_at"])
-def test_redo_refuses_a_terminal_submission(terminal):
+@pytest.mark.parametrize("status", [SubmissionStatus.READY, SubmissionStatus.FAILED])
+def test_redo_refuses_a_terminal_submission(terminal, status):
     submission = make_submission(
-        status=SubmissionStatus.READY,
+        status=status,
         result_media_id=99,
         **{terminal: NOW},
     )
@@ -236,8 +298,9 @@ def test_redo_refuses_a_terminal_submission(terminal):
         submission.redo(corners=CORNERS, crop=CROP)
 
     assert error.value.code == "submission_cannot_redo"
-    assert submission.status is SubmissionStatus.READY
+    assert submission.status is status
     assert submission.result_media_id == 99
+    assert submission.redos == 0
 
 
 def test_apply_stamps_a_ready_submission_without_changing_its_status():

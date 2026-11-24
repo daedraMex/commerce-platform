@@ -569,6 +569,13 @@
             "readOnly": true,
             "type": "string"
           },
+          "redos": {
+            "type": "integer"
+          },
+          "redos_remaining": {
+            "readOnly": true,
+            "type": "integer"
+          },
           "result": {
             "allOf": [
               {
@@ -607,6 +614,8 @@
           "photographed_variant_id",
           "pipeline_version",
           "preview_url",
+          "redos",
+          "redos_remaining",
           "result",
           "status",
           "target_product_id",
@@ -2469,6 +2478,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -2535,6 +2546,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -2804,6 +2817,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -3042,6 +3057,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -3283,6 +3300,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -3544,6 +3563,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -3863,7 +3884,7 @@
     },
     "/api/v1/staff/photos/{id}/redo/": {
       "post": {
-        "description": "Redo a ready photo with new corners or crop, keeping the previous result Media.",
+        "description": "Redo a ready or failed photo with new corners or crop, keeping the previous result Media.",
         "operationId": "api_v1_staff_photos_redo_create",
         "parameters": [
           {
@@ -3948,6 +3969,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -3968,7 +3991,7 @@
                 }
               }
             },
-            "description": "The submission back in processing with a new attempt queued."
+            "description": "The submission back in processing with a new run queued."
           },
           "400": {
             "content": {
@@ -4076,7 +4099,17 @@
                     "summary": "submission_cannot_redo",
                     "value": {
                       "code": "submission_cannot_redo",
-                      "detail": "Only a ready photo can be redone.",
+                      "detail": "Only a ready or failed photo can be redone.",
+                      "status": 409,
+                      "title": "Conflict",
+                      "type": "about:blank"
+                    }
+                  },
+                  "SubmissionRedoExhausted": {
+                    "summary": "submission_redo_exhausted",
+                    "value": {
+                      "code": "submission_redo_exhausted",
+                      "detail": "This photo was already redone 5 times. Discard it and take a new photo.",
                       "status": 409,
                       "title": "Conflict",
                       "type": "about:blank"
@@ -4088,7 +4121,7 @@
                 }
               }
             },
-            "description": "Only a ready photo can be redone."
+            "description": "Only a ready or failed photo can be redone. This photo was already redone 5 times. Discard it and take a new photo."
           }
         },
         "security": [
@@ -4169,6 +4202,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,
@@ -4410,6 +4445,8 @@
                       "photographed_variant_id": 3,
                       "pipeline_version": "2026-11-11.2",
                       "preview_url": "/api/v1/staff/photos/12/preview/",
+                      "redos": 0,
+                      "redos_remaining": 5,
                       "result": {
                         "height": 1500,
                         "media_id": 44,

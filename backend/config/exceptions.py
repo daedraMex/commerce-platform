@@ -30,6 +30,7 @@ from apps.photos.domain.errors import (
     ImageTooLarge,
     InvalidImage,
     InvalidSubmissionTarget,
+    RedoExhausted,
     TooManyPixels,
 )
 from apps.shared.domain.exceptions import (
@@ -69,6 +70,7 @@ DOMAIN_ERROR_STATUS = {
     CannotMarkReady: status.HTTP_409_CONFLICT,
     CannotMarkFailed: status.HTTP_409_CONFLICT,
     CannotRedo: status.HTTP_409_CONFLICT,
+    RedoExhausted: status.HTTP_409_CONFLICT,
     CannotApply: status.HTTP_409_CONFLICT,
     CannotChangeGroupLinks: status.HTTP_409_CONFLICT,
     CannotRemove: status.HTTP_409_CONFLICT,
