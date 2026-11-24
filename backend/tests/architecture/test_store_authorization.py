@@ -4,12 +4,16 @@
 gate the admin (AGENTS.md). Beyond direct calls, the scan refuses the ways around a
 call check found in #178: reading the method without calling it
 (``check = user.has_perm``), naming it in a string (``getattr(user, "has_perm")``),
-DRF's ``DjangoModelPermissions`` family and importing ``auth.Permission``.
+DRF's ``DjangoModelPermissions`` family and reaching ``auth.Permission`` through
+any import (``from django.contrib.auth import models as m; m.Permission``).
+Accepted, because only running the code could tell: building the name at runtime
+(``"has_" + "perm"``). ``apps.accounts.models.Permission`` is the roles model and
+stays allowed.
 """
 
 import ast
 
-from tests.architecture.support import parse, relative, source_files
+from tests.architecture.support import import_aliases, parse, relative, resolved, source_files
 
 # Django's permissions only gate the admin.
 ALLOWED_FILE_NAMES = {"admin.py"}
@@ -20,11 +24,16 @@ BANNED_PERMISSION_CLASSES = {
     "DjangoObjectPermissions",
 }
 AUTH_MODELS = "django.contrib.auth.models"
+AUTH_PERMISSION = f"{AUTH_MODELS}.Permission"
 
 
 def django_permission_uses(path):
-    for node in ast.walk(parse(path)):
-        if isinstance(node, ast.Attribute) and node.attr in BANNED_METHODS:
+    tree = parse(path)
+    aliases = import_aliases(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Attribute) and resolved(node, aliases) == AUTH_PERMISSION:
+            yield node.lineno, AUTH_PERMISSION
+        elif isinstance(node, ast.Attribute) and node.attr in BANNED_METHODS:
             yield node.lineno, node.attr
         elif isinstance(node, ast.Constant) and node.value in BANNED_METHODS:
             yield node.lineno, f"{node.value!r}"
@@ -34,8 +43,8 @@ def django_permission_uses(path):
                 yield node.lineno, name
         elif isinstance(node, ast.ImportFrom):
             for alias in node.names:
-                if node.module == AUTH_MODELS and alias.name == "Permission":
-                    yield node.lineno, f"{AUTH_MODELS}.Permission"
+                if f"{node.module}.{alias.name}" == AUTH_PERMISSION:
+                    yield node.lineno, AUTH_PERMISSION
                 elif alias.name in BANNED_PERMISSION_CLASSES:
                     yield node.lineno, alias.name
         elif isinstance(node, ast.Import):
@@ -55,9 +64,25 @@ def test_the_scan_sees_every_way_around_a_has_perm_call(tmp_path):
         "getattr(user, 'has_perm')('x')\n"
         "permission_classes = [DjangoObjectPermissions]\n"
         "def has_permission(self, request, view): ...\n"
+        "from django.contrib.auth import models as auth_models\n"
+        "auth_models.Permission.objects.all()\n"
+        "from django.contrib import auth\n"
+        "auth.models.Permission\n"
+        "from apps.accounts.models import Permission as RolePermission\n"
+        '"""A docstring that mentions has_perm is fine."""\n'
     )
 
-    assert sorted({line for line, _ in django_permission_uses(planted)}) == [1, 2, 3, 4, 5, 6, 7]
+    assert sorted({line for line, _ in django_permission_uses(planted)}) == [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        10,
+        12,
+    ]
 
 
 def test_no_django_permissions_outside_the_admin():

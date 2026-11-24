@@ -1,9 +1,12 @@
 """Every Celery task has an explicit name and receives its store (AGENTS.md).
 
-The checks read decorated functions, so a task must be registered with a
-decorator: ``t = shared_task(fn)`` or ``app.task(fn)`` would hide it from them
-and is refused (#178). Class-based tasks (``class T(celery.Task)``) are not used
-here and are not checked: the worker-registration test below still sees them.
+The name and store checks read decorated functions, so a task must be registered
+with ``@shared_task(...)`` or ``@app.task(...)`` written out (#178). Every other way
+is refused: calling the decorator on a function (``shared_task(fn)``,
+``shared_task(name=...)(fn)``), an aliased decorator (``st = shared_task``) and a
+class-based task (``app.register_task(T())``). The scan catches the first two; the
+worker test catches all of them, because it requires the worker's registry and
+the decorated tasks in the code to be the same set, both ways.
 """
 
 import ast
@@ -45,26 +48,55 @@ def _explicit_name(decorator):
     return None
 
 
+def _task_aliases(tree):
+    """Local names bound to ``shared_task`` under another name."""
+    return {
+        alias.asname
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.module == "celery"
+        for alias in node.names
+        if alias.name == "shared_task" and alias.asname
+    }
+
+
 def call_registrations(path):
-    """Tasks registered by calling the decorator on a function instead of decorating it."""
-    for node in ast.walk(parse(path)):
-        if isinstance(node, ast.Call) and _is_task_decorator(node) and node.args:
-            yield node.lineno
+    """Tasks registered without a written-out ``@shared_task(...)`` decorator."""
+    tree = parse(path)
+    aliases = _task_aliases(tree)
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "celery"
+            and any(alias.name == "shared_task" and alias.asname for alias in node.names)
+        ):
+            yield node.lineno  # an alias hides its tasks from the name and store checks
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        aliased = isinstance(func, ast.Name) and func.id in aliases
+        if (_is_task_decorator(node) or aliased) and node.args:
+            yield node.lineno  # shared_task(fn)
+        elif isinstance(func, ast.Call) and _is_task_decorator(func) and node.args:
+            yield node.lineno  # shared_task(name=...)(fn)
 
 
 def test_the_scan_sees_a_task_registered_with_a_call(tmp_path):
     planted = tmp_path / "tasks.py"
     planted.write_text(
         "from celery import shared_task\n"
+        "from celery import shared_task as st\n"
         "from config.celery import app\n"
         "def run(store_id): ...\n"
         "t = shared_task(run)\n"
         "u = app.task(run, name='x')\n"
+        "v = shared_task(name='photos.x')(run)\n"
+        "w = app.task(bind=True, name='y')(run)\n"
+        "x = st(run)\n"
         "@shared_task(name='ok')\n"
         "def fine(store_id): ...\n"
     )
 
-    assert list(call_registrations(planted)) == [4, 5]
+    assert sorted(set(call_registrations(planted))) == [2, 5, 6, 7, 8, 9]
 
 
 def test_every_task_is_registered_with_a_decorator():
@@ -75,6 +107,17 @@ def test_every_task_is_registered_with_a_decorator():
     ]
 
     assert found == [], "Register tasks with @shared_task(name=...), so these checks see them."
+
+
+def hidden_tasks(registered, in_code):
+    """Registered tasks the decorator scan never saw; Celery's own are not ours."""
+    return {name for name in registered - in_code if not name.startswith("celery.")}
+
+
+def test_a_task_the_scan_never_saw_is_hidden():
+    registered = {"celery.chord_unlock", "apps.photos.tasks.process_photo", "apps.x.ClassTask"}
+
+    assert hidden_tasks(registered, {"apps.photos.tasks.process_photo"}) == {"apps.x.ClassTask"}
 
 
 def test_the_task_scan_finds_the_known_tasks():
@@ -123,3 +166,7 @@ def test_the_worker_registers_every_task_in_the_code():
     in_code = {_explicit_name(decorator) for _path, _node, decorator in tasks()}
 
     assert in_code - registered == set(), "config/celery.py must discover every task module."
+    # The other way: a task the checks above never read (class-based, aliased,
+    # registered by a call) is in the worker's registry but not in the code scan.
+    hidden = hidden_tasks(registered, in_code)
+    assert hidden == set(), f"Register every task with @shared_task(name=...): {hidden}"
