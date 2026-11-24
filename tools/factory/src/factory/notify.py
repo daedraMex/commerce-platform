@@ -33,6 +33,8 @@ class Notifier(Protocol):
 
     def send_paused(self, info: PausedInfo) -> None: ...
 
+    def send_cleaned_up(self, info: CleanedUpInfo) -> None: ...
+
     def send_review_addressed(self, info: ReviewAddressedInfo) -> None: ...
 
     def send_review_skipped(self, info: ReviewSkippedInfo) -> None: ...
@@ -97,6 +99,11 @@ class RunFailedInfo:
 
 @dataclass(frozen=True)
 class PausedInfo:
+    reason: str
+
+
+@dataclass(frozen=True)
+class CleanedUpInfo:
     reason: str
 
 
@@ -293,6 +300,17 @@ def build_paused_message(info: PausedInfo) -> str:
     )
 
 
+def build_cleaned_up_message(info: CleanedUpInfo) -> str:
+    return _bound_message(
+        "\n".join(
+            [
+                "<b>Night factory cleaned up</b>",
+                escape_html(info.reason),
+            ]
+        )
+    )
+
+
 def build_review_skipped_message(info: ReviewSkippedInfo) -> str:
     return _bound_message(
         "\n".join(
@@ -400,6 +418,9 @@ class NullNotifier:
     def send_paused(self, info: PausedInfo) -> None:
         return None
 
+    def send_cleaned_up(self, info: CleanedUpInfo) -> None:
+        return None
+
     def send_review_addressed(self, info: ReviewAddressedInfo) -> None:
         return None
 
@@ -429,6 +450,9 @@ class TelegramNotifier:
 
     def send_paused(self, info: PausedInfo) -> None:
         self._send(build_paused_message(info), [])
+
+    def send_cleaned_up(self, info: CleanedUpInfo) -> None:
+        self._send(build_cleaned_up_message(info), [])
 
     def send_review_addressed(self, info: ReviewAddressedInfo) -> None:
         self._send(

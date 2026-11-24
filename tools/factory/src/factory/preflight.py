@@ -18,7 +18,7 @@ from .credentials import TokenProvider
 from .git import Git, verify_git_version
 from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
-from .notify import Notifier, RunFailedInfo
+from .notify import CleanedUpInfo, Notifier, RunFailedInfo
 from .sudoers import verify_sudoers_logging
 from .tickets import REQUIRED_LABELS, Ticket, worktree_path
 
@@ -75,6 +75,7 @@ class Preflight:
         log_path = self.settings.logs_dir / f"preflight-{run_id}.log"
         worktree = None
         branch = None
+        failed_after: str | None = None
         step = "fetch origin/main"
         try:
             self.git.fetch_main(self.settings.repo_dir)
@@ -108,6 +109,9 @@ class Preflight:
             step = "verify sudoers logging"
             self._verify_sudoers_logging()
 
+            step = "remove preflight leftovers"
+            self._remove_preflight_leftovers()
+
             step = "verify worktrees directory"
             self.git.verify_no_leaked_worktrees(self.settings.repo_dir, self.settings.worktrees_dir)
 
@@ -139,15 +143,23 @@ class Preflight:
 
             return tickets
         except PreflightError:
+            failed_after = step
             raise
         except Exception as exc:
+            failed_after = step
             detail = short_error(exc) or type(exc).__name__
             self.notifier.send_run_failed(
                 RunFailedInfo(reason=f"preflight failed: {step}: {detail}")
             )
             raise PreflightError(step, detail) from exc
+        except BaseException:
+            failed_after = f"interrupted during {step}"
+            raise
         finally:
-            self._cleanup(worktree, branch)
+            if failed_after is None:
+                self._cleanup(worktree, branch)
+            else:
+                self._cleanup_keeping_the_failure(worktree, branch, failed_after)
 
     def _verify_labels(self, token: str) -> None:
         """Fail before any model spend when a label the factory writes is missing."""
@@ -162,6 +174,33 @@ class Preflight:
     def _write_check_log(self, log_path, output: str) -> None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text(output)
+
+    def _remove_preflight_leftovers(self) -> None:
+        """Delete what an interrupted preflight left, so it never stops later runs (#194).
+
+        Runs after the sudoers and isolation checks, because the delete needs them.
+        A leftover that cannot be deleted fails the step, as any cleanup failure does.
+        """
+        for leftover in self.git.preflight_leftovers(self.settings.worktrees_dir):
+            self._cleanup(leftover, leftover.name)
+            self.notifier.send_cleaned_up(
+                CleanedUpInfo(reason=f"removed a leftover preflight worktree: {leftover}")
+            )
+
+    def _cleanup_keeping_the_failure(self, worktree, branch, failed_after: str) -> None:
+        """Clean up after a failure without letting a cleanup error replace it.
+
+        An exception from ``finally`` would replace the one in flight, and the
+        reason the preflight stopped would be lost (#194). The cleanup error is
+        reported on its own; the original keeps propagating.
+        """
+        try:
+            self._cleanup(worktree, branch)
+        except Exception as exc:
+            detail = short_error(exc) or type(exc).__name__
+            self.notifier.send_run_failed(
+                RunFailedInfo(reason=f"preflight cleanup failed after {failed_after}: {detail}")
+            )
 
     def _cleanup(self, worktree, branch) -> None:
         if worktree is not None:

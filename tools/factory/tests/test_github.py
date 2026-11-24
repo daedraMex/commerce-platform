@@ -115,22 +115,29 @@ def test_list_tickets_marks_a_ticket_closed_by_a_recorded_pr():
 def test_is_open_reads_recorded_state():
     run = FakeGh()
 
-    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+    assert GitHub(REPO, run=run).is_open(21, "TOKEN") is True
     assert run.calls[-1][0] == ["gh", "issue", "view", "21", "--repo", REPO, "--json", "state"]
+
+
+def test_is_open_is_false_for_a_closed_issue():
+    def run(_argv, cwd, *, timeout, env=None, replace_env=False):
+        return CommandResult(exit_code=0, stdout='{"state":"CLOSED"}', stderr="")
+
+    assert GitHub(REPO, run=run).is_open(130, "TOKEN") is False
 
 
 def test_is_open_fails_closed_when_gh_exits_nonzero():
     def run(_argv, cwd, *, timeout, env=None, replace_env=False):
         return CommandResult(exit_code=1, stdout="", stderr="network down")
 
-    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+    assert GitHub(REPO, run=run).is_open(21, "TOKEN") is True
 
 
 def test_is_open_fails_closed_on_invalid_json():
     def run(_argv, cwd, *, timeout, env=None, replace_env=False):
         return CommandResult(exit_code=0, stdout="not json", stderr="")
 
-    assert GitHub(REPO, run=run)._is_open(21, "TOKEN") is True
+    assert GitHub(REPO, run=run).is_open(21, "TOKEN") is True
 
 
 def test_create_draft_pr_reads_the_number_from_recorded_output():

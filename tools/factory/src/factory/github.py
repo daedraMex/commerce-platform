@@ -566,7 +566,7 @@ class GitHub:
         resolved: list[Ticket] = []
         for ticket in tickets:
             blocked_by = tuple(
-                n for n in self._open_blockers(ticket.body) if self._is_open(n, token)
+                n for n in self._open_blockers(ticket.body) if self.is_open(n, token)
             )
             resolved.append(
                 Ticket(
@@ -634,7 +634,12 @@ class GitHub:
         # Native dependencies are the live gate; the "Blocked by:" line is the fallback.
         return list(parse_blocked_by(body))
 
-    def _is_open(self, number: int, token: str | None) -> bool:
+    def is_open(self, number: int, token: str | None = None) -> bool:
+        """Whether the issue is open; an unreadable state counts as open.
+
+        For a blocker, open means "stop". Before a push or a stuck comment it
+        means "go on as before the check" (#194).
+        """
         result = self._run(
             ["gh", "issue", "view", str(number), "--repo", self.repo, "--json", "state"],
             cwd="/",
