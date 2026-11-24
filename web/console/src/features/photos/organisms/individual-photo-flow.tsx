@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import {
   ArrowLeft,
@@ -38,6 +39,7 @@ import {
   type PhotoUploadKey,
 } from "../lib/idempotency";
 import {
+  photoCarouselQueryKey,
   photoCategoriesQueryKey,
   photoProductsQueryKey,
 } from "../lib/queries";
@@ -45,6 +47,7 @@ import { redoPhoto, uploadPhoto } from "../lib/upload";
 import { PhotoEditor } from "../molecules/photo-editor";
 import { PhotoSourcePicker } from "../molecules/photo-source-picker";
 import { PhotoSubmissionCard } from "./photo-submission-card";
+import { ProductCarouselPanel } from "./product-carousel-panel";
 
 type IndividualPhotoFlowProps = {
   store: string;
@@ -107,6 +110,7 @@ export function IndividualPhotoFlow({
   productId,
 }: IndividualPhotoFlowProps) {
   const t = useTranslations("Photos");
+  const queryClient = useQueryClient();
 
   const products = useApiV1StaffProductsList(
     { page_size: 100 },
@@ -271,6 +275,9 @@ export function IndividualPhotoFlow({
     try {
       const next = await call(submission.id);
       setSubmission(next);
+      void queryClient.invalidateQueries({
+        queryKey: photoCarouselQueryKey(store, productId),
+      });
     } catch (error) {
       setErrorMessage(describeError(error));
     } finally {
@@ -345,6 +352,8 @@ export function IndividualPhotoFlow({
               {t("individualSubtitle")}
             </p>
           </header>
+
+          <ProductCarouselPanel store={store} productId={productId} />
 
           {stage === "capture" ? (
             <PhotoSourcePicker localUrl={localUrl} onSelect={selectFile} />
