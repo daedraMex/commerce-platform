@@ -1,7 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
+import { redirect, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import * as React from "react";
 
@@ -30,7 +30,7 @@ export function SessionGate({ store, children }: SessionGateProps) {
   const queryClient = useQueryClient();
   const t = useTranslations("Session");
   const [signingOut, setSigningOut] = React.useState(false);
-  const signingOutRef = React.useRef(false);
+  const [signOutStarted, setSignOutStarted] = React.useState(false);
 
   const { data, error, isPending } = useApiV1MeRetrieve({
     query: { retry: false, staleTime: SESSION_STALE_TIME_MS },
@@ -41,22 +41,19 @@ export function SessionGate({ store, children }: SessionGateProps) {
   const unauthorized = statusOf(error) === 401 || statusOf(error) === 403;
   const unknownStore = data !== undefined && memberships.length > 0 && !membership;
 
-  // eslint-disable-next-line no-restricted-syntax -- redirects run after the session query; moving them to render is #180
-  React.useEffect(() => {
-    if (unauthorized && !signingOutRef.current) {
-      router.replace(`/sign-in?next=${encodeURIComponent(`/${store}`)}`);
+  if (unauthorized) {
+    if (!signOutStarted) {
+      redirect(`/sign-in?next=${encodeURIComponent(`/${store}`)}`);
     }
-  }, [router, store, unauthorized]);
+    return null;
+  }
 
-  // eslint-disable-next-line no-restricted-syntax -- redirects run after the session query; moving them to render is #180
-  React.useEffect(() => {
-    if (unknownStore && memberships[0]) {
-      router.replace(`/${memberships[0].store.slug}`);
-    }
-  }, [memberships, router, unknownStore]);
+  if (unknownStore) {
+    redirect(`/${memberships[0].store.slug}`);
+  }
 
   const signOut = async () => {
-    signingOutRef.current = true;
+    setSignOutStarted(true);
     setSigningOut(true);
     try {
       await fetch("/api/auth/sign-out", {
