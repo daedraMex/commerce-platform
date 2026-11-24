@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from apps.accounts.services import grant_membership
-from apps.stores.models import Store
+from apps.stores.services import get_store_by_slug
 
 HOME_STORE_SLUG = "home"
 HOME_STORE_NAME = "Home"
@@ -26,7 +26,7 @@ class Command(BaseCommand):
 
         with transaction.atomic():
             user = _upsert_staff_user(email, password)
-            store = Store.objects.filter(slug=HOME_STORE_SLUG).first()
+            store = get_store_by_slug(HOME_STORE_SLUG)
             if store is None:
                 call_command(
                     "create_store",
@@ -36,7 +36,6 @@ class Command(BaseCommand):
                     owner=email,
                     stdout=self.stdout,
                 )
-                store = Store.objects.get(slug=HOME_STORE_SLUG)
             else:
                 grant_membership(user=user, store=store, role_name="owner")
             call_command(

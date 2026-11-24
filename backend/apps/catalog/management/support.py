@@ -43,18 +43,16 @@ from apps.catalog.rules import (
     validate_product_attributes,
 )
 from apps.shared.domain.paths import safe_child_path
-from apps.stores.models import Store
-from apps.stores.services import lock_store
+from apps.stores.services import get_store_by_slug, lock_store
 
 PRICE_FIELDS = ("price", "compare_at_price", "cost")
 
 
 def get_active_store(slug):
     """Return the active store named by slug, or reject the command."""
-    try:
-        store = Store.objects.get(slug=slug)
-    except Store.DoesNotExist as error:
-        raise CommandError(f"No store with slug {slug!r}.") from error
+    store = get_store_by_slug(slug)
+    if store is None:
+        raise CommandError(f"No store with slug {slug!r}.")
     if not store.is_active:
         raise CommandError(f"Store {slug!r} is inactive.")
     return store
