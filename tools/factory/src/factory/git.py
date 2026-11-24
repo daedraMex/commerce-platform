@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .areas import BACKEND, Area, select_areas
+from .contract_diff import CONTRACT_DIFF_CONTEXT, CONTRACTS_DIR
 from .diff import DiffStats, build_diff_stats
 from .runner import (
     build_check_env,
@@ -579,6 +580,25 @@ class Git:
     def review_diff(self, worktree: Path) -> str:
         """Everything the builder changed against origin/main, new files included."""
         return self._with_temp_index(worktree, ["git", "diff", "--cached", "origin/main"])
+
+    def contract_diff(self, worktree: Path) -> str:
+        """The change to ``docs/contracts/`` against origin/main, whole files as context.
+
+        Every changed line then has its ``## <module>.<name>`` heading in the same
+        hunk, which is how the factory tells which contracts a change edits (#203).
+        """
+        return self._with_temp_index(
+            worktree,
+            [
+                "git",
+                "diff",
+                "--cached",
+                f"--unified={CONTRACT_DIFF_CONTEXT}",
+                "origin/main",
+                "--",
+                CONTRACTS_DIR,
+            ],
+        )
 
     def review_changed_files(self, worktree: Path) -> list[str]:
         """Every path the builder changed against origin/main, new files included."""

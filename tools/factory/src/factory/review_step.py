@@ -261,6 +261,7 @@ def compose_reviewer_prompt(
     review_rules: str,
     diff: str,
     previous: tuple[Finding, ...],
+    undeclared_contracts: tuple[tuple[str, str], ...] = (),
 ) -> str:
     """The reviewer's prompt: rules (trusted), ticket, previous round, diff (untrusted)."""
     parts = [
@@ -307,6 +308,17 @@ def compose_reviewer_prompt(
             _quote(
                 "\n".join(f"[{f.tag}] {f.location} | {f.summary} | {f.failure}" for f in previous)
             ),
+        ]
+    if undeclared_contracts:
+        parts += [
+            "",
+            "## Contracts changed without being declared",
+            "",
+            "The diff edits these sections of docs/contracts/, but the ticket does not "
+            "declare them as changed. Check every consumer of each one in this "
+            "worktree, and report a consumer the change breaks with its failure case.",
+            "",
+            *(f"- `{cid}` ({how})" for cid, how in undeclared_contracts),
         ]
     parts += [
         "",

@@ -12,6 +12,7 @@ from pathlib import Path
 from .areas import BACKEND, Area, select_areas
 from .cleanup import cleanup_old
 from .config import Settings
+from .contract_diff import touched_contract_ids, undeclared_contracts
 from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
 from .diff import DiffStats, is_dependency_path, non_dependency_change, touches_protected_paths
@@ -69,6 +70,7 @@ from .tickets import (
     branch_from_worktree_dir_name,
     branch_name,
     is_ready,
+    parse_contracts,
     select_tickets,
     worktree_path,
 )
@@ -804,6 +806,7 @@ class Factory:
             step_budget=self.settings.attempts,
             verified_sha=verified_sha,
             check_output=check_output,
+            undeclared_contracts=self._undeclared_contracts_for_risk(ticket, worktree),
         )
         try:
             pr_number = self.github.create_draft_pr(
@@ -1047,6 +1050,21 @@ class Factory:
         text = self.git.read_ref_file(self.settings.repo_dir, "origin/main", path)
         return inline_opencode_config(text, path)
 
+    def _undeclared_contracts(self, ticket: Ticket, worktree: Path) -> tuple[tuple[str, str], ...]:
+        """Contracts the change edits that the ticket does not declare as changed (#203)."""
+        touched = touched_contract_ids(self.git.contract_diff(worktree))
+        return undeclared_contracts(touched, parse_contracts(ticket.body))
+
+    def _undeclared_contracts_for_risk(
+        self, ticket: Ticket, worktree: Path
+    ) -> tuple[tuple[str, str], ...]:
+        """The same list for the PR body; an unreadable diff is flagged, never fatal."""
+        try:
+            return self._undeclared_contracts(ticket, worktree)
+        except Exception as exc:
+            reason = f"could not read the docs/contracts/ diff ({short_error(exc)})"
+            return (("docs/contracts/", f"{reason}: read it in full"),)
+
     def _pre_pr_review(self, ticket: Ticket, **kwargs) -> PrePrReview:
         review = self._run_pre_pr_review(ticket, **kwargs)
         self._track_reviewer(review)
@@ -1098,6 +1116,7 @@ class Factory:
             # opencode.json and .opencode/, and the worktree copy is never read.
             reviewer_config = self._inline_config(REVIEWER_CONFIG_PATH)
             diff = self.git.review_diff(worktree)
+            undeclared = self._undeclared_contracts(ticket, worktree)
             before = self.git.worktree_fingerprint(worktree)
         except Exception as exc:
             return PrePrReview.failed(reviewer, short_error(exc))
@@ -1105,7 +1124,11 @@ class Factory:
             worktree=worktree,
             model=reviewer,
             prompt=compose_reviewer_prompt(
-                ticket, review_rules=rules, diff=diff, previous=previous
+                ticket,
+                review_rules=rules,
+                diff=diff,
+                previous=previous,
+                undeclared_contracts=undeclared,
             ),
             timeout_seconds=int(remaining),
             config_content=reviewer_config,

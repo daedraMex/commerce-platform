@@ -86,6 +86,14 @@ def test_runbook_documents_agent_owned_worktree_cleanup():
     assert "PYTEST_ADDOPTS=-p no:cacheprovider" in text
 
 
+def test_runbook_documents_the_undeclared_contract_check():
+    flat = " ".join(RUNBOOK.read_text().split())
+
+    assert "edits but the ticket does not declare as changed" in flat
+    assert "declared as consumed" in flat
+    assert "Review fixes are not checked again" in flat
+
+
 def test_runbook_documents_model_checks_and_reviewer_failures():
     flat = " ".join(RUNBOOK.read_text().split())
 

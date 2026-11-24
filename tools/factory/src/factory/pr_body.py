@@ -40,6 +40,7 @@ def build_pr_body(
     step_budget: int,
     verified_sha: str,
     check_output: str = "",
+    undeclared_contracts: tuple[tuple[str, str], ...] = (),
 ) -> str:
     parts: list[str] = [
         f"Closes #{ticket_number}",
@@ -65,7 +66,7 @@ def build_pr_body(
     ]
     if review_lines:
         parts += ["", "## Review", "", *review_lines]
-    parts += ["", "## Risk", "", *_risk(diff)]
+    parts += ["", "## Risk", "", *_risk(diff, undeclared_contracts)]
     parts += ["", "## How to revert", "", *_revert(diff)]
     return "\n".join(parts) + "\n"
 
@@ -138,8 +139,16 @@ def _verification(
     return [*lines, f"- Agent steps: {steps_used} of {step_budget}"]
 
 
-def _risk(diff: DiffStats) -> list[str]:
+def _risk(diff: DiffStats, undeclared_contracts: tuple[tuple[str, str], ...] = ()) -> list[str]:
     lines: list[str] = []
+    if undeclared_contracts:
+        # The conflict check only reads the ticket's Contracts section, so it let
+        # these run beside other tickets on the same contract (#203).
+        lines.append(
+            "- Contracts changed that the ticket does not declare as changed "
+            "(check every consumer):"
+        )
+        lines += [f"  - `{cid}`: {how}" for cid, how in undeclared_contracts]
     if diff.migrations_changed:
         lines.append("- Migrations changed: review them before merging.")
     dependencies = [f.path for f in diff.files if is_dependency_path(f.path)]

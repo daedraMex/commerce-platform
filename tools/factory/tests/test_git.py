@@ -1092,3 +1092,14 @@ def test_review_tests_are_placed_and_removed_with_their_directory(tmp_path):
     git.remove_review_tests(tmp_path, paths)
     assert not (tmp_path / "backend" / "tests" / "review").exists()
     assert (tmp_path / "backend" / "tests").is_dir()
+
+
+def test_contract_diff_takes_the_whole_contract_files_as_context(tmp_path):
+    run = RecordingRun(CommandResult(0, "diff --git a/docs/contracts/photos.md ...", ""))
+
+    out = Git(run=run).contract_diff(tmp_path)
+
+    assert out.startswith("diff --git a/docs/contracts/photos.md")
+    diff_call = next(call for call in run.calls if call[0][:3] == ["git", "diff", "--cached"])
+    assert "--unified=100000" in diff_call[0]
+    assert diff_call[0][-3:] == ["origin/main", "--", "docs/contracts/"]
