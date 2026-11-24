@@ -1,7 +1,7 @@
 """The Photo submission entity and its state machine.
 
 A submission is one staff upload: it moves uploaded -> processing -> ready or failed,
-and a redo moves it from ready back to processing without deleting the previous result.
+and a redo moves it from ready or failed back to processing, up to MAX_REDOS times.
 Applied and discarded are timestamps, not states.
 """
 
@@ -20,9 +20,11 @@ from apps.photos.domain.errors import (
     CannotStartProcessing,
     IdempotencyConflict,
     InvalidSubmissionTarget,
+    RedoExhausted,
 )
 
 MAX_ATTEMPTS = 3
+MAX_REDOS = 5
 
 
 class SubmissionStatus(StrEnum):
@@ -76,6 +78,7 @@ class PhotoSubmission:
     failure_code: str = ""
     failure_message: str = ""
     attempts: int = 0
+    redos: int = 0
     result_media_id: int | None = None
     applied_at: datetime | None = None
     applied_by_id: int | None = None
@@ -140,17 +143,23 @@ class PhotoSubmission:
         self.failure_message = message
 
     def redo(self, corners: list, crop: dict) -> int | None:
-        """Move a ready submission back to processing with a new quad or crop.
+        """Move a ready or failed submission back to processing with a new quad or crop.
 
-        Returns the previous result Media id; the Media itself is kept, never deleted.
+        Counts toward MAX_REDOS, not toward attempts. Returns the previous result Media id,
+        or None from failed; the Media itself is kept, never deleted.
         """
         if self.applied_at is not None:
             raise CannotRedo("An applied submission cannot be redone.")
         if self.discarded_at is not None:
             raise CannotRedo("A discarded submission cannot be redone.")
-        if self.status is not SubmissionStatus.READY:
-            raise CannotRedo("Only a ready submission can be redone.")
+        if self.status not in (SubmissionStatus.READY, SubmissionStatus.FAILED):
+            raise CannotRedo("Only a ready or failed submission can be redone.")
+        if self.redos >= MAX_REDOS:
+            raise RedoExhausted(
+                f"This photo was already redone {MAX_REDOS} times. Discard it and take a new photo."
+            )
         previous_result_media_id = self.result_media_id
+        self.redos += 1
         self.corners = corners
         self.crop = crop
         self.status = SubmissionStatus.PROCESSING

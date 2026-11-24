@@ -11,7 +11,7 @@ from rest_framework import serializers
 from apps.catalog.media import media_url, rendition_url
 from apps.photos.application.get_photo_submission import PhotoSubmissionView
 from apps.photos.application.get_product_images import CarouselImage
-from apps.photos.domain.submission import SubmissionKind
+from apps.photos.domain.submission import MAX_REDOS, SubmissionKind
 
 
 def _json_value(value, message):
@@ -220,6 +220,8 @@ class PhotoSubmissionSerializer(serializers.Serializer):
     linked_product_ids = serializers.ListField(child=serializers.IntegerField(), read_only=True)
     pipeline_version = serializers.CharField(source="submission.pipeline_version")
     attempts = serializers.IntegerField(source="submission.attempts")
+    redos = serializers.IntegerField(source="submission.redos")
+    redos_remaining = serializers.SerializerMethodField()
     version = serializers.IntegerField(source="submission.version")
     target_product_id = serializers.IntegerField(
         source="submission.target_product_id", allow_null=True
@@ -238,6 +240,10 @@ class PhotoSubmissionSerializer(serializers.Serializer):
     )
     created_at = serializers.DateTimeField(source="submission.created_at")
     updated_at = serializers.DateTimeField(source="submission.updated_at")
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_redos_remaining(self, view):
+        return max(MAX_REDOS - view.submission.redos, 0)
 
     @extend_schema_field(serializers.CharField())
     def get_preview_url(self, view):

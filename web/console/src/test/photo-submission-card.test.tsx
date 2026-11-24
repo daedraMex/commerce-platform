@@ -24,6 +24,8 @@ function submission(
     photographed_variant_id: null,
     pipeline_version: "2026-11-11.2",
     preview_url: "/api/v1/staff/photos/12/preview/",
+    redos: 0,
+    redos_remaining: 5,
     result: null,
     status: "ready",
     target_product_id: 13,

@@ -14,6 +14,7 @@ class PhotoSubmissionAdmin(admin.ModelAdmin):
         "status",
         "created_by",
         "attempts",
+        "redos",
         "applied_at",
         "discarded_at",
         "created_at",
