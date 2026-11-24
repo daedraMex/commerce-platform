@@ -21,8 +21,9 @@ full.
 
 from __future__ import annotations
 
+import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .tickets import Ticket
 
@@ -232,6 +233,28 @@ def _quoted_diff(diff: str) -> str:
     )
 
 
+def inline_opencode_config(text: str, path: str) -> str:
+    """An OpenCode config file's text, ready to pass inline as OPENCODE_CONFIG_CONTENT.
+
+    A blank or invalid file fails closed: OpenCode would silently skip it and run
+    with the repo's own permissions. The top-level permissions are also set as the
+    ``build`` agent's, because agent-level permissions are merged after top-level
+    ones and the repo's opencode.json defines that agent.
+    """
+    try:
+        config = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{path} on origin/main is not valid JSON") from exc
+    if not isinstance(config, dict) or not isinstance(config.get("permission"), dict):
+        raise RuntimeError(f"{path} on origin/main has no permission block")
+    build = config.setdefault("agent", {}).setdefault("build", {})
+    build["permission"] = config["permission"]
+    # Pin the agent: a planted .opencode/opencode.json (project config, ranked
+    # below inline) cannot switch the run to an agent with wider permissions.
+    config["default_agent"] = "build"
+    return json.dumps(config)
+
+
 def compose_reviewer_prompt(
     ticket: Ticket,
     *,
@@ -431,19 +454,27 @@ class PrePrReview:
         return cls("protected")
 
     @classmethod
+    def model_failed(cls, reviewer: str, reason: str) -> PrePrReview:
+        """The reviewer ran and gave nothing usable: timed out, silent or unparsable."""
+        return cls("failed", reviewer, reason=reason, from_model=True)
+
+    @classmethod
     def done(cls, reviewer: str, result: ReviewResult) -> PrePrReview:
         if not result.ok:
-            return cls.failed(reviewer, result.error)
-        return cls("done", reviewer, result)
+            return cls.model_failed(reviewer, result.error)
+        return cls("done", reviewer, result, from_model=True)
 
     @property
     def findings(self) -> tuple[Finding, ...]:
         return self.result.findings
 
     attack: AttackRun | None = None
+    # The reviewer model itself ran and produced this result. Only these count
+    # toward "Pre-PR reviewer failing" (#202): a budget or git error is not the model's.
+    from_model: bool = False
 
     def with_attack(self, attack: AttackRun) -> PrePrReview:
-        return PrePrReview(self.status, self.reviewer, self.result, self.reason, attack)
+        return replace(self, attack=attack)
 
     @property
     def blocking(self) -> bool:

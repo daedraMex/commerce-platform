@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -47,9 +48,11 @@ class FakeGit:
         if self.identity_error is not None:
             raise self.identity_error
 
+    reviewer_config = REVIEWER_CONFIG
+
     def read_file(self, worktree, relpath):
         if relpath == "tools/factory/opencode.reviewer.json":
-            return REVIEWER_CONFIG
+            return self.reviewer_config
         return ""
 
     def preflight_leftovers(self, worktrees_dir):
@@ -147,6 +150,7 @@ def make_settings(tmp_path):
         secrets_file=tmp_path / "secrets.env",
         deploy_key=tmp_path / ".ssh" / "commerce_deploy",
         state_dir=tmp_path / "state",
+        pre_pr_review=True,
     )
 
 
@@ -494,7 +498,11 @@ def test_preflight_checks_each_configured_model_after_opencode_starts(tmp_path):
 
     checks = [event for event in events if event[0] == "model_check"]
     assert [event[1] for event in checks] == ["m", "s"]
-    assert all(event[2] == REVIEWER_CONFIG for event in checks)
+    for event in checks:
+        config = json.loads(event[2])
+        assert config["permission"] == json.loads(REVIEWER_CONFIG)["permission"]
+        assert config["agent"]["build"]["permission"] == config["permission"]
+        assert config["default_agent"] == "build"
     names = [event[0] for event in events]
     assert names.index("opencode_smoke") < names.index("model_check")
     assert names.index("model_check") < names.index("create_agent_cleanup_probe")
@@ -533,6 +541,44 @@ def test_preflight_fails_naming_the_model_that_gives_no_answer(tmp_path):
     preflight.runner = SandboxRunner(retry)
     preflight.run()
     assert [event[1] for event in retry if event[0] == "model_check"] == ["s"]
+
+
+def test_a_preflight_run_by_hand_rechecks_every_model(tmp_path):
+    """After rotating a key, `factory preflight` must ask the model again."""
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events)
+    preflight.run()
+    events.clear()
+
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.runner = SandboxRunner(events)
+    preflight.recheck_models = True
+    preflight.run()
+
+    assert [event[1] for event in events if event[0] == "model_check"] == ["m", "s"]
+
+
+def test_with_the_review_off_only_the_builder_model_is_checked(tmp_path):
+    events = []
+    preflight = build_preflight(tmp_path, events=events)
+    preflight.settings = replace(preflight.settings, pre_pr_review=False)
+    preflight.runner = SandboxRunner(events)
+
+    preflight.run()
+
+    assert [event[1] for event in events if event[0] == "model_check"] == ["m"]
+
+
+def test_an_invalid_reviewer_config_fails_the_model_check_step(tmp_path):
+    events = []
+    git = FakeGit(events=events)
+    git.reviewer_config = "{not json"
+    preflight = build_preflight(tmp_path, git=git, events=events)
+    preflight.runner = SandboxRunner(events)
+
+    with pytest.raises(PreflightError, match="verify models: .*not valid JSON"):
+        preflight.run()
 
 
 def test_preflight_checks_one_model_once_when_both_settings_name_it(tmp_path):

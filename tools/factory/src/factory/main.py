@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
@@ -52,6 +51,7 @@ from .review_step import (
     attack_test_paths,
     build_reviewer_feedback,
     compose_reviewer_prompt,
+    inline_opencode_config,
     parse_review,
     stuck_reason,
     suggested_ticket_body,
@@ -280,8 +280,14 @@ class Factory:
                 return fix
         return None
 
-    def run_preflight(self, token: str | None = None) -> list[Ticket]:
-        """Run the real-tool preflight and return the tickets it listed."""
+    def run_preflight(
+        self, token: str | None = None, *, recheck_models: bool = False
+    ) -> list[Ticket]:
+        """Run the real-tool preflight and return the tickets it listed.
+
+        ``factory preflight`` by hand asks every model again (``recheck_models``),
+        so it proves a rotated key; hourly runs use the daily cache.
+        """
         return Preflight(
             self.settings,
             git=self.git,
@@ -293,6 +299,7 @@ class Factory:
             verify_git_version_fn=self._preflight_verify_git_version,
             verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
             runner=self.runner,
+            recheck_models=recheck_models,
         ).run(token=token)
 
     def _remove_expired_worktree(self, worktree: Path) -> None:
@@ -1036,26 +1043,9 @@ class Factory:
         return self._inline_config(OPENCODE_CONFIG_PATH)
 
     def _inline_config(self, path: str) -> str:
-        """An OpenCode config from origin/main, ready to pass inline.
-
-        A blank or invalid file fails closed: OpenCode would silently skip it and run
-        with the repo's own permissions. The top-level permissions are also set as the
-        ``build`` agent's, because agent-level permissions are merged after top-level
-        ones and the repo's opencode.json defines that agent.
-        """
+        """An OpenCode config from origin/main, ready to pass inline (fails closed)."""
         text = self.git.read_ref_file(self.settings.repo_dir, "origin/main", path)
-        try:
-            config = json.loads(text)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"{path} on origin/main is not valid JSON") from exc
-        if not isinstance(config, dict) or not isinstance(config.get("permission"), dict):
-            raise RuntimeError(f"{path} on origin/main has no permission block")
-        build = config.setdefault("agent", {}).setdefault("build", {})
-        build["permission"] = config["permission"]
-        # Pin the agent: a planted .opencode/opencode.json (project config, ranked
-        # below inline) cannot switch the run to an agent with wider permissions.
-        config["default_agent"] = "build"
-        return json.dumps(config)
+        return inline_opencode_config(text, path)
 
     def _pre_pr_review(self, ticket: Ticket, **kwargs) -> PrePrReview:
         review = self._run_pre_pr_review(ticket, **kwargs)
@@ -1068,10 +1058,10 @@ class Factory:
         A failed review still opens the PR, flagged; without this, a reviewer that
         never works again looks the same as one hiccup.
         """
+        if not review.from_model:
+            return
         if review.status == "done":
             self.reviewer_failures.succeeded()
-            return
-        if review.status != "failed":
             return
         if self.reviewer_failures.failed() == REVIEWER_FAILURE_ALERT_AT:
             self._notify(
@@ -1125,12 +1115,12 @@ class Factory:
         if self.git.worktree_fingerprint(worktree) != before:
             return PrePrReview.tampered(reviewer)
         if result.timed_out:
-            return PrePrReview.failed(reviewer, "the reviewer timed out")
+            return PrePrReview.model_failed(reviewer, "the reviewer timed out")
         if not result.stdout.strip():
             # A model without a provider login prints nothing at all (#202).
             said = " ".join(result.stderr.split())[:200]
             reason = f"the reviewer produced no output (exit {result.exit_code})"
-            return PrePrReview.failed(reviewer, f"{reason}: {said}" if said else reason)
+            return PrePrReview.model_failed(reviewer, f"{reason}: {said}" if said else reason)
         review = PrePrReview.done(reviewer, parse_review(result.stdout))
         if (
             not self.settings.review_tests
@@ -1255,7 +1245,7 @@ def preflight_main() -> int:
     try:
         settings = Settings.from_env()
         notifier = _build_notifier(settings)
-        tickets = _build_factory(settings, notifier=notifier).run_preflight()
+        tickets = _build_factory(settings, notifier=notifier).run_preflight(recheck_models=True)
     except PreflightError as exc:
         print(f"preflight failed: {exc}")
         return 1

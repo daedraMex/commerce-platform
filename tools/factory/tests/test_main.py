@@ -168,6 +168,8 @@ class FakeGit:
 
     def read_ref_file(self, repo_dir, ref, path):
         self.ref_reads.append((str(repo_dir), ref, path))
+        if getattr(self, "ref_read_error", None) is not None and path == "REVIEW.md":
+            raise self.ref_read_error
         if path in self.dependency_old:
             old = self.dependency_old[path]
             if old is None:
@@ -1308,7 +1310,8 @@ class FakePreflightFactory:
         self.error = error
         self.run_error = run_error
 
-    def run_preflight(self):
+    def run_preflight(self, *, recheck_models=False):
+        self.recheck_models = recheck_models
         if self.error is not None:
             raise self.error
         return self.tickets
@@ -1330,6 +1333,7 @@ def test_preflight_cli_reports_success(monkeypatch, capsys, tmp_path):
 
     assert main_module.main(["preflight"]) == 0
     assert "preflight ok (1 tickets listed)" in capsys.readouterr().out
+    assert fake.recheck_models is True  # by hand, every model is asked again
 
 
 def test_preflight_cli_reports_failure_and_exits_nonzero(monkeypatch, capsys, tmp_path):
@@ -2519,6 +2523,19 @@ def test_a_second_reviewer_failure_in_a_row_reaches_telegram_once(tmp_path):
     assert info.model == "deepseek/deepseek-v4-pro"
     assert "no REVIEW-FINDINGS block" in info.reason
     assert third.reviewer_failing == []
+
+
+def test_a_review_the_model_never_ran_does_not_count_against_it(tmp_path):
+    """Two budget overruns before the review must not blame the reviewer model."""
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.ref_read_error = RuntimeError("git show failed")
+
+    run_with_reviewer(tmp_path, [], git=git)
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    git.ref_read_error = RuntimeError("git show failed")
+    _, _, _, _, notifier = run_with_reviewer(tmp_path, [], git=git)
+
+    assert notifier.reviewer_failing == []
 
 
 def test_a_successful_review_resets_the_failure_count(tmp_path):

@@ -629,7 +629,8 @@ unreachable" as before.
   answers without a findings block is reported in the PR body ("read in full")
   and the PR still opens. The second such failure in a row sends a "Pre-PR
   reviewer failing" Telegram message with the model and the reason, once; a
-  review that works resets the count. `strong-model` tickets skip the
+  review that works resets the count. A review that never reached the model (no
+  time left in the budget, REVIEW.md or the config unreadable) does not count. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
   `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#158): the agent's home
   (`/home/factory-agent`) is still its own and is reused across runs, and
@@ -877,10 +878,12 @@ message gives the `gh label create` command for each), creates a throwaway
 present area's `check.sh` in it as `factory-agent` with the real check
 environment, verifies isolation,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
-policy, asks `FACTORY_MODEL` and `FACTORY_STRONG_MODEL` for a fixed answer
-with the reviewer's read-only config (each at most once a day; the last success
-is kept in the state directory, `model-checks.json`) and fails naming a model
-that gives none, which is how a missing provider login shows up (step 8),
+policy, asks `FACTORY_MODEL` and, with the review on, `FACTORY_STRONG_MODEL`
+for a fixed answer with the reviewer's read-only config (hourly runs at most
+once a day per model, keeping the last success in the state directory,
+`model-checks.json`; `factory preflight` by hand asks every time, so it proves a
+rotated key) and fails naming a model that gives none, which is how a missing
+provider login shows up (step 8),
 deletes any `preflight-*` entry an earlier preflight left behind, fails
 if the worktrees directory contains any other entry that is not a live git
 worktree, then proves the cleanup removes an agent-owned

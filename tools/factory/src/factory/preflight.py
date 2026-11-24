@@ -20,7 +20,7 @@ from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
 from .model_health import ModelChecks
 from .notify import CleanedUpInfo, Notifier, RunFailedInfo
-from .review_step import REVIEWER_CONFIG_PATH
+from .review_step import REVIEWER_CONFIG_PATH, inline_opencode_config
 from .sudoers import verify_sudoers_logging
 from .tickets import REQUIRED_LABELS, Ticket, worktree_path
 
@@ -59,6 +59,7 @@ class Preflight:
         verify_sudoers_logging_fn: Callable[[], None] = verify_sudoers_logging,
         runner=None,
         model_checks: ModelChecks | None = None,
+        recheck_models: bool = False,
     ):
         self.settings = settings
         self.git = git
@@ -73,6 +74,9 @@ class Preflight:
         # starts as the agent with the real env (read-only config home, #153).
         self.runner = runner
         self.model_checks = model_checks or ModelChecks(settings.state_dir)
+        # By hand (`factory preflight`) every model is asked again, ignoring the
+        # daily cache, so the command proves a key that was just rotated.
+        self.recheck_models = recheck_models
 
     def run(self, token: str | None = None) -> list[Ticket]:
         run_id = str(self._clock())
@@ -188,12 +192,18 @@ class Preflight:
         A missing provider login otherwise shows up only as reviews that silently
         fail; it now stops the run before any ticket, naming the model.
         """
-        config = self.git.read_file(worktree, REVIEWER_CONFIG_PATH)
-        if not config.strip():
-            raise RuntimeError(f"{REVIEWER_CONFIG_PATH} is missing from origin/main")
-        models = (self.settings.factory_model, self.settings.factory_strong_model)
+        # The worktree is a fresh origin/main, and the config is built exactly as
+        # the reviewer's is: an invalid file fails here instead of running wide open.
+        config = inline_opencode_config(
+            self.git.read_file(worktree, REVIEWER_CONFIG_PATH), REVIEWER_CONFIG_PATH
+        )
+        models = [self.settings.factory_model]
+        # With the review off the strong model only builds strong-model tickets, which
+        # go stuck on their own if it cannot answer; it must not stop every run.
+        if self.settings.pre_pr_review:
+            models.append(self.settings.factory_strong_model)
         for model in dict.fromkeys(models):
-            if not self.model_checks.due(model):
+            if not self.recheck_models and not self.model_checks.due(model):
                 continue
             self.runner.model_check(worktree, model, config_content=config)
             self.model_checks.passed(model)
