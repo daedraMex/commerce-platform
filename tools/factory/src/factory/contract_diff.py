@@ -23,62 +23,57 @@ CONTRACT_DIFF_CONTEXT = 100_000
 
 _HEADING_RE = re.compile(r"^##\s+(?P<title>.+?)\s*$")
 _ID_RE = re.compile(r"^[a-z][a-z0-9_]*\.[a-z0-9][a-z0-9_-]*$")
-_FILE_HEADER_PREFIXES = (
-    "diff --git",
-    "index ",
-    "--- ",
-    "+++ ",
-    "@@",
-    "new file",
-    "deleted file",
-    "old mode",
-    "new mode",
-    "similarity",
-    "rename ",
-    "Binary files",
-    "\\ No newline",
-)
+_FENCE_RE = re.compile(r"^\s*(```|~~~)")
 
 
-def _section(text: str, current: str | None) -> str | None:
-    """The section a line opens, or ``current`` when it opens none.
+class _Side:
+    """Where one side of the diff (before or after the change) is in the file."""
 
-    A level-2 heading that is not a contract id (``## Notes``) ends the section.
-    """
-    heading = _HEADING_RE.match(text)
-    if heading is None:
-        return current
-    title = heading["title"]
-    return title if _ID_RE.match(title) else None
+    def __init__(self) -> None:
+        self.section: str | None = None
+        self.in_fence = False
+
+    def read(self, text: str) -> None:
+        if _FENCE_RE.match(text):
+            self.in_fence = not self.in_fence
+            return
+        if self.in_fence:
+            return  # a "## x.y" line inside a code block is not a heading
+        heading = _HEADING_RE.match(text)
+        if heading is not None:
+            # A level-2 heading that is not a contract id (``## Notes``) ends the section.
+            title = heading["title"]
+            self.section = title if _ID_RE.match(title) else None
 
 
 def touched_contract_ids(diff: str) -> frozenset[str]:
     """Every contract whose section has an added or removed line in ``diff``.
 
     Old and new sides are tracked apart: a removed line belongs to the section it
-    sat in before the change, an added line to the one it sits in after it.
+    sat in before the change, an added line to the one it sits in after it. Lines
+    that are only whitespace change no contract: git shows the blank line before a
+    section appended at the end of a file as an addition to the section above.
     """
     touched: set[str] = set()
-    old: str | None = None
-    new: str | None = None
+    old = new = _Side()
+    in_header = True
     for line in diff.splitlines():
+        line = line.rstrip("\r")
         if line.startswith("diff --git"):
-            old = new = None
+            old, new = _Side(), _Side()
+            in_header = True
             continue
-        if not line or line.startswith(_FILE_HEADER_PREFIXES):
+        if line.startswith("@@"):
+            in_header = False  # file headers ("--- a/x", "+++ b/x") come only before
+            continue
+        if in_header or not line or line.startswith("\\"):
             continue
         mark, text = line[0], line[1:]
-        if mark == " ":
-            old = _section(text, old)
-            new = _section(text, new)
-        elif mark == "-":
-            old = _section(text, old)
-            if old is not None:
-                touched.add(old)
-        elif mark == "+":
-            new = _section(text, new)
-            if new is not None:
-                touched.add(new)
+        sides = {" ": (old, new), "-": (old,), "+": (new,)}.get(mark, ())
+        for side in sides:
+            side.read(text)
+            if mark != " " and text.strip() and side.section is not None:
+                touched.add(side.section)
     return frozenset(touched)
 
 

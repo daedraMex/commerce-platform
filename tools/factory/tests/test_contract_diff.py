@@ -113,3 +113,41 @@ def test_undeclared_contracts_say_how_the_ticket_named_them():
         ("photos.catalog-port", "declared as consumed"),
         ("photos.processing-queue", "not declared"),
     )
+
+
+def test_a_section_appended_at_the_end_does_not_flag_the_one_above():
+    """git shows the blank line before the new heading as an added line."""
+    diff = HEADER + (
+        " ## photos.submission-states\n \n MAX_ATTEMPTS is 3.\n+\n+## photos.new-thing\n+\n+body\n"
+    )
+
+    assert touched_contract_ids(diff) == {"photos.new-thing"}
+
+
+def test_a_content_line_that_looks_like_a_diff_header_still_counts():
+    """A removed "-- note" shows as "--- note"; an added "++ x" as "+++ x"."""
+    diff = HEADER + (
+        " ## photos.process-photo-task\n"
+        " \n"
+        "--- sql comment\n"
+        " \n"
+        " ## photos.catalog-port\n"
+        "+++ added note\n"
+    )
+
+    assert touched_contract_ids(diff) == {"photos.process-photo-task", "photos.catalog-port"}
+
+
+def test_a_heading_inside_a_code_block_is_not_a_section():
+    diff = HEADER + (
+        " ## photos.processing-queue\n"
+        " \n"
+        " ```python\n"
+        "+## photos.fake-in-fence\n"
+        " class PhotoProcessingQueue(Protocol):\n"
+        " ```\n"
+        " \n"
+        " More text.\n"
+    )
+
+    assert touched_contract_ids(diff) == {"photos.processing-queue"}
