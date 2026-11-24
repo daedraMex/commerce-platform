@@ -105,3 +105,39 @@ def test_run_command_kills_the_process_group_when_interrupted(tmp_path):
     assert _wait_until_gone(child, seconds=0.5), (
         f"grandchild {child} still running after the interrupt propagated"
     )
+
+
+def _killpg_refused(monkeypatch):
+    """Only factory-agent processes are left in the group: killpg gets EPERM (#197)."""
+    import factory.shell as shell
+
+    def refuse(pgid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(shell.os, "killpg", refuse)
+
+
+def test_a_refused_group_kill_still_reports_the_timeout(monkeypatch, tmp_path):
+    _killpg_refused(monkeypatch)
+
+    with pytest.raises(CommandTimeout, match="timed out after 1s"):
+        run_command([sys.executable, "-c", "import time; time.sleep(30)"], str(tmp_path), timeout=1)
+
+
+def test_a_refused_group_kill_still_reraises_the_interrupt(monkeypatch, tmp_path):
+    import signal
+    import threading
+
+    _killpg_refused(monkeypatch)
+    started = tmp_path / "started"
+    script = f"open({str(started)!r}, 'w').close()\nimport time\ntime.sleep(30)\n"
+
+    def interrupt_once_started():
+        deadline = time.time() + 10
+        while not started.exists() and time.time() < deadline:
+            time.sleep(0.05)
+        os.kill(os.getpid(), signal.SIGINT)
+
+    threading.Thread(target=interrupt_once_started, daemon=True).start()
+    with pytest.raises(KeyboardInterrupt):
+        run_command([sys.executable, "-c", script], str(tmp_path), timeout=30)

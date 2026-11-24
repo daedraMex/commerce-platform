@@ -542,6 +542,22 @@ class TimeoutThenRecord:
         return CommandResult(exit_code=1, stdout="", stderr="")
 
 
+def test_an_interrupted_check_kills_every_agent_process_before_it_propagates(tmp_path):
+    write_script(tmp_path, BACKEND)
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        if len(calls) == 1:
+            raise KeyboardInterrupt
+        return CommandResult(exit_code=1, stdout="", stderr="")
+
+    with pytest.raises(KeyboardInterrupt):
+        Git(run=run, agent_user="factory-agent").check(tmp_path, areas=(BACKEND,))
+
+    assert "/usr/bin/pkill" in calls[1]
+
+
 def test_check_on_timeout_runs_the_agent_cleanup_through_sudo(tmp_path):
     worktree = tmp_path
     write_script(worktree, BACKEND)
