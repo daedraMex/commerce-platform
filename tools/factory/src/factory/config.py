@@ -68,6 +68,11 @@ class Settings:
     # backend check.sh --review-tests mode, which the sudoers rule already allows.
     review_tests: bool = False
     agent_config_home: Path = Path("/srv/factory/agent-config")
+    # A fresh OpenCode home per run, and the factory-owned provider keys it gets (#158).
+    agent_homes_dir: Path = Path("/srv/factory/agent-homes")
+    agent_auth_file: Path = field(
+        default_factory=lambda: Path.home() / "factory" / "agent-auth.json"
+    )
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -102,6 +107,12 @@ class Settings:
             review_tests=_read(env, "FACTORY_REVIEW_TESTS") in ("1", "true", "yes"),
             agent_config_home=Path(
                 _read(env, "FACTORY_AGENT_CONFIG_HOME") or "/srv/factory/agent-config"
+            ),
+            agent_homes_dir=Path(
+                _read(env, "FACTORY_AGENT_HOMES_DIR") or "/srv/factory/agent-homes"
+            ),
+            agent_auth_file=Path(
+                _read(env, "FACTORY_AGENT_AUTH_FILE") or str(home / "factory" / "agent-auth.json")
             ),
             repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or "/srv/factory/repo"),
             worktrees_dir=Path(_read(env, "FACTORY_WORKTREES_DIR") or "/srv/factory/worktrees"),

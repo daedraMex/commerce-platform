@@ -59,6 +59,7 @@ from .review_step import (
     suggested_ticket_title,
 )
 from .reviews import ReviewFix
+from .run_home import RunHomes
 from .runner import OPENCODE_CONFIG_PATH, AgentRunner
 from .sudoers import verify_sudoers_logging
 from .tickets import (
@@ -1233,6 +1234,7 @@ def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> F
             agent_user=settings.agent_user,
             agent_home=settings.agent_home,
             config_home=str(settings.agent_config_home),
+            run_homes=_build_run_homes(settings),
         ),
         notifier=notifier or _build_notifier(settings),
         token_provider=_build_token_provider(settings),
@@ -1260,6 +1262,18 @@ def _report_failure(notifier: Notifier, reason: str) -> int:
     _notify_failure(notifier, reason)
     print(reason)
     return 1
+
+
+def _build_run_homes(settings: Settings) -> RunHomes | None:
+    """Fresh OpenCode homes (#158) whenever the agent is its own user."""
+    if not settings.agent_user:
+        return None
+    return RunHomes(
+        homes_dir=settings.agent_homes_dir,
+        auth_file=settings.agent_auth_file,
+        agent_user=settings.agent_user,
+        worktrees_dir=settings.worktrees_dir,
+    )
 
 
 def preflight_main() -> int:

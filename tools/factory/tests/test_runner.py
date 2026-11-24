@@ -588,3 +588,96 @@ def test_an_interrupted_agent_run_kills_every_agent_process_before_it_propagates
 
     opencode = next(i for i, argv in enumerate(calls) if "/usr/bin/opencode" in argv)
     assert "/usr/bin/pkill" in calls[opencode + 1]
+
+
+class FakeRunHomes:
+    def __init__(self, tmp_path, create_error=None):
+        self.tmp_path = tmp_path
+        self.created = []
+        self.removed = []
+        self.create_error = create_error
+
+    def create(self, label):
+        if self.create_error is not None:
+            raise self.create_error
+        home = self.tmp_path / f"{label}-{len(self.created)}"
+        home.mkdir()
+        self.created.append(home)
+        return home
+
+    def env(self, home, *, shared_home):
+        return {
+            "HOME": str(home),
+            "XDG_DATA_HOME": str(home / ".local/share"),
+            "UV_CACHE_DIR": f"{shared_home}/.cache/uv",
+        }
+
+    def remove(self, home):
+        self.removed.append(home)
+
+
+def _homes_runner(tmp_path, homes, answer=None, raise_on_opencode=None):
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append((argv, env))
+        if "/usr/bin/opencode" in argv:
+            if raise_on_opencode is not None:
+                raise raise_on_opencode
+            return answer or CommandResult(0, "done", "")
+        return CommandResult(1, "", "")
+
+    runner = AgentRunner(
+        run=run,
+        agent_user="factory-agent",
+        agent_home="/home/factory-agent",
+        base_env={"PATH": "/usr/bin"},
+        run_homes=homes,
+    )
+    return runner, calls
+
+
+def test_every_opencode_run_gets_a_fresh_home_that_is_removed_after(tmp_path):
+    """Nothing a run writes in its home is loaded by a later one (#158)."""
+    homes = FakeRunHomes(tmp_path)
+    runner, calls = _homes_runner(tmp_path, homes)
+
+    runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+    runner.run(
+        worktree=tmp_path, model="s", prompt="r", timeout_seconds=60, disable_project_config=True
+    )
+
+    assert [home.name for home in homes.created] == ["builder-0", "reviewer-1"]
+    assert homes.removed == homes.created
+    envs = [env for argv, env in calls if "/usr/bin/opencode" in argv]
+    assert envs[0]["HOME"] == str(homes.created[0])
+    assert envs[0]["XDG_DATA_HOME"] == str(homes.created[0] / ".local/share")
+    assert envs[0]["UV_CACHE_DIR"] == "/home/factory-agent/.cache/uv"
+    opencode_argv = next(argv for argv, _ in calls if "/usr/bin/opencode" in argv)
+    assert "XDG_DATA_HOME" in opencode_argv[2]  # passed through sudo --preserve-env
+
+
+def test_the_run_home_is_removed_after_a_timeout_and_after_an_interrupt(tmp_path):
+    from factory.shell import CommandTimeout
+
+    for error in (CommandTimeout("slow"), KeyboardInterrupt()):
+        homes = FakeRunHomes(tmp_path / type(error).__name__)
+        (tmp_path / type(error).__name__).mkdir()
+        runner, _ = _homes_runner(tmp_path, homes, raise_on_opencode=error)
+        try:
+            runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+        except KeyboardInterrupt:
+            pass
+        assert homes.removed == homes.created and len(homes.created) == 1
+
+
+def test_a_run_home_that_cannot_be_made_stops_before_opencode(tmp_path):
+    from factory.run_home import RunHomeError
+
+    homes = FakeRunHomes(tmp_path, create_error=RunHomeError("agent-auth.json is missing"))
+    runner, calls = _homes_runner(tmp_path, homes)
+
+    with pytest.raises(RunHomeError, match="agent-auth.json"):
+        runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+
+    assert not any("/usr/bin/opencode" in argv for argv, _ in calls)
