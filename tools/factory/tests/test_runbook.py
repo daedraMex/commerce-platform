@@ -86,6 +86,16 @@ def test_runbook_documents_agent_owned_worktree_cleanup():
     assert "PYTEST_ADDOPTS=-p no:cacheprovider" in text
 
 
+def test_runbook_documents_interrupted_runs_and_closed_tickets():
+    flat = " ".join(RUNBOOK.read_text().split())
+
+    assert "kills every agent process" in flat
+    assert "preflight cleanup failed after <step>" in flat
+    assert "Night factory cleaned up" in flat
+    assert "Never run two preflights at once" in flat
+    assert "closed while the factory worked on it" in flat
+
+
 def test_runbook_documents_the_safe_repo_group_and_fix_commands():
     text = RUNBOOK.read_text()
 

@@ -23,6 +23,7 @@ from .runner import (
 from .shell import CommandTimeout, RunCommand, run_command
 
 MIN_GIT_VERSION = (2, 46)
+PREFLIGHT_PREFIX = "preflight-"
 _GIT_VERSION_RE = re.compile(r"git version (\d+)\.(\d+)(?:\.(\d+))?")
 
 
@@ -207,6 +208,18 @@ class Git:
             for line in result.stdout.splitlines()
             if line.startswith("worktree ")
         }
+
+    def preflight_leftovers(self, worktrees_dir: Path) -> list[Path]:
+        """Entries an earlier preflight left behind, live or not.
+
+        Preflight worktrees are throwaway by name, so a leftover is never
+        evidence anyone needs; ticket worktrees (``nf-*``) are, and are not listed.
+        """
+        if not worktrees_dir.exists():
+            return []
+        return sorted(
+            entry for entry in worktrees_dir.iterdir() if entry.name.startswith(PREFLIGHT_PREFIX)
+        )
 
     def verify_no_leaked_worktrees(self, repo_dir: Path, worktrees_dir: Path) -> None:
         """Fail if the worktrees directory has entries git does not know about."""
@@ -636,6 +649,10 @@ class Git:
                 "FACTORY_AGENT_USER is not set; cannot delete the worktree as its owner."
             )
         target = worktree_cleanup_path(worktrees_dir, worktree)
+        # An agent process still writing (uv filling .venv after an interrupted
+        # check) makes rm fail half-way and leaves a worktree git no longer
+        # knows (#194). Strict: a refused cleanup raises before anything is deleted.
+        ensure_agent_cleanup(self._run, self._agent_user)
         result = self._run(
             ["sudo", "-n", "-u", self._agent_user, "--", RM_BIN, "-rf", str(target)],
             cwd="/",
