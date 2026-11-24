@@ -61,6 +61,7 @@ from .review_step import (
 from .reviews import ReviewFix
 from .run_home import RunHomes
 from .runner import OPENCODE_CONFIG_PATH, AgentRunner
+from .self_update import SelfUpdate
 from .sudoers import verify_sudoers_logging
 from .tickets import (
     DEPS_CHANGE_LABEL,
@@ -1276,19 +1277,38 @@ def _build_run_homes(settings: Settings) -> RunHomes | None:
     )
 
 
-def preflight_main() -> int:
+def _build_self_update(settings: Settings) -> SelfUpdate:
+    return SelfUpdate(repo_dir=settings.repo_dir, tools_dir=settings.repo_dir / "tools" / "factory")
+
+
+def _start(settings: Settings, notifier: Notifier) -> tuple[str, int | None]:
+    """Move the factory's checkout to origin/main (#215); may re-exec this process.
+
+    Returns the short commit the factory runs ("" with self-update off), and an
+    exit code when the run must stop.
+    """
+    if not settings.self_update:
+        return "", None
+    outcome = _build_self_update(settings).run()
+    commit = outcome.head[:7]
+    if hasattr(notifier, "commit"):
+        notifier.commit = commit
+    if outcome.status == "blocked":
+        return commit, _report_failure(notifier, outcome.reason)
+    return commit, None
+
+
+def preflight_main(settings: Settings, notifier: Notifier, commit: str = "") -> int:
     """Run the real-tool preflight by hand and report the result."""
-    notifier = _startup_notifier()
     try:
-        settings = Settings.from_env()
-        notifier = _build_notifier(settings)
         tickets = _build_factory(settings, notifier=notifier).run_preflight(recheck_models=True)
     except PreflightError as exc:
         print(f"preflight failed: {exc}")
         return 1
     except Exception as exc:
         return _report_failure(notifier, f"run failed: preflight: {short_error(exc)}")
-    print(f"preflight ok ({len(tickets)} tickets listed)")
+    where = f" at {commit}" if commit else ""
+    print(f"preflight ok{where} ({len(tickets)} tickets listed)")
     return 0
 
 
@@ -1312,15 +1332,21 @@ def metrics_main() -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if args and args[0] == "preflight":
-        return preflight_main()
     if args and args[0] == "metrics":
         return metrics_main()
     notifier = _startup_notifier()
-    phase = "startup"
     try:
         settings = Settings.from_env()
         notifier = _build_notifier(settings)
+        commit, stop = _start(settings, notifier)
+    except Exception as exc:
+        return _report_failure(notifier, f"run failed: startup: {short_error(exc)}")
+    if stop is not None:
+        return stop
+    if args and args[0] == "preflight":
+        return preflight_main(settings, notifier, commit)
+    phase = "startup"
+    try:
         factory = _build_factory(settings, notifier=notifier)
         phase = "run"
         results = factory.run()

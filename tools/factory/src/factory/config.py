@@ -64,6 +64,8 @@ class Settings:
     deploy_key: Path = field(default_factory=lambda: Path.home() / ".ssh" / "commerce_deploy")
     handoff_host: str | None = None
     pre_pr_review: bool = False
+    # Move /srv/factory/repo to origin/main before every run (#215); off in tests.
+    self_update: bool = False
     # Off until the machine is ready: the reviewer's attack tests run through the
     # backend check.sh --review-tests mode, which the sudoers rule already allows.
     review_tests: bool = False
@@ -104,6 +106,7 @@ class Settings:
             max_tickets_per_day=_read_int(env, "FACTORY_MAX_TICKETS_PER_DAY", 6),
             attempts=_read_int(env, "FACTORY_ATTEMPTS", 3),
             pre_pr_review=_read(env, "FACTORY_PRE_PR_REVIEW") not in ("0", "false", "no"),
+            self_update=_read(env, "FACTORY_SELF_UPDATE") not in ("0", "false", "no"),
             review_tests=_read(env, "FACTORY_REVIEW_TESTS") in ("1", "true", "yes"),
             agent_config_home=Path(
                 _read(env, "FACTORY_AGENT_CONFIG_HOME") or "/srv/factory/agent-config"

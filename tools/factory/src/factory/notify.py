@@ -286,15 +286,12 @@ def build_stuck_message(info: StuckInfo) -> str:
     return _bound_message("\n".join(lines))
 
 
-def build_run_failed_message(info: RunFailedInfo) -> str:
-    return _bound_message(
-        "\n".join(
-            [
-                "<b>Night factory aborted</b>",
-                escape_html(info.reason),
-            ]
-        )
-    )
+def build_run_failed_message(info: RunFailedInfo, commit: str = "") -> str:
+    lines = ["<b>Night factory aborted</b>", escape_html(info.reason)]
+    if commit:
+        # Which factory code failed: the checkout once ran 48 commits behind (#215).
+        lines.append(f"Commit: <code>{escape_html(commit)}</code>")
+    return _bound_message("\n".join(lines))
 
 
 def build_paused_message(info: PausedInfo) -> str:
@@ -462,6 +459,8 @@ class TelegramNotifier:
         self._bot_token = bot_token
         self._chat_id = chat_id
         self._post = post
+        # The commit the factory runs, named in every abort message (#215).
+        self.commit = ""
 
     def send_pr_ready(self, info: PrReadyInfo) -> None:
         self._send(build_pr_ready_message(info), build_pr_ready_keyboard(info))
@@ -470,7 +469,7 @@ class TelegramNotifier:
         self._send(build_stuck_message(info), build_stuck_keyboard(info))
 
     def send_run_failed(self, info: RunFailedInfo) -> None:
-        self._send(build_run_failed_message(info), [])
+        self._send(build_run_failed_message(info, self.commit), [])
 
     def send_paused(self, info: PausedInfo) -> None:
         self._send(build_paused_message(info), [])

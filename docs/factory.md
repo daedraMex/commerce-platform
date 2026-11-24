@@ -463,6 +463,30 @@ To upgrade an existing machine to this version:
    Then run `factory preflight` by hand: it makes a run home and asks both
    models to answer from one.
 
+## Updating the factory
+
+The factory updates its own code (#215). Before anything else, every run and
+every `factory preflight` fetches `origin/main` in `/srv/factory/repo`. When the
+checkout is behind, on `main` and clean, it fast-forwards, runs `uv sync` in
+`tools/factory` and re-executes the same command, so that run already uses the
+new code. `factory preflight` prints the commit it runs
+(`preflight ok at <sha> (N tickets listed)`), and every "Night factory aborted"
+message names it too.
+
+It never resets or discards anything there. A checkout on another branch, with
+local changes or diverged from `origin/main`, or a failed `uv sync`, stops the
+run with one Telegram message naming the reason and both commits. To fix it,
+as `factory`:
+```bash
+cd /srv/factory/repo
+git status --short          # see what is there before touching it
+git switch main             # if it was on another branch
+git merge --ff-only origin/main
+cd tools/factory && uv sync
+```
+Set `FACTORY_SELF_UPDATE=0` in `secrets.env` to turn it off (for example while
+testing a branch on the machine); then update by hand with the same commands.
+
 ## How tickets become agent-ready
 
 - When `/to-tickets` creates a ticket it is marked **HITL** (human-in-the-loop)
