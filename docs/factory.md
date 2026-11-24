@@ -728,7 +728,11 @@ unreachable" as before.
   otherwise). If that kill is refused, nothing is deleted.
 - **Interrupted runs.** Ctrl+C while a command runs also stops that command's
   process group before the cleanup starts, since commands run in their own
-  session and never see the interrupt. `systemctl --user stop factory.service`
+  session and never see the interrupt. When only `factory-agent` processes are
+  left in that group (sudo already gone), the group kill is refused and
+  ignored, so the timeout or the interrupt is still reported; an agent run, a
+  check or an attack-test run then kills every agent process with the agent
+  `pkill` before the interrupt propagates. `systemctl --user stop factory.service`
   kills the whole service instead, and a bare `kill <pid>` ends the factory
   without any cleanup; in both cases the next preflight removes what is left.
   When a cleanup fails after a

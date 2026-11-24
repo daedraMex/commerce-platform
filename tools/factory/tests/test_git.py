@@ -542,6 +542,22 @@ class TimeoutThenRecord:
         return CommandResult(exit_code=1, stdout="", stderr="")
 
 
+def test_an_interrupted_check_kills_every_agent_process_before_it_propagates(tmp_path):
+    write_script(tmp_path, BACKEND)
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        if len(calls) == 1:
+            raise KeyboardInterrupt
+        return CommandResult(exit_code=1, stdout="", stderr="")
+
+    with pytest.raises(KeyboardInterrupt):
+        Git(run=run, agent_user="factory-agent").check(tmp_path, areas=(BACKEND,))
+
+    assert "/usr/bin/pkill" in calls[1]
+
+
 def test_check_on_timeout_runs_the_agent_cleanup_through_sudo(tmp_path):
     worktree = tmp_path
     write_script(worktree, BACKEND)
@@ -1092,6 +1108,25 @@ def test_review_tests_are_placed_and_removed_with_their_directory(tmp_path):
     git.remove_review_tests(tmp_path, paths)
     assert not (tmp_path / "backend" / "tests" / "review").exists()
     assert (tmp_path / "backend" / "tests").is_dir()
+
+
+def test_interrupted_attack_tests_kill_every_agent_process_before_it_propagates(tmp_path):
+    write_script(tmp_path, BACKEND)
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        if "--review-tests" in argv:
+            raise KeyboardInterrupt
+        return CommandResult(exit_code=1, stdout="", stderr="")
+
+    with pytest.raises(KeyboardInterrupt):
+        Git(run=run, agent_user="factory-agent").run_review_tests(
+            tmp_path, ("tests/review/test_review_7_1.py",)
+        )
+
+    attack = next(i for i, argv in enumerate(calls) if "--review-tests" in argv)
+    assert "/usr/bin/pkill" in calls[attack + 1]
 
 
 def test_contract_diff_takes_the_whole_contract_files_as_context(tmp_path):

@@ -569,3 +569,22 @@ def test_model_check_reports_what_the_model_said_instead(tmp_path):
 
     with pytest.raises(AgentSandboxError, match="exit 1.*ProviderAuthError"):
         runner.model_check(tmp_path, "anthropic/claude-sonnet-5-5", config_content="{}")
+
+
+def test_an_interrupted_agent_run_kills_every_agent_process_before_it_propagates(tmp_path):
+    """Ctrl+C reaches only the factory; the agent's own processes need the pkill (#197)."""
+    calls = []
+
+    def run(argv, cwd, *, timeout, env=None, replace_env=False):
+        calls.append(argv)
+        if "/usr/bin/opencode" in argv:
+            raise KeyboardInterrupt
+        return CommandResult(exit_code=1, stdout="", stderr="")
+
+    runner = AgentRunner(run=run, agent_user="factory-agent", base_env={"PATH": "/usr/bin"})
+
+    with pytest.raises(KeyboardInterrupt):
+        runner.run(worktree=tmp_path, model="m", prompt="p", timeout_seconds=60)
+
+    opencode = next(i for i, argv in enumerate(calls) if "/usr/bin/opencode" in argv)
+    assert "/usr/bin/pkill" in calls[opencode + 1]

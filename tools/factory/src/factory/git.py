@@ -439,6 +439,10 @@ class Git:
                 failed.append(area)
                 chunks.append(f"=== {label}: timed out after {CHECK_TIMEOUT_SECONDS}s ===")
                 continue
+            except BaseException:
+                # Ctrl+C or a stop: the check's agent processes never saw it (#197).
+                kill_agent_processes(self._run, self._agent_user)
+                raise
             output = result.stdout
             if result.stderr:
                 output += ("\n" if output else "") + result.stderr
@@ -493,6 +497,10 @@ class Git:
             kill_agent_processes(self._run, self._agent_user)
             ensure_agent_cleanup(self._run, self._agent_user)
             return "error", f"attack tests timed out after {REVIEW_TESTS_TIMEOUT_SECONDS}s"
+        except BaseException:
+            # Ctrl+C or a stop: the tests' agent processes never saw it (#197).
+            kill_agent_processes(self._run, self._agent_user)
+            raise
         ensure_agent_cleanup(self._run, self._agent_user)
         output = result.stdout + (("\n" + result.stderr) if result.stderr else "")
         if result.exit_code == 0:
