@@ -336,6 +336,7 @@ class Factory:
                 review_feedback=feedback.review,
             ),
             write_log=lambda step, result: self._write_log(ticket, result, step=step, model=model),
+            log_check=lambda step, check: self._log_check(ticket, step, check),
             review=lambda step, previous, deadline: self._pre_pr_review(
                 ticket, worktree=worktree, step=step, previous=previous, deadline=deadline
             ),
@@ -433,6 +434,7 @@ class Factory:
             write_log=lambda step, result: self._write_log(
                 ticket, result, step=step, model=model, review_fix=True
             ),
+            log_check=lambda step, check: self._log_check(ticket, step, check),
         )
         if not attempt.passed:
             return self._stuck_after(
@@ -761,6 +763,17 @@ class Factory:
         with log_path.open("w" if fresh else "a") as log:
             log.write(header + content)
         return log_path
+
+    def _log_check(self, ticket: Ticket, step: int, check: CheckResult) -> None:
+        """Append each check's statuses and full-log paths to the run log (#227).
+
+        The agent never sees them (it cannot read the factory's logs); the stuck
+        comment's tail and the owner do.
+        """
+        if not check.summary:
+            return
+        with self._log_path(ticket).open("a") as log:
+            log.write(f"=== checks after step {step} ===\n{check.summary}\n")
 
     def _builder_config(self) -> str:
         """Main's builder permissions, passed inline so the repo's opencode.json cannot

@@ -154,3 +154,21 @@ def test_running_out_of_steps_names_the_budget():
 
 def test_feedback_defaults_are_empty():
     assert Feedback() == Feedback("", (), "")
+
+
+def test_every_check_is_handed_to_log_check():
+    git = Git([FAIL("E1"), PASS])
+    runner = Runner(git=git)
+    seen = []
+
+    loop = _loop(git, runner)
+    loop.run(
+        worktree="/w",
+        model="m",
+        builder_config="{}",
+        compose=lambda fb: "p",
+        write_log=lambda step, result: None,
+        log_check=lambda step, check: seen.append((step, check.passed)),
+    )
+
+    assert seen == [(1, False), (2, True)]

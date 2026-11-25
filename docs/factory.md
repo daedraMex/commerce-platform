@@ -51,7 +51,8 @@ The main clone and the worktrees live under `/srv/factory`, outside
 ├── factory/            # ~/factory
 │   ├── logs/           # one log per ticket run, each check's full log per area and a failed
 │   │                   # console check's Playwright report; cleaned after 14 days
-│   └── secrets.env     # chmod 600, see below
+│   ├── secrets.env     # chmod 600, see below
+│   └── agent-auth.json # chmod 600; the validated keys each run's OpenCode home gets
 ├── state/              # mode 700 (FACTORY_STATE_DIR); pause marker and the append-only ledgers
 │   ├── attempts.log    # mode 600; started + outcome lines per attempt, never readable by factory-agent
 │   ├── review-attempts.log  # mode 600; review ids already attempted, never readable by factory-agent
@@ -956,15 +957,19 @@ merge before every review fix and the conflict, ordering and prompt tests in
   that worktree (a ticket's step 2 never overwrites step 1), for example
   `preflight-1795586084.1.console.log` or `nf-212-slug.2.backend.log`; the
   agent's feedback and the PR body keep only the last 4000 characters and no
-  paths, and the preflight's run log and Telegram message name the logs.
+  paths; the run log gets each check's `Status:` line and log paths
+  (`=== checks after step N ===` for a ticket), and a failed preflight's Telegram
+  message names the area and its log.
   `exit 137 (a command was killed by SIGKILL)` means a test runner was killed,
   usually for memory, rather than a test failing; a timed-out area's log keeps
   what it printed before the timeout. Exit 1 is also what `sudo` returns when it
   refuses a command, so read the log before blaming a test. A failed console
   check also keeps its Playwright traces and report in
-  `~/factory/logs/<worktree>.<n>.console-report/`. The copy never follows a link,
-  keeps only files and folders (0700/0600) and stops at 200 MB or 2000 files; the
-  area's log says what was copied or skipped. Open the report from a checkout's
+  `~/factory/logs/<worktree>.<n>.console-report/`. The copy opens every path
+  component without following links (a `web/console` link is refused too), keeps
+  only files and folders with the factory's modes (0700/0600), and stops each
+  report folder at 200 MB or 2000 entries; the area's log says what was copied
+  or skipped. Open the report from a checkout's
   `web/console/`, where Playwright is installed:
   `pnpm exec playwright show-report <report>/playwright-report` or
   `pnpm exec playwright show-trace <trace.zip>`.

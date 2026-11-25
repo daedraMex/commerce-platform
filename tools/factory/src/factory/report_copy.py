@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 MAX_REPORT_BYTES = 200 * 1024 * 1024
+# Files and folders together, so empty folders cannot fill the factory's inodes.
 MAX_REPORT_FILES = 2000
 MAX_DEPTH = 32
 _DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -23,13 +24,13 @@ _CHUNK = 1024 * 1024
 
 @dataclass
 class CopyReport:
-    files: int = 0
+    files: int = 0  # files and folders
     bytes: int = 0
     skipped: int = 0
     stopped: list[str] = field(default_factory=list)
 
     def describe(self) -> str:
-        text = f"copied {self.files} files ({self.bytes} bytes)"
+        text = f"copied {self.files} entries ({self.bytes} bytes)"
         if self.skipped:
             text += f", skipped {self.skipped} links or special files"
         if self.stopped:
@@ -38,20 +39,34 @@ class CopyReport:
 
 
 def copy_report(
-    source: Path,
+    base: Path,
+    relative: Path,
     target: Path,
     *,
     max_bytes: int = MAX_REPORT_BYTES,
     max_files: int = MAX_REPORT_FILES,
-) -> CopyReport:
-    """Copy ``source`` into ``target`` (created 0700); raise OSError when the root is a link."""
+) -> CopyReport | None:
+    """Copy ``base / relative`` into ``target`` (created 0700).
+
+    ``base`` is the factory's own worktree folder; every component of ``relative``
+    is opened with ``O_NOFOLLOW`` from the one before, so a link anywhere on the
+    way (``web/console`` -> elsewhere) raises OSError instead of being followed.
+    Returns None when the folder does not exist.
+    """
     report = CopyReport()
-    root = os.open(source, _DIR_FLAGS)  # ELOOP when the root itself is a symlink
+    fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
     try:
+        for part in relative.parts:
+            try:
+                child = os.open(part, _DIR_FLAGS, dir_fd=fd)
+            except FileNotFoundError:
+                return None
+            os.close(fd)
+            fd = child
         target.mkdir(mode=0o700, parents=True)
-        _copy_dir(root, target, report, max_bytes=max_bytes, max_files=max_files, depth=0)
+        _copy_dir(fd, target, report, max_bytes=max_bytes, max_files=max_files, depth=0)
     finally:
-        os.close(root)
+        os.close(fd)
     return report
 
 
@@ -66,7 +81,11 @@ def _copy_dir(fd, target, report, *, max_bytes, max_files, depth):
             info = os.stat(name, dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
             continue
+        if report.files >= max_files:
+            report.stopped.append(f"more than {max_files} entries")
+            return
         if stat.S_ISDIR(info.st_mode):
+            report.files += 1
             try:
                 child = os.open(name, _DIR_FLAGS, dir_fd=fd)
             except OSError:
@@ -85,9 +104,6 @@ def _copy_dir(fd, target, report, *, max_bytes, max_files, depth):
             finally:
                 os.close(child)
         elif stat.S_ISREG(info.st_mode):
-            if report.files >= max_files:
-                report.stopped.append(f"more than {max_files} files")
-                return
             _copy_file(fd, name, target / name, report, max_bytes=max_bytes)
         else:
             report.skipped += 1

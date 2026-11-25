@@ -165,7 +165,7 @@ def test_a_failed_console_check_keeps_its_playwright_report(tmp_path):
     assert (kept / "test-results" / "photos-retry" / "trace.zip").read_text() == "trace"
     assert (kept / "playwright-report" / "index.html").exists()
     assert f"- console report: {kept}" in result.summary
-    assert "test-results: copied 1 files" in (logs / "preflight-42.1.console.log").read_text()
+    assert "test-results: copied 2 entries" in (logs / "preflight-42.1.console.log").read_text()
 
 
 def test_a_report_folder_that_is_a_link_is_never_followed(tmp_path):
@@ -220,19 +220,28 @@ def test_the_copy_stops_at_its_limits_and_uses_its_own_modes(tmp_path):
     locked.chmod(0o555)
 
     try:
-        report = copy_report(source, tmp_path / "copy", max_bytes=1_000, max_files=3)
+        report = copy_report(
+            tmp_path, Path("test-results"), tmp_path / "copy", max_bytes=1_000, max_files=3
+        )
     finally:
         locked.chmod(0o755)
 
-    assert report.files == 3 and report.stopped == ["more than 3 files"]
+    # The folder counts too: entries, so empty folders cannot fill the inodes.
+    assert report.files == 3 and report.stopped == ["more than 3 entries"]
     assert stat.S_IMODE((tmp_path / "copy" / "locked").stat().st_mode) == 0o700
     assert stat.S_IMODE((tmp_path / "copy" / "locked" / "f0.txt").stat().st_mode) == 0o600
 
     big = tmp_path / "big"
     big.mkdir()
     (big / "huge.bin").write_bytes(b"x" * 5_000)
-    report = copy_report(big, tmp_path / "copy-big", max_bytes=1_000)
+    report = copy_report(tmp_path, Path("big"), tmp_path / "copy-big", max_bytes=1_000)
     assert report.stopped == ["over 1000 bytes"]
+
+    empty = tmp_path / "dirs"
+    for n in range(10):
+        (empty / f"d{n}").mkdir(parents=True)
+    report = copy_report(tmp_path, Path("dirs"), tmp_path / "copy-dirs", max_files=4)
+    assert report.files == 4 and report.stopped == ["more than 4 entries"]
 
 
 def test_a_passing_area_keeps_no_report(tmp_path):
@@ -294,3 +303,36 @@ def test_old_area_logs_and_reports_go_with_the_run_logs(tmp_path):
     assert not old_log.exists()
     assert not (logs / "preflight-1.1.console-report").exists()
     assert fresh.exists()
+
+
+def test_a_link_anywhere_on_the_way_to_a_report_is_never_followed(tmp_path):
+    worktree = _worktree(tmp_path)
+    elsewhere = tmp_path / "factory-logs" / "other-report"
+    (elsewhere / "test-results").mkdir(parents=True)
+    (elsewhere / "test-results" / "private.txt").write_text("private")
+    console = worktree / "web" / "console"
+    moved = tmp_path / "moved-console"
+    console.rename(moved)
+    console.symlink_to(elsewhere)  # web/console -> a folder only the factory reads
+    (moved / "scripts").rename(elsewhere / "scripts")  # the check still runs
+    logs = tmp_path / "logs"
+
+    _checks(Run({"console/scripts": CommandResult(1, "", "")}), logs).check(
+        worktree, areas=(CONSOLE,)
+    )
+
+    assert not list(logs.rglob("private.txt"))
+    assert "test-results not kept" in (logs / "preflight-42.1.console.log").read_text()
+
+
+def test_check_numbers_go_on_from_the_logs_already_there(tmp_path):
+    worktree = _worktree(tmp_path, "nf-212-slug")
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "nf-212-slug.3.backend.log").write_text("last night")
+    (logs / "nf-2120-other.9.backend.log").write_text("another ticket")
+
+    _checks(Run({}), logs).check(worktree, areas=(BACKEND,))
+
+    assert (logs / "nf-212-slug.4.backend.log").exists()
+    assert (logs / "nf-212-slug.3.backend.log").read_text() == "last night"

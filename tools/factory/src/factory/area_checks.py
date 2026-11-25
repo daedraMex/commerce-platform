@@ -96,7 +96,6 @@ class AreaChecks:
         self._run = run
         self._logs_dir = logs_dir
         self._clock = clock
-        self._runs: dict[str, int] = {}
         self._changed_files = changed_files
         self._agent_user = agent_user
         self._agent_home = agent_home
@@ -219,9 +218,20 @@ class AreaChecks:
         )
 
     def _next_run(self, worktree: Path) -> int:
-        """1 for a worktree's first check, then 2, 3...: one log per check, never overwritten."""
-        self._runs[worktree.name] = self._runs.get(worktree.name, 0) + 1
-        return self._runs[worktree.name]
+        """The next free check number for this worktree: logs are never overwritten.
+
+        Read from the logs already there, so a factory restart or tomorrow's retry of
+        the same ticket goes on counting.
+        """
+        taken = [0]
+        if self._logs_dir is not None and self._logs_dir.is_dir():
+            prefix = f"{worktree.name}."
+            for entry in self._logs_dir.iterdir():
+                rest = entry.name[len(prefix) :] if entry.name.startswith(prefix) else ""
+                number = rest.split(".", 1)[0]
+                if number.isdigit():
+                    taken.append(int(number))
+        return max(taken) + 1
 
     def _write_log(self, worktree, area, run, label, status, stdout, stderr) -> Path | None:
         """Write the area's full output; None when the factory keeps no logs."""
@@ -244,15 +254,13 @@ class AreaChecks:
         target = self._logs_dir / f"{worktree.name}.{run}.{area.name}-report"
         notes = []
         for report in area.reports:
-            source = worktree / report
-            if not os.path.lexists(source):
-                continue
             try:
-                copied = copy_report(source, target / report.name)
+                copied = copy_report(worktree, report, target / report.name)
             except OSError as exc:
                 notes.append(f"{report.as_posix()} not kept: {exc}")
                 continue
-            notes.append(f"{report.as_posix()}: {copied.describe()}")
+            if copied is not None:
+                notes.append(f"{report.as_posix()}: {copied.describe()}")
         if not notes:
             return None
         with log.open("a") as handle:
