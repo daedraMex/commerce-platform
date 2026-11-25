@@ -3090,3 +3090,59 @@ def test_each_check_summary_is_appended_to_the_ticket_run_log(tmp_path):
     assert "=== checks after step 1 ===\nStatus: backend exit 0 after 30s" in log
     # The PR body never carries the factory's paths.
     assert "- backend: /x" not in github.created_prs[0][2]
+
+
+def _hold_the_run_lock(tmp_path):
+    import os
+
+    from factory.run_lock import acquire_run_lock
+
+    return acquire_run_lock(
+        make_settings(tmp_path).state_dir / "run.lock", env={}, command="run", now="08:00"
+    ), os
+
+
+def test_a_run_while_another_holds_the_lock_stops_quietly(monkeypatch, capsys, tmp_path):
+    import factory.main as main_module
+
+    fd, os = _hold_the_run_lock(tmp_path)
+    notifier = RecordingNotifier()
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+    monkeypatch.setattr(main_module, "_build_notifier", lambda settings: notifier)
+    monkeypatch.setattr(main_module, "_start", lambda *a: pytest.fail("no self-update"))
+    monkeypatch.setattr(main_module, "_build_factory", lambda *a, **k: pytest.fail("no run"))
+
+    assert main_module.main([]) == 0
+    assert main_module.main(["preflight"]) == 1
+
+    err = capsys.readouterr().err
+    assert "another factory run is in progress" in err and "run since 08:00" in err
+    assert notifier.run_failed == []
+    os.close(fd)
+
+
+def test_a_run_takes_the_lock_before_the_self_update(monkeypatch, tmp_path):
+    import os
+
+    import factory.main as main_module
+    from factory.run_lock import LOCK_ENV, RunLocked, acquire_run_lock
+
+    seen = []
+
+    def start(settings, notifier):
+        with pytest.raises(RunLocked):
+            acquire_run_lock(settings.state_dir / "run.lock", env={}, command="preflight")
+        seen.append("locked")
+        return "abc1234", 0
+
+    monkeypatch.setattr(
+        main_module.Settings, "from_env", classmethod(lambda cls: make_settings(tmp_path))
+    )
+    monkeypatch.setattr(main_module, "_build_notifier", lambda settings: RecordingNotifier())
+    monkeypatch.setattr(main_module, "_start", start)
+
+    assert main_module.main([]) == 0
+    assert seen == ["locked"]
+    os.close(int(os.environ[LOCK_ENV]))
