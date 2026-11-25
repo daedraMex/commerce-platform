@@ -12,6 +12,7 @@ from tests.api.helpers import assert_problem_details
 pytestmark = pytest.mark.django_db
 
 STAFF_PRODUCTS_URL = "/api/v1/staff/products/"
+STAFF_PRODUCT_DETAIL_URL = "/api/v1/staff/products/{id}/"
 
 SIZE_OPTION = [
     {
@@ -58,6 +59,14 @@ def get_products(client, user, slug="home", **params):
     return client.get(
         STAFF_PRODUCTS_URL,
         params,
+        HTTP_AUTHORIZATION=bearer(user),
+        HTTP_X_STORE=slug,
+    )
+
+
+def get_product(client, user, product_id, slug="home"):
+    return client.get(
+        STAFF_PRODUCT_DETAIL_URL.format(id=product_id),
         HTTP_AUTHORIZATION=bearer(user),
         HTTP_X_STORE=slug,
     )
@@ -335,3 +344,95 @@ def test_staff_products_are_paginated(client, home, user):
     assert body["count"] == 3
     assert body["next"] is not None
     assert [item["slug"] for item in body["results"]] == ["product-0", "product-1"]
+
+
+def test_staff_product_detail_returns_the_same_shape_as_a_list_item(
+    client, home, user, media_base_url
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home, name="Frazada Térmica", slug="frazada-termica")
+    add_image(
+        product,
+        home,
+        role=ProductMedia.Role.MAIN,
+        key="stores/1/media/main.jpg",
+        content_hash="main",
+    )
+
+    detail = get_product(client, user, product.id)
+    listing = get_products(client, user, "home")
+
+    assert detail.status_code == 200
+    assert detail.json() == listing.json()["results"][0]
+    assert detail.json() == {
+        "id": product.id,
+        "name": "Frazada Térmica",
+        "slug": "frazada-termica",
+        "category": {"name": product.category.name, "slug": product.category.slug},
+        "needs_main_image": False,
+        "main_image": {
+            "url": "https://media.example.com/stores/1/media/main.jpg",
+            "thumbnail_url": (
+                "https://media.example.com/stores/1/media/renditions/main-320w-v1.webp"
+            ),
+            "medium_url": ("https://media.example.com/stores/1/media/renditions/main-800w-v1.webp"),
+            "role": "main",
+            "position": 1,
+            "alt_text": "A blanket",
+            "width": 800,
+            "height": 600,
+            "variant": None,
+        },
+    }
+
+
+def test_staff_product_detail_returns_404_for_another_stores_product_without_leaking(
+    client, home, anime, user
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    other = make_product(anime, name="Secret Anime Product", slug="secret-anime-product")
+
+    response = get_product(client, user, other.id, "home")
+
+    assert_problem_details(response, status=404, code="not_found")
+    assert "Secret Anime Product" not in response.content.decode()
+    assert "secret-anime-product" not in response.content.decode()
+
+
+def test_staff_product_detail_returns_404_for_an_inactive_product(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home, name="Retired Product", slug="retired-product", is_active=False)
+
+    response = get_product(client, user, product.id)
+
+    assert_problem_details(response, status=404, code="not_found")
+    assert "Retired Product" not in response.content.decode()
+
+
+def test_staff_product_detail_returns_404_for_an_unknown_id(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+
+    response = get_product(client, user, 999999)
+
+    assert_problem_details(response, status=404, code="not_found")
+
+
+def test_staff_product_detail_requires_the_store_header(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+
+    response = client.get(
+        STAFF_PRODUCT_DETAIL_URL.format(id=product.id),
+        HTTP_AUTHORIZATION=bearer(user),
+    )
+
+    assert_problem_details(response, status=400, code="store_header_missing")
+
+
+def test_staff_product_detail_requires_catalog_manage(client, home, user):
+    grant_membership(user=user, store=home, role_name="warehouse")
+    product = make_product(home)
+
+    response = get_product(client, user, product.id)
+
+    assert_problem_details(response, status=403, code="permission_denied")
