@@ -205,3 +205,11 @@ def test_the_overlay_points_to_the_architecture_map_with_its_condition():
     assert "read `docs/architecture.md` before you change code" in text
     assert "more than one module" in text
     assert "Otherwise skip it." in text
+
+
+def test_the_overlay_tells_the_agent_to_keep_working_while_a_check_fails():
+    text = PROMPT_OVERLAY.read_text()
+
+    assert "Do not end your turn while a check you ran is failing" in text
+    assert "A failed command or test is a reason to keep" in text
+    assert "or when rule 4 applies" in text
