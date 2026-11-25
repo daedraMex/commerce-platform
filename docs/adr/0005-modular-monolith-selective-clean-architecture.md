@@ -1,5 +1,9 @@
+---
+status: accepted, amended on 2026-11-25 (#148)
+---
+
 # Modular monolith, clean architecture only where there are business rules
 
 The backend is one deployable made of modules (one Django app per module) that talk to each other only through services or ports, never by writing another module's models. Clean architecture (domain, application, infrastructure, interfaces) is applied only to modules with business rules: inventory, orders, payments, photos and agents. CRUD-only modules (accounts, stores, catalog) use plain Django, because the layering costs more than it returns where there are no rules to protect.
 
-Amended on 2026-11-25 (#148): `photos` has business rules (the photo submission states, ADR-0028 and ADR-0030), so it follows clean architecture. The catalog stays plain Django, and its interface for other modules is `apps.catalog.services` (commands and records, pure Python), `apps.catalog.rules` (pure rules) and the public URL builders `media_url` and `rendition_url` in `apps.catalog.media`. Other modules import nothing else from the catalog; only the composition root in `config/` wires its repositories (ADR-0022). `backend/tests/architecture/test_catalog_interface.py` enforces this.
+Amended on 2026-11-25 (#148): `photos` has business rules (the photo submission states, ADR-0028 and ADR-0030), so it follows clean architecture. The catalog stays plain Django, and its interface for other modules is `apps.catalog.services` (commands and records, pure Python), `apps.catalog.rules` (pure rules) and the public URL builders `media_url` and `rendition_url` in `apps.catalog.media`. Other modules import nothing else from the catalog, except that their `models.py` (foreign keys) and `admin.py` (inlines) may name its models, as for every module; only the composition root in `config/` wires its repositories (ADR-0022). `backend/tests/architecture/test_catalog_interface.py` enforces this.

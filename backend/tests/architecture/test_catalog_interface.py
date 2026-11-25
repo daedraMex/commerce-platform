@@ -2,8 +2,11 @@
 
 The interface is ``apps.catalog.services`` (commands and records), ``apps.catalog.rules``
 (pure rules) and the public URL builders ``media_url`` and ``rendition_url`` from
-``apps.catalog.media``. The composition root in ``config/`` may wire the catalog's
-repositories; it is not under ``apps/``.
+``apps.catalog.media``, imported by name. Out of scope, as in test_module_boundaries.py:
+another module's ``models.py`` (foreign keys) and ``admin.py`` (inlines), the
+composition root in ``config/`` (it wires the catalog's repositories) and tests.
+Accepted: dynamic imports (``importlib.import_module``, ``__import__``) are not seen;
+nothing in ``apps/`` loads modules that way.
 """
 
 import ast
@@ -60,9 +63,17 @@ def catalog_interface_violations(tree):
     return sorted(set(found))
 
 
+# Foreign keys and admin inlines may name another module's models (test_module_boundaries.py).
+ALLOWED_FILE_NAMES = {"models.py", "admin.py"}
+
+
 def _outside_catalog():
     catalog_dir = APPS_DIR / "catalog"
-    return [path for path in source_files() if catalog_dir not in path.parents]
+    return [
+        path
+        for path in source_files()
+        if catalog_dir not in path.parents and path.name not in ALLOWED_FILE_NAMES
+    ]
 
 
 def test_other_modules_use_only_the_catalog_interface():
@@ -73,7 +84,9 @@ def test_other_modules_use_only_the_catalog_interface():
     ]
 
     assert violations == [], (
-        "Use apps.catalog.services, apps.catalog.rules or the media URL builders (ADR-0005)."
+        "Use apps.catalog.services, apps.catalog.rules, or import media_url and "
+        "rendition_url by name from apps.catalog.media (ADR-0005). Only config/ "
+        "wires the catalog's repositories."
     )
 
 
@@ -85,6 +98,9 @@ def test_the_guard_catches_every_way_around_the_interface():
         "import apps.catalog.views\n"
         "import apps.catalog.services\n"
         "apps.catalog.models.Product\n"
+        "import apps.catalog.models as m\n"
+        "from apps.catalog import media\n"
+        "media.store_media\n"
     )
 
     assert catalog_interface_violations(tree) == [
@@ -93,6 +109,9 @@ def test_the_guard_catches_every_way_around_the_interface():
         (3, "apps.catalog.media.store_media"),
         (4, "apps.catalog.views"),
         (6, "apps.catalog.models.Product"),
+        (7, "apps.catalog.models"),
+        (8, "apps.catalog.media"),
+        (9, "apps.catalog.media.store_media"),
     ]
 
 
