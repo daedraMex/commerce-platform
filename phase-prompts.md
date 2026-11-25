@@ -34,7 +34,7 @@ Decisions ALREADY TAKEN (do not reopen them; record each one as an ADR in docs/a
    Transfers between stores are an outbound and an inbound movement.
 4. Python 3.12 and Django 5.2 LTS, Django REST Framework as a thin layer.
 5. Modular monolith; clean architecture only in modules with business rules
-   (inventory, orders, payments, agents).
+   (inventory, orders, payments, photos, agents).
 6. Development workflow: OpenCode with DeepSeek, Matt Pocock skills in the repo,
    AGENTS.md as the single source of instructions; Claude Code plans critical
    phases and reviews PRs. No Gentle-AI SDD/ODD flows in this repo.

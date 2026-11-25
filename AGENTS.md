@@ -12,6 +12,9 @@ enabled for our own stores first (feature flags) and rolled out to others after.
 
 Read GLOSSARY.md for the domain vocabulary, ROADMAP.md for phases and the
 Definition of Done, and docs/adr/ for the decisions already taken.
+Read docs/architecture.md when a ticket touches more than one module, adds a module,
+or crosses areas (backend, console, factory): it maps the code and names the ADR that
+rules each part.
 
 ## Development workflow
 - This project uses the Matt Pocock skills workflow (skills in .agents/skills):
@@ -43,7 +46,7 @@ Definition of Done, and docs/adr/ for the decisions already taken.
 - backend/: Python 3.12 managed with uv, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
 - web/storefront/: one Next.js + TypeScript app; the store and its theme are resolved by domain (later)
 - mobile/: Kotlin Multiplatform + Compose Multiplatform, Material 3 (later, ADR-0029)
-- packages/api-client/: TypeScript client generated from the OpenAPI schema (later)
+- packages/api-client/: TypeScript client generated from the OpenAPI schema
 - Deploy: backend on a VPS with Dokploy, storefront on Vercel
 - Tickets: GitHub Issues
 
@@ -58,6 +61,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   - infrastructure/: Django ORM, repositories, external gateways
   - interfaces/: DRF views and serializers, Celery tasks
 - CRUD-only modules (accounts, stores, catalog) use plain Django.
+- Other modules use the catalog only through `apps.catalog.services`, `apps.catalog.rules`
+  and the media URL builders `media_url` and `rendition_url` (ADR-0005).
 - Modules talk to each other only through services or ports; never write another
   module's models directly.
 - DRF is a thin layer: serializers validate shape, use cases enforce rules.
@@ -70,7 +75,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   environment, so the generated schema is deterministic.
 - The media bucket holds public product media only; never store private files
   (invoices, customer documents) in it.
-- Never upload a supplier's watermarked image; every catalog image is our own photo.
+- A catalog image is our own photo or an image its supplier authorized in writing
+  (ADR-0033); it never shows a watermark.
 
 ## Stores (one business today, SaaS later)
 - Never hardcode store names; stores are data, created with the `create_store` command.
