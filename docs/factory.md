@@ -122,6 +122,28 @@ Run these once, as the admin user unless a step says `factory`.
     the repo copy and refuses a copy that is not root-owned or is group- or
     world-writable.
 
+    `factory-agent` must not schedule work that would run after the factory
+    killed its processes (#231): no crontab, no `at` job, no lingering systemd
+    user manager. Deny it once, as admin, and remove anything it already has:
+    ```bash
+    sudo sh -c 'grep -qx factory-agent /etc/cron.deny 2>/dev/null || echo factory-agent >> /etc/cron.deny'
+    sudo crontab -r -u factory-agent 2>/dev/null || true
+    if [ -x /usr/bin/at ]; then
+      sudo sh -c 'grep -qx factory-agent /etc/at.deny 2>/dev/null || echo factory-agent >> /etc/at.deny'
+      sudo chmod 644 /etc/at.deny
+      sudo atq | awk '$NF == "factory-agent" {print $1}' | xargs -r sudo atrm
+    fi
+    sudo loginctl disable-linger factory-agent
+    sudo loginctl terminate-user factory-agent 2>/dev/null || true
+    ```
+    The preflight's "verify agent scheduling" step checks what the `factory`
+    user can see: the agent is denied by `/etc/cron.allow` or `/etc/cron.deny`
+    (and by `/etc/at.allow` or `/etc/at.deny` when `at` is installed; with
+    neither `at` file only root may use it), it has no
+    `/var/lib/systemd/linger/factory-agent`, and no `systemd` user manager runs
+    as it. It cannot read other users' crontabs or the `at` queue, so jobs that
+    existed before the denial are removed by the commands above, not detected.
+
     `Defaults:factory !log_allowed` stops sudo from writing the successful
     downgrade commands to the journal, including the environment named in
     `--preserve-env` and the prompt passed to OpenCode. Denied commands are
@@ -506,6 +528,11 @@ To upgrade an existing machine to this version:
    ```
    Then run `uv run --locked factory preflight` as `factory`. Until both are
    done, every preflight stops at "verify cleanup probe".
+10. Agent scheduling (#231), as admin: run the commands under "factory-agent
+    must not schedule work" in the setup steps (deny cron and `at`, remove any
+    crontab or `at` job, disable lingering), then `uv run --locked factory
+    preflight` as `factory`. Until then every preflight stops at "verify agent
+    scheduling" with the fix for the first problem.
 
 ## Updating the factory
 

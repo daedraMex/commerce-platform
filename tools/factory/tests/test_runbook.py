@@ -224,3 +224,14 @@ def test_runbook_installs_the_root_owned_cleanup_probe():
     migration = text.split("## Migrating an existing machine", 1)[1].split("\n## ", 1)[0]
     assert "NOSETENV: /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*" in migration
     assert "verify cleanup probe" in migration
+
+
+def test_runbook_denies_the_agent_cron_at_and_lingering():
+    text = RUNBOOK.read_text()
+
+    assert "echo factory-agent >> /etc/cron.deny" in text
+    assert "sudo crontab -r -u factory-agent" in text
+    assert "echo factory-agent >> /etc/at.deny" in text
+    assert "sudo loginctl disable-linger factory-agent" in text
+    migration = text.split("## Migrating an existing machine", 1)[1].split("\n## ", 1)[0]
+    assert "verify agent\n    scheduling" in migration or "verify agent scheduling" in migration

@@ -14,6 +14,7 @@ import time
 from collections.abc import Callable
 
 from .areas import AREAS
+from .agent_scheduling import verify_agent_cannot_schedule
 from .cleanup_probe import verify_cleanup_probe
 from .config import Settings
 from .credentials import TokenProvider
@@ -73,6 +74,7 @@ class Preflight:
         verify_git_version_fn: Callable[[], None] = verify_git_version,
         verify_sudoers_logging_fn: Callable[[], None] = verify_sudoers_logging,
         verify_cleanup_probe_fn: Callable[[], None] | None = None,
+        verify_agent_scheduling_fn: Callable[[str], None] | None = None,
         runner=None,
         model_checks: ModelChecks | None = None,
         recheck_models: bool = False,
@@ -86,6 +88,7 @@ class Preflight:
         self._verify_isolation = verify_isolation_fn
         self._verify_git_version = verify_git_version_fn
         self._verify_sudoers_logging = verify_sudoers_logging_fn
+        self._verify_agent_scheduling = verify_agent_scheduling_fn or verify_agent_cannot_schedule
         self._verify_cleanup_probe = verify_cleanup_probe_fn or (
             lambda: verify_cleanup_probe(
                 CLEANUP_PROBE_PATH, settings.repo_dir / CLEANUP_PROBE_REPO_RELATIVE
@@ -141,6 +144,10 @@ class Preflight:
 
             step = "verify cleanup probe"
             self._verify_cleanup_probe()
+
+            if settings_agent := self.settings.agent_user:
+                step = "verify agent scheduling"
+                self._verify_agent_scheduling(settings_agent)
 
             step = "remove preflight leftovers"
             self._remove_preflight_leftovers()
