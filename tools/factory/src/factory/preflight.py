@@ -13,8 +13,8 @@ import shutil
 import time
 from collections.abc import Callable
 
-from .areas import AREAS
 from .agent_scheduling import verify_agent_cannot_schedule
+from .areas import AREAS
 from .cleanup_probe import verify_cleanup_probe
 from .config import Settings
 from .credentials import TokenProvider

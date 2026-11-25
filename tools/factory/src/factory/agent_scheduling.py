@@ -59,26 +59,36 @@ def verify_agent_cannot_schedule(
     raise SchedulingError(message)
 
 
-def _names(path: Path) -> set[str] | str:
-    """The user names a cron/at list holds, or the problem reading it."""
+def _names(path: Path, agent: str) -> set[str] | str:
+    """The names a cron/at list holds, matched as cron and at match them, or the problem.
+
+    Both compare each whole line, without trimming spaces or reading comments, so
+    ``factory-agent `` or ``factory-agent\\r`` does not deny the agent. Such a line
+    is reported instead of being read as a denial.
+    """
     try:
-        text = path.read_text()
+        # Bytes, not text: read_text would turn a stray \r into a line break.
+        text = path.read_bytes().decode(errors="replace")
     except OSError:
         return f"cannot read {path}; fix: sudo chmod 644 {path}"
-    return {line.strip() for line in text.splitlines() if line.strip() and not line.startswith("#")}
+    lines = text.split("\n")
+    for line in lines:
+        if line != agent and line.strip() == agent:
+            return f"{path} has {agent} with extra spaces; fix: write it alone on its line"
+    return set(lines)
 
 
 def _listed_rule(agent, allow: Path, deny: Path, *, neither_allows: bool, tool: str):
     """Debian's rule: an allow list decides alone; else a deny list; else the default."""
     if allow.exists():
-        names = _names(allow)
+        names = _names(allow, agent)
         if isinstance(names, str):
             return f"{tool}: {names}"
         if agent in names:
             return f"{tool}: listed in {allow}; fix: remove it from {allow}"
         return None
     if deny.exists():
-        names = _names(deny)
+        names = _names(deny, agent)
         if isinstance(names, str):
             return f"{tool}: {names}"
         if agent not in names:

@@ -91,14 +91,14 @@ def test_at_deny_without_the_agent_fails(tmp_path):
 
 def test_an_unreadable_list_fails_with_the_fix(tmp_path, monkeypatch):
     paths = _safe(tmp_path)
-    original = type(paths.at_deny).read_text
+    original = type(paths.at_deny).read_bytes
 
     def unreadable(self, *args, **kwargs):
         if self == paths.at_deny:
             raise PermissionError(13, "Permission denied")
         return original(self, *args, **kwargs)
 
-    monkeypatch.setattr(type(paths.at_deny), "read_text", unreadable)
+    monkeypatch.setattr(type(paths.at_deny), "read_bytes", unreadable)
 
     with pytest.raises(SchedulingError, match=f"cannot read {paths.at_deny}") as excinfo:
         verify_agent_cannot_schedule(AGENT, paths, run=_no_manager)
@@ -142,3 +142,12 @@ def test_every_problem_is_named_and_the_message_stays_short(tmp_path):
     assert message.startswith("factory-agent can schedule work: cron")
     assert "3 problems" in message
     assert len("verify agent scheduling: " + message) <= MAX_ERROR_CHARS
+
+
+@pytest.mark.parametrize("line", ["factory-agent ", " factory-agent", "factory-agent\r"])
+def test_a_deny_line_cron_would_not_match_is_reported(tmp_path, line):
+    paths = _safe(tmp_path)
+    paths.cron_deny.write_text(f"daemon\n{line}\n")
+
+    with pytest.raises(SchedulingError, match="extra spaces"):
+        verify_agent_cannot_schedule(AGENT, paths, run=_no_manager)
