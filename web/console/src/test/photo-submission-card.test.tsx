@@ -122,4 +122,63 @@ describe("PhotoSubmissionCard", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Descartar" })).toBeInTheDocument();
   });
+
+  it("offers redo on a failed photo and shows the remaining redos", () => {
+    render(
+      card(
+        submission({
+          status: "failed",
+          failure_code: "quad_self_intersecting",
+          redos: 2,
+          redos_remaining: 3,
+        }),
+      ),
+    );
+
+    const redo = screen.getByRole("button", { name: "Rehacer" });
+    expect(redo).toBeEnabled();
+    expect(screen.getByTestId("redos-remaining")).toHaveTextContent(
+      "Puedes rehacerla 3 veces más",
+    );
+  });
+
+  it("shows the remaining redos while a ready photo can be redone", () => {
+    render(card(submission({ redos: 4, redos_remaining: 1 })));
+
+    expect(screen.getByRole("button", { name: "Rehacer" })).toBeEnabled();
+    expect(screen.getByTestId("redos-remaining")).toHaveTextContent(
+      "Puedes rehacerla 1 vez más",
+    );
+  });
+
+  it("disables redo and explains the photo must be replaced when no redos are left", () => {
+    render(
+      card(
+        submission({
+          status: "failed",
+          redos: 5,
+          redos_remaining: 0,
+        }),
+      ),
+    );
+
+    expect(screen.getByRole("button", { name: "Rehacer" })).toBeDisabled();
+    expect(screen.getByTestId("redos-remaining")).toHaveTextContent(
+      "Ya no puedes rehacer esta foto. Descártala y toma una nueva.",
+    );
+  });
+
+  it.each([
+    ["applied", { applied_at: "2026-11-12T09:32:00Z" }],
+    ["discarded", { discarded_at: "2026-11-12T09:32:00Z" }],
+    ["uploaded", { status: "uploaded" }],
+    ["processing", { status: "processing" }],
+  ])("does not offer redo for a %s photo", (_label, overrides) => {
+    render(card(submission(overrides)));
+
+    expect(
+      screen.queryByRole("button", { name: "Rehacer" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId("redos-remaining")).not.toBeInTheDocument();
+  });
 });

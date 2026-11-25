@@ -170,6 +170,7 @@ export function IndividualPhotoFlow({
     submission_cannot_apply: t("errorCannotApply"),
     submission_cannot_remove: t("errorCannotRemove"),
     submission_cannot_redo: t("errorCannotRedo"),
+    submission_redo_exhausted: t("errorRedoExhausted"),
     submission_cannot_start_processing: t("errorCannotRetry"),
     submission_attempts_exhausted: t("errorAttemptsExhausted"),
     submission_cannot_discard: t("errorCannotDiscard"),

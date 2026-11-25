@@ -532,7 +532,7 @@ export const handlers = [
     },
   ),
 
-  http.post("*/api/v1/staff/photos/", async ({ request }) => {
+  http.post(/\/api\/v1\/staff\/photos\/?$/, async ({ request }) => {
     if (!authorized(request)) {
       return problem(
         401,
@@ -811,7 +811,7 @@ export const handlers = [
     );
   }),
 
-  http.post("*/api/v1/staff/photos/:id/redo/", async ({ request, params }) => {
+  http.post("*/api/v1/staff/photos/:id/redo", async ({ request, params }) => {
     if (!authorized(request)) {
       return problem(
         401,
@@ -829,14 +829,21 @@ export const handlers = [
       );
     }
     if (
-      submission.status !== "ready" ||
+      (submission.status !== "ready" && submission.status !== "failed") ||
       submission.applied_at ||
       submission.discarded_at
     ) {
       return photoProblem(
         409,
         "submission_cannot_redo",
-        "Only a ready photo can be redone.",
+        "Only a ready or failed photo can be redone.",
+      );
+    }
+    if (submission.redos >= 5) {
+      return photoProblem(
+        409,
+        "submission_redo_exhausted",
+        "This submission already used all its redos.",
       );
     }
 
@@ -854,6 +861,10 @@ export const handlers = [
         status: "processing",
         corners: body.corners ?? submission.corners,
         crop: body.crop ?? submission.crop,
+        redos: submission.redos + 1,
+        redos_remaining: Math.max(0, submission.redos_remaining - 1),
+        failure_code: "",
+        failure_message: "",
         result: null,
         updated_at: new Date().toISOString(),
         version: submission.version + 1,
