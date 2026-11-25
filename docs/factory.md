@@ -528,7 +528,12 @@ testing a branch on the machine); then update by hand with the same commands.
   PR's link lines before its first heading. A `Part of #n` in the summary
   below is not a link. A parent holds only the contracts its own body
   declares, and epics declare none. If GitHub's list cannot be read, the run
-  stops instead of guessing.
+  stops instead of guessing: a preflight that aborts at "list tickets" with a
+  GraphQL error usually means an open PR closes an issue in a repository
+  `xolo-bot` cannot read, so edit that PR's closing line. GitHub links closing
+  keywords only on PRs into `main`, so a PR into another branch holds nothing;
+  never stack branches. A review fix takes its ticket from its `nf/<n>-` branch,
+  not from the body.
 - The conflict check trusts the ticket's **Contracts** section, so a new ticket's
   PR is also checked against its diff: every `## <module>.<name>` section of
   `docs/contracts/` that the change edits but the ticket does not declare as

@@ -10,9 +10,8 @@ from .reviews import CHANGES_REQUESTED, ReviewComment, ReviewFix
 from .shell import CommandResult, RunCommand, run_command
 from .tickets import Contracts, Ticket, parse_blocked_by, parse_contracts
 
-_CLOSES_RE = re.compile(r"(?:Closes|Part of)\s+#(\d+)", re.IGNORECASE)
 # "Part of #a, #b" in a PR's link lines: the text before its first heading (#176).
-_PART_OF_RE = re.compile(r"Part of\s+(#\d+(?:\s*(?:,|and)\s*#\d+)*)", re.IGNORECASE)
+_PART_OF_RE = re.compile(r"\bPart of\s+(#\d+(?:\s*(?:,|and)\s*#\d+)*)", re.IGNORECASE)
 _HEADING_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
 
 
@@ -219,7 +218,7 @@ class GitHub:
                 "--limit",
                 "1000",
                 "--json",
-                "number,headRefName,author,body",
+                "number,headRefName,author",
             ],
             cwd="/",
             timeout=120,
@@ -248,7 +247,8 @@ class GitHub:
                 continue
             if _commit_after(detail.get("commits") or [], submitted_at):
                 continue
-            ticket_number = _ticket_number(pr.get("body", "") or "")
+            # The branch names the ticket, as for the push guard; the body may not (#176).
+            ticket_number = _branch_ticket_number(branch, branch_prefix)
             if ticket_number is None:
                 continue
             ticket = self.get_ticket(ticket_number, token)
@@ -811,8 +811,8 @@ def _commit_after(commits: list[dict], review_time: datetime) -> bool:
     return max(times) > review_time
 
 
-def _ticket_number(pr_body: str) -> int | None:
-    match = _CLOSES_RE.search(pr_body)
+def _branch_ticket_number(branch: str, branch_prefix: str) -> int | None:
+    match = re.match(rf"{re.escape(branch_prefix)}(\d+)-", branch)
     return int(match.group(1)) if match else None
 
 

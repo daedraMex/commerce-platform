@@ -922,3 +922,44 @@ def test_an_open_pr_without_readable_closing_references_fails_closed(pr):
 
     with pytest.raises(GitHubError, match="closingIssuesReferences"):
         GitHub(REPO, run=gh).list_tickets("TOKEN")
+
+
+def test_a_review_fix_takes_its_ticket_from_the_branch_not_the_body():
+    run = FakeGh(
+        prs=[_pr(101, branch="nf/7-ticket-7", body="Part of #79. Closes #7")],
+        pr_details={
+            101: {
+                "reviews": [_review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z")],
+                "commits": [_commit("xolo-bot[bot]", "2026-11-10T09:00:00Z")],
+            }
+        },
+        issue=_issue(7),
+    )
+
+    (fix,) = GitHub(REPO, run=run).list_review_fixes(
+        author="xolo-bot", owner="daedraMex", token="TOKEN"
+    )
+
+    assert fix.ticket.number == 7
+    viewed = [argv[3] for argv, _cwd, _env in run.calls if argv[:3] == ["gh", "issue", "view"]]
+    assert viewed == ["7"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Closes #156. Part of #79.",
+        "Closes #156.\r\nPart of #79.\r\n\r\n## Summary\r\n\r\nPart of #136.\r\n",
+        "Closes #156.\n#99 is related.\nPart of #79.\n\n## Summary\n\nPart of #136.\n",
+    ],
+)
+def test_part_of_link_lines_without_a_heading_with_crlf_or_a_number_line(body):
+    prs = [_open_pr(175, body, closes=(156,))]
+
+    assert _linked(prs, 156, 79, 136) == {156, 79}
+
+
+def test_part_of_needs_a_word_boundary():
+    prs = [_open_pr(175, "Counterpart of #79.\n\n## Summary\n", closes=())]
+
+    assert _linked(prs, 79) == set()
