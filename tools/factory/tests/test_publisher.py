@@ -74,3 +74,21 @@ def test_a_deps_ticket_may_not_change_a_manifest_beyond_dependencies():
 def test_the_push_target_is_asserted_after_the_guard():
     with pytest.raises(Exception, match="nf/8"):
         _guard(Git(files=("backend/apps/x.py",)), branch="nf/8-other")
+
+
+def test_before_scope_runs_after_the_protected_check_and_returns_its_value():
+    order = []
+    git = Git(files=("backend/apps/x.py",))
+
+    guarded = Publisher(git=git, github=None, step_budget=3).guard(
+        TICKET,
+        "/w",
+        branch="nf/7-ticket-7",
+        message="m",
+        since=None,
+        empty_check="e",
+        before_scope=lambda: order.append("mint") or "TOKEN",
+    )
+
+    assert guarded.token == "TOKEN" and order == ["mint"]
+    assert _guard(Git(files=(".github/x.yml",))).token is None

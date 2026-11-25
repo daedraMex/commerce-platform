@@ -231,7 +231,7 @@ class Factory:
 
         Listing failures are not fatal: review fixes are skipped for this run
         while the normal ticket flow continues. GitHub being unreachable is
-        detected earlier, in ``_run_limits``.
+        detected earlier, by ``LimitGate.limits``.
         """
         attempted = self.review_attempts.attempted_ids()
         try:
@@ -538,21 +538,23 @@ class Factory:
                 worktree=worktree,
             )
 
-        guarded = self.publisher.guard(
+        publisher = self.publisher
+        guarded = publisher.guard(
             ticket,
             worktree,
             branch=branch,
             message=f"feat: implement #{ticket.number} ({ticket.title})",
             since=None,
             empty_check="no changes made for the ticket",
+            before_scope=lambda: self.token_provider.mint(self.settings.repo),
         )
         if guarded.failing_check is not None:
             return stuck(guarded.failing_check)
-        token = self.token_provider.mint(self.settings.repo)
+        token = guarded.token
         if self._closed_during_run(ticket, token):
             return TicketResult(ticket=ticket, ok=False, closed=True)
         diff = guarded.diff
-        pr_number = self.publisher.open_pr(
+        pr_number = publisher.open_pr(
             ticket,
             branch=branch,
             worktree=worktree,
@@ -566,7 +568,7 @@ class Factory:
             skipped_areas=skipped_areas,
             check_output=check_output,
             review_lines=review_lines,
-            undeclared_contracts=self._undeclared_contracts_for_risk(ticket, worktree),
+            undeclared_contracts=lambda: self._undeclared_contracts_for_risk(ticket, worktree),
         )
         if pr_number is None:
             return stuck(_orphan_branch_check(branch))

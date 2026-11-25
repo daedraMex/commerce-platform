@@ -61,4 +61,5 @@ def test_git_is_a_repo_whose_checks_read_its_own_changed_files(tmp_path):
     assert isinstance(git, GitRepo)
     assert isinstance(git.checks, AreaChecks)
     assert isinstance(git.cleanup, WorktreeCleanup)
-    assert git.checks._changed_files == git.changed_files
+    git.changed_files = lambda worktree: ["web/console/x.tsx"]
+    assert git.checks._changed_files(tmp_path) == ["web/console/x.tsx"]

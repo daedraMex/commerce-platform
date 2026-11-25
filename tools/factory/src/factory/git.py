@@ -88,7 +88,8 @@ class Git(GitRepo):
         super().__init__(run, bot_user_id=bot_user_id)
         self.checks = AreaChecks(
             run,
-            changed_files=self.changed_files,
+            # Looked up per call, as when check was a Git method.
+            changed_files=lambda worktree: self.changed_files(worktree),
             agent_user=agent_user,
             agent_home=agent_home,
             base_env=base_env if base_env is not None else dict(os.environ),

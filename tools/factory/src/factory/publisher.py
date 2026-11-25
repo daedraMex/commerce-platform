@@ -8,6 +8,7 @@ side effects and returns what happened; the factory reports it.
 from __future__ import annotations
 
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -27,6 +28,7 @@ class Guarded:
 
     diff: DiffStats
     failing_check: str | None = None
+    token: str | None = None
 
 
 def allows_dependencies(ticket: Ticket) -> bool:
@@ -48,28 +50,34 @@ class Publisher:
         message: str,
         since: str | None,
         empty_check: str,
+        before_scope: Callable[[], str] | None = None,
     ) -> Guarded:
         """Commit everything, then refuse an empty, protected or out-of-scope change.
 
         commit_all's result decides nothing: the agent may have committed on its
         own (commit_all then has nothing left). The diff since ``since`` (origin/main
-        when None) decides (#137). The push target is asserted last, before any push.
+        when None) decides (#137). ``before_scope`` runs between the protected-path
+        and the dependency-scope checks (a new ticket mints its token there) and its
+        value comes back as ``token``. The push target is asserted last.
         """
         self.git.commit_all(worktree, message)
-        diff = (
-            self.git.diff_stats(worktree, since=since) if since else self.git.diff_stats(worktree)
-        )
+        if since is None:
+            diff = self.git.diff_stats(worktree)
+        else:
+            diff = self.git.diff_stats(worktree, since=since)
         if not diff.files:
             return Guarded(diff, empty_check)
         if touches_protected_paths(
             (f.path for f in diff.files), allow_dependencies=allows_dependencies(ticket)
         ):
             return Guarded(diff, "protected path changed")
-        violation = self.dependency_scope_violation(ticket, worktree, diff, since or MAIN_BASE)
+        token = before_scope() if before_scope is not None else None
+        base = MAIN_BASE if since is None else since
+        violation = self.dependency_scope_violation(ticket, worktree, diff, base)
         if violation is not None:
-            return Guarded(diff, violation)
+            return Guarded(diff, violation, token)
         assert_push_target(branch, ticket)
-        return Guarded(diff)
+        return Guarded(diff, token=token)
 
     def dependency_scope_violation(
         self, ticket: Ticket, worktree: Path, diff: DiffStats, base: str
@@ -109,7 +117,7 @@ class Publisher:
         skipped_areas: tuple[Area, ...],
         check_output: str,
         review_lines: tuple[str, ...],
-        undeclared_contracts: tuple[tuple[str, str], ...],
+        undeclared_contracts: Callable[[], tuple[tuple[str, str], ...]],
     ) -> int | None:
         """Push the branch and open its PR ready for review; None when no PR opened."""
         # The checks ran on this tree before commit_all, so this commit is what they verified.
@@ -128,7 +136,8 @@ class Publisher:
             step_budget=self.step_budget,
             verified_sha=verified_sha,
             check_output=check_output,
-            undeclared_contracts=undeclared_contracts,
+            # Read after the push, as before the split.
+            undeclared_contracts=undeclared_contracts(),
         )
         try:
             pr_number = self.github.create_draft_pr(
