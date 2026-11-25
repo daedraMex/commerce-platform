@@ -16,7 +16,7 @@ from .config import Settings
 from .contract_diff import touched_contract_ids, undeclared_contracts
 from .credentials import GithubAppTokenProvider, TokenProvider
 from .decisions import DECISIONS_HEADER, extract_decisions, extract_summary
-from .diff import DiffStats, is_dependency_path, non_dependency_change, touches_protected_paths
+from .diff import touches_protected_paths
 from .git import CheckResult, Git, verify_git_version
 from .github import GitHub, GitHubError
 from .holds import LabelHolds
@@ -40,9 +40,9 @@ from .notify import (
 )
 from .outcomes import build_issue_comment
 from .pause import PauseState
-from .pr_body import build_pr_body, replace_verification, verification_section
 from .preflight import Preflight, PreflightError, short_error
 from .prompt import compose_prompt, compose_review_prompt, read_command_body
+from .publisher import Publisher, allows_dependencies
 from .review_attempts import ReviewAttemptLedger
 from .review_step import (
     REVIEW_RULES,
@@ -63,8 +63,6 @@ from .runner import OPENCODE_CONFIG_PATH, AgentRunner
 from .self_update import SelfUpdate
 from .sudoers import verify_sudoers_logging
 from .tickets import (
-    DEPS_CHANGE_LABEL,
-    MIGRATION_LABEL,
     NEEDS_DECISION_LABEL,
     Ticket,
     assert_push_target,
@@ -496,90 +494,39 @@ class Factory:
         check: CheckResult,
     ) -> TicketResult:
         ticket = fix.ticket
-        # commit_all's result decides nothing: the agent may have committed on its own
-        # (commit_all then has nothing left). The diff since the fix's base decides (#137).
-        self.git.commit_all(worktree, f"fix: address review on #{fix.pr_number}")
-        diff = self.git.diff_stats(worktree, since=base_sha)
-        if not diff.files:
-            return self._review_stuck(
+
+        def stuck(failing_check: str) -> TicketResult:
+            return self._stuck_after(
                 ticket,
+                Attempt(attempts, decisions, failing_check=failing_check),
                 model=model,
-                decisions=decisions,
                 log_path=log_path,
                 worktree=worktree,
-                open_question=None,
-                failing_check="no changes made for the review",
-                attempts=attempts,
+                skip_if_closed=False,
             )
-        if touches_protected_paths(
-            (f.path for f in diff.files), allow_dependencies=_allows_dependencies(ticket)
-        ):
-            return self._review_stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                worktree=worktree,
-                open_question=None,
-                failing_check="protected path changed",
-                attempts=attempts,
-            )
-        violation = self._dependency_scope_violation(ticket, worktree, diff, base_sha)
-        if violation is not None:
-            return self._review_stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                worktree=worktree,
-                open_question=None,
-                failing_check=violation,
-                attempts=attempts,
-            )
-        assert_push_target(fix.branch, ticket)
-        token = self.token_provider.mint(self.settings.repo)
-        # Labeled before the push: auto-merge is already on for this PR, so a failed
-        # label must leave nothing pushed (#160).
-        if any(is_dependency_path(f.path) for f in diff.files):
-            self.github.add_pr_label(fix.pr_number, DEPS_CHANGE_LABEL, token)
-        sha = self.git.head_sha(worktree)
-        # The evidence names the new commit before it is pushed: a push with a stale
-        # body would fail the Evidence check, and a failed edit leaves nothing pushed.
-        try:
-            body = self.github.pr_body(fix.pr_number, token)
-            self.github.edit_pr_body(
-                fix.pr_number,
-                replace_verification(
-                    body,
-                    verification_section(
-                        verified_sha=sha,
-                        checked_areas=check.checked_areas,
-                        skipped_areas=check.skipped_areas,
-                        steps_used=attempts,
-                        step_budget=self.settings.attempts,
-                        check_output=check.output,
-                    ),
-                ),
-                token,
-            )
-        except Exception as exc:
-            print(f"PR #{fix.pr_number} body not updated: {short_error(exc)}", file=sys.stderr)
-            return self._review_stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                worktree=worktree,
-                open_question=None,
-                failing_check=EVIDENCE_NOT_UPDATED_CHECK,
-                attempts=attempts,
-            )
-        self.git.push(worktree, fix.branch, token)
-        self.github.comment(
-            fix.pr_number,
-            f"Addressed the review in {sha}; please re-review.",
-            token,
+
+        guarded = self.publisher.guard(
+            ticket,
+            worktree,
+            branch=fix.branch,
+            message=f"fix: address review on #{fix.pr_number}",
+            since=base_sha,
+            empty_check="no changes made for the review",
         )
+        if guarded.failing_check is not None:
+            return stuck(guarded.failing_check)
+        token = self.token_provider.mint(self.settings.repo)
+        sha = self.publisher.update_review_pr(
+            pr_number=fix.pr_number,
+            branch=fix.branch,
+            worktree=worktree,
+            diff=guarded.diff,
+            token=token,
+            attempts=attempts,
+            check=check,
+        )
+        if sha is None:
+            return stuck(EVIDENCE_NOT_UPDATED_CHECK)
         info = ReviewAddressedInfo(
             pr_number=fix.pr_number,
             ticket_number=ticket.number,
@@ -609,94 +556,47 @@ class Factory:
         review_lines: tuple[str, ...] = (),
         suggested: tuple[Finding, ...] = (),
     ) -> TicketResult:
-        # commit_all's result decides nothing: the agent may have committed on its own
-        # (commit_all then has nothing left). The diff against origin/main decides.
-        self.git.commit_all(worktree, f"feat: implement #{ticket.number} ({ticket.title})")
-        diff = self.git.diff_stats(worktree)
-        if not diff.files:
-            return self._stuck(
+        def stuck(failing_check: str) -> TicketResult:
+            return self._stuck_after(
                 ticket,
+                Attempt(attempts, decisions, failing_check=failing_check),
                 model=model,
-                decisions=decisions,
                 log_path=log_path,
                 worktree=worktree,
-                open_question=None,
-                failing_check="no changes made for the ticket",
-                attempts=attempts,
             )
-        if touches_protected_paths(
-            (f.path for f in diff.files), allow_dependencies=_allows_dependencies(ticket)
-        ):
-            return self._stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                worktree=worktree,
-                open_question=None,
-                failing_check="protected path changed",
-                attempts=attempts,
-            )
+
+        guarded = self.publisher.guard(
+            ticket,
+            worktree,
+            branch=branch,
+            message=f"feat: implement #{ticket.number} ({ticket.title})",
+            since=None,
+            empty_check="no changes made for the ticket",
+        )
+        if guarded.failing_check is not None:
+            return stuck(guarded.failing_check)
         token = self.token_provider.mint(self.settings.repo)
-        violation = self._dependency_scope_violation(ticket, worktree, diff, "origin/main")
-        if violation is not None:
-            return self._stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                worktree=worktree,
-                open_question=None,
-                failing_check=violation,
-                attempts=attempts,
-            )
-        assert_push_target(branch, ticket)
         if self._closed_during_run(ticket, token):
             return TicketResult(ticket=ticket, ok=False, closed=True)
-        # The checks ran on this tree before commit_all, so this commit is what they verified.
-        verified_sha = self.git.head_sha(worktree)
-        self.git.push(worktree, branch, token)
-        summary = extract_summary(decisions) or ticket.title
-        body = build_pr_body(
-            ticket_number=ticket.number,
-            summary=summary,
+        diff = guarded.diff
+        pr_number = self.publisher.open_pr(
+            ticket,
+            branch=branch,
+            worktree=worktree,
+            diff=diff,
+            token=token,
+            summary=extract_summary(decisions) or ticket.title,
             model=model,
             decisions=extract_decisions(decisions),
+            attempts=attempts,
             checked_areas=checked_areas,
             skipped_areas=skipped_areas,
-            review_lines=review_lines,
-            diff=diff,
-            steps_used=attempts,
-            step_budget=self.settings.attempts,
-            verified_sha=verified_sha,
             check_output=check_output,
+            review_lines=review_lines,
             undeclared_contracts=self._undeclared_contracts_for_risk(ticket, worktree),
         )
-        try:
-            pr_number = self.github.create_draft_pr(
-                branch=branch, title=f"#{ticket.number}: {ticket.title}", body=body, token=token
-            )
-        except Exception as exc:
-            # The branch is already pushed. Without a PR the next run's push would be
-            # non-fast-forward, so the ticket goes stuck and the remote branch is left
-            # for a human to delete.
-            print(f"PR for {branch} was not created: {short_error(exc)}", file=sys.stderr)
-            return self._stuck(
-                ticket,
-                model=model,
-                decisions=decisions,
-                log_path=log_path,
-                worktree=worktree,
-                open_question=None,
-                failing_check=_orphan_branch_check(branch),
-                attempts=attempts,
-            )
-        if diff.migrations_changed:
-            self.github.add_pr_label(pr_number, MIGRATION_LABEL, token)
-        if any(is_dependency_path(f.path) for f in diff.files):
-            self.github.add_pr_label(pr_number, DEPS_CHANGE_LABEL, token)
-        self._mark_pr_ready(pr_number, token)
-        self._enable_auto_merge(pr_number, token)
+        if pr_number is None:
+            return stuck(_orphan_branch_check(branch))
         self._open_suggested_tickets(ticket, pr_number, suggested, token)
         info = PrReadyInfo(
             ticket_number=ticket.number,
@@ -714,6 +614,11 @@ class Factory:
         )
         self._notify(self.notifier.send_pr_ready, info)
         return TicketResult(ticket=ticket, ok=True)
+
+    @property
+    def publisher(self) -> Publisher:
+        # Built from the current git and github, which tests may swap after init.
+        return Publisher(git=self.git, github=self.github, step_budget=self.settings.attempts)
 
     def _attempt_loop(self) -> AttemptLoop:
         return AttemptLoop(
@@ -803,14 +708,6 @@ class Factory:
         self._notify(self.notifier.send_stuck, info)
         return TicketResult(ticket=ticket, ok=False)
 
-    def _review_stuck(self, ticket: Ticket, **kwargs) -> TicketResult:
-        """Report a review fix as stuck even when its ticket is closed.
-
-        The PR is still open and the owner asked for changes, so they must not
-        vanish without a comment or a Telegram message.
-        """
-        return self._stuck(ticket, skip_if_closed=False, **kwargs)
-
     def _closed_during_run(self, ticket: Ticket, token: str) -> bool:
         """A ticket its PR closed mid-run gets no comment, label or push (#194).
 
@@ -831,40 +728,6 @@ class Factory:
             file=sys.stderr,
         )
         return True
-
-    def _mark_pr_ready(self, pr_number: int, token: str) -> None:
-        """Mark the PR ready; a failure leaves it a draft and never fails the ticket."""
-        try:
-            result = self.github.mark_pr_ready(pr_number, token)
-        except Exception as exc:
-            print(
-                f"PR #{pr_number} stays a draft: {short_error(exc)}",
-                file=sys.stderr,
-            )
-            return
-        if result.exit_code != 0:
-            reason = result.stderr.strip() or result.stdout.strip() or f"exit {result.exit_code}"
-            print(
-                f"PR #{pr_number} stays a draft: {short_error(reason)}",
-                file=sys.stderr,
-            )
-
-    def _enable_auto_merge(self, pr_number: int, token: str) -> None:
-        """Ask GitHub to auto-merge; a repo setting that forbids it is not fatal."""
-        try:
-            result = self.github.enable_auto_merge(pr_number, token)
-        except Exception as exc:
-            print(
-                f"auto-merge not enabled for PR #{pr_number}: {short_error(exc)}",
-                file=sys.stderr,
-            )
-            return
-        if result.exit_code != 0:
-            reason = result.stderr.strip() or result.stdout.strip() or f"exit {result.exit_code}"
-            print(
-                f"auto-merge not enabled for PR #{pr_number}: {short_error(reason)}",
-                file=sys.stderr,
-            )
 
     def _notify(self, send, info) -> None:
         """Notifications are best effort; a delivery failure never changes the outcome."""
@@ -912,28 +775,6 @@ class Factory:
         with log_path.open("w" if fresh else "a") as log:
             log.write(header + content)
         return log_path
-
-    def _dependency_scope_violation(
-        self, ticket: Ticket, worktree: Path, diff: DiffStats, base: str
-    ) -> str | None:
-        """On a deps-change ticket, the reason a manifest changed beyond dependencies."""
-        if not _allows_dependencies(ticket):
-            return None
-        for change in diff.files:
-            if not is_dependency_path(change.path):
-                continue
-            try:
-                old = self.git.read_ref_file(worktree, base, change.path)
-            except RuntimeError:
-                old = None
-            try:
-                new = self.git.read_file(worktree, change.path)
-            except (OSError, RuntimeError):
-                new = None  # deleted by the change
-            reason = non_dependency_change(change.path, old, new)
-            if reason is not None:
-                return f"dependency file changed beyond dependencies: {reason}"
-        return None
 
     def _builder_config(self) -> str:
         """Main's builder permissions, passed inline so the repo's opencode.json cannot
@@ -1004,7 +845,7 @@ class Factory:
             # The publish guard runs again later; running it here keeps the reviewer
             # off any change to protected paths, OpenCode configs included.
             changed = tuple(self.git.review_changed_files(worktree))
-            if touches_protected_paths(changed, allow_dependencies=_allows_dependencies(ticket)):
+            if touches_protected_paths(changed, allow_dependencies=allows_dependencies(ticket)):
                 return PrePrReview.protected()
             rules = self.git.read_ref_file(self.settings.repo_dir, "origin/main", REVIEW_RULES)
             # Main's reviewer permissions, passed inline: they outrank the repo's own
@@ -1269,10 +1110,6 @@ def _log_contract_skips(tickets: list[Ticket]) -> None:
         if ticket.contract_conflicts and is_ready(replace(ticket, contract_conflicts=())):
             reasons = "; ".join(ticket.contract_conflicts)
             print(f"#{ticket.number} skipped: {reasons}", file=sys.stderr)
-
-
-def _allows_dependencies(ticket: Ticket) -> bool:
-    return DEPS_CHANGE_LABEL in ticket.labels
 
 
 if __name__ == "__main__":
