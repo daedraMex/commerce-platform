@@ -48,6 +48,7 @@ class Attempt:
 
 ComposePrompt = Callable[[Feedback], str]
 WriteLog = Callable[[int, object], None]
+LogCheck = Callable[[int, CheckResult], None]
 Review = Callable[[int, tuple[Finding, ...], float], PrePrReview]
 
 
@@ -76,6 +77,7 @@ class AttemptLoop:
         compose: ComposePrompt,
         write_log: WriteLog,
         review: Review | None = None,
+        log_check: LogCheck | None = None,
     ) -> Attempt:
         """Run up to ``attempts`` steps before the deadline.
 
@@ -112,6 +114,8 @@ class AttemptLoop:
             if result.timed_out:
                 return Attempt(made, decisions, failing_check=TIME_BUDGET_EXCEEDED)
             check = self.git.check(worktree)
+            if log_check is not None:
+                log_check(step, check)
             if not check.passed:
                 # The open review findings stay in the next prompt until a review passes.
                 feedback = Feedback(check.output, check.failed_areas, feedback.review)

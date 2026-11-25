@@ -48,13 +48,16 @@ The main clone and the worktrees live under `/srv/factory`, outside
                         # sudoers check-script and cleanup globs match; cleaned after 14 days
 
 /home/factory/          # factory:factory, mode 700
-├── logs/               # one log file per ticket run, cleaned after 14 days
-├── state/              # mode 700; pause marker and the append-only ledgers
+├── factory/            # ~/factory
+│   ├── logs/           # one log per ticket run, each check's full log per area and a failed
+│   │                   # console check's Playwright report; cleaned after 14 days
+│   ├── secrets.env     # chmod 600, see below
+│   └── agent-auth.json # chmod 600; the validated keys each run's OpenCode home gets
+├── state/              # mode 700 (FACTORY_STATE_DIR); pause marker and the append-only ledgers
 │   ├── attempts.log    # mode 600; started + outcome lines per attempt, never readable by factory-agent
 │   ├── review-attempts.log  # mode 600; review ids already attempted, never readable by factory-agent
 │   └── paused          # present only while the factory is paused
-├── secrets.env         # chmod 600, see below
-└── xolo-bot.pem        # chmod 600, see below
+└── .config/xolo-bot/private-key.pem   # chmod 600, see below
 ```
 
 ## One-time machine setup
@@ -294,7 +297,7 @@ Run these once, as the admin user unless a step says `factory`.
      identity.
    - Save the private key as a file the `factory` user owns, `chmod 600`:
      ```bash
-     install -m 600 xolo-bot.pem /home/factory/xolo-bot.pem
+     install -D -m 600 xolo-bot.pem /home/factory/.config/xolo-bot/private-key.pem
      ```
    - The factory mints a short-lived installation token on demand: one for the
      run's `gh` read calls (`list_tickets` and its blocker/PR lookups) and a
@@ -372,7 +375,7 @@ Run these once, as the admin user unless a step says `factory`.
     FACTORY_TELEGRAM_BOT_TOKEN=123456:ABC...     # from @BotFather
     FACTORY_TELEGRAM_CHAT_ID=123456789           # the one fixed chat id
     XOLO_BOT_APP_ID=123456                       # the xolo-bot App ID
-    XOLO_BOT_PRIVATE_KEY=$HOME/factory/xolo-bot.pem   # path to the private key file
+    XOLO_BOT_PRIVATE_KEY=/home/factory/.config/xolo-bot/private-key.pem   # path to the key file
     XOLO_BOT_INSTALLATION_ID=987654              # the installation on this repo
     XOLO_BOT_USER_ID=1234567                     # xolo-bot[bot] user id, for commits
     # agent isolation (the provider key is in factory-agent's own auth store):
@@ -393,7 +396,7 @@ Run these once, as the admin user unless a step says `factory`.
     # FACTORY_REPO=daedraMex/commerce-platform
     # FACTORY_REPO_DIR=/srv/factory/repo
     # FACTORY_WORKTREES_DIR=/srv/factory/worktrees
-    # FACTORY_LOGS_DIR=/home/factory/logs
+    # FACTORY_LOGS_DIR=/home/factory/factory/logs
     # FACTORY_DEPLOY_KEY=/home/factory/.ssh/commerce_deploy
     ```
     All settings are listed in `tools/factory/src/factory/config.py`. The
@@ -722,7 +725,8 @@ unreachable" as before.
   **rotate it**: re-run `sudo -u factory-agent -H /usr/bin/opencode auth login`
   for the provider key (then copy it again into `~/factory/agent-auth.json`,
   step 8), issue a new Telegram token and update `secrets.env`, or
-  regenerate the xolo-bot key and replace `xolo-bot.pem`, then restart the
+  regenerate the xolo-bot key and replace
+  `/home/factory/.config/xolo-bot/private-key.pem`, then restart the
   timer. Deleting the log line is not enough.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`,
   default 3) and a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either
@@ -947,6 +951,29 @@ merge before every review fix and the conflict, ordering and prompt tests in
   see what the agent did and why it failed. A ticket's first step starts the
   file over; its reviews and every later review fix (`=== review fix step N`)
   are appended, so the original review is still there after a fix.
+- When a check fails (#227), the run's output ends with a `Status:` line (each
+  area's exit code, or the signal that killed it, and how long it ran) and the
+  paths of its full logs. Each area writes its whole output, never truncated, to
+  `~/factory/logs/<worktree>.<n>.<area>.log`, where `<n>` counts the checks of
+  that worktree (a ticket's step 2 never overwrites step 1), for example
+  `preflight-1795586084.1.console.log` or `nf-212-slug.2.backend.log`; the
+  agent's feedback and the PR body keep only the last 4000 characters and no
+  paths; the run log gets each check's `Status:` line and log paths
+  (`=== checks after step N ===` for a ticket), and a failed preflight's Telegram
+  message names the area and its log.
+  `exit 137 (a command was killed by SIGKILL)` means a test runner was killed,
+  usually for memory, rather than a test failing; a timed-out area's log keeps
+  what it printed before the timeout. Exit 1 is also what `sudo` returns when it
+  refuses a command, so read the log before blaming a test. A failed console
+  check also keeps its Playwright traces and report in
+  `~/factory/logs/<worktree>.<n>.console-report/`. The copy opens every path
+  component without following links (a `web/console` link is refused too), keeps
+  only files and folders with the factory's modes (0700/0600), and stops each
+  report folder at 200 MB or 2000 entries; the area's log says what was copied
+  or skipped. Open the report from a checkout's
+  `web/console/`, where Playwright is installed:
+  `pnpm exec playwright show-report <report>/playwright-report` or
+  `pnpm exec playwright show-trace <trace.zip>`.
 - The agent keeps a running decision log in `DECISIONS.md` at the worktree
   root (git-ignored, never committed). It holds every choice, the rejected
   alternative, and why. If the agent could not decide safely it writes the open

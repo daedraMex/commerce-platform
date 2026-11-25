@@ -236,9 +236,7 @@ def test_preflight_failure_notifies_cleans_up_and_stops(tmp_path):
 
     assert caught.value.step == "check.sh"
     assert len(notifier.run_failed) == 1
-    assert notifier.run_failed[0].reason.startswith(
-        "preflight failed: check.sh: check.sh failed; see "
-    )
+    assert notifier.run_failed[0].reason.startswith("preflight failed: check.sh: check.sh failed: ")
     assert str(tmp_path / "logs" / "preflight-42.log") in notifier.run_failed[0].reason
     assert [call[0] for call in git.calls][-2:] == ["remove_worktree", "delete_branch"]
 

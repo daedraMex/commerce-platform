@@ -336,6 +336,7 @@ class Factory:
                 review_feedback=feedback.review,
             ),
             write_log=lambda step, result: self._write_log(ticket, result, step=step, model=model),
+            log_check=lambda step, check: self._log_check(ticket, step, check),
             review=lambda step, previous, deadline: self._pre_pr_review(
                 ticket, worktree=worktree, step=step, previous=previous, deadline=deadline
             ),
@@ -433,6 +434,7 @@ class Factory:
             write_log=lambda step, result: self._write_log(
                 ticket, result, step=step, model=model, review_fix=True
             ),
+            log_check=lambda step, check: self._log_check(ticket, step, check),
         )
         if not attempt.passed:
             return self._stuck_after(
@@ -762,6 +764,17 @@ class Factory:
             log.write(header + content)
         return log_path
 
+    def _log_check(self, ticket: Ticket, step: int, check: CheckResult) -> None:
+        """Append each check's statuses and full-log paths to the run log (#227).
+
+        The agent never sees them (it cannot read the factory's logs); the stuck
+        comment's tail and the owner do.
+        """
+        if not check.summary:
+            return
+        with self._log_path(ticket).open("a") as log:
+            log.write(f"=== checks after step {step} ===\n{check.summary}\n")
+
     def _builder_config(self) -> str:
         """Main's builder permissions, passed inline so the repo's opencode.json cannot
         override them (an OPENCODE_CONFIG file ranks below project config, #153)."""
@@ -950,6 +963,7 @@ def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> F
             agent_user=settings.agent_user,
             agent_home=settings.agent_home,
             bot_user_id=settings.github_user_id,
+            logs_dir=settings.logs_dir,
         ),
         runner=AgentRunner(
             agent_user=settings.agent_user,

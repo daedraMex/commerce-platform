@@ -3062,3 +3062,31 @@ def test_a_contract_skip_is_not_logged_when_the_ticket_is_not_ready_anyway(tmp_p
     factory.run()
 
     assert "skipped" not in capsys.readouterr().err
+
+
+def test_each_check_summary_is_appended_to_the_ticket_run_log(tmp_path):
+    from dataclasses import replace
+
+    git = FakeGit(check_passed=True, decisions=DECISIONS_DOC)
+    original = git.check
+
+    def check_with_summary(worktree, *, areas=None):
+        result = original(worktree, areas=areas)
+        if "preflight" in str(worktree):
+            return result
+        return replace(
+            result, summary="Status: backend exit 0 after 30s\nFull logs:\n- backend: /x"
+        )
+
+    git.check = check_with_summary
+    github = FakeGitHub(tickets=[make_ticket(7, labels={"ready-for-agent"})], pr_number=101)
+    factory = build_factory(
+        tmp_path, git=git, github=github, runner=FakeRunner(), notifier=RecordingNotifier()
+    )
+
+    factory.run()
+
+    log = (factory.settings.logs_dir / "7.log").read_text()
+    assert "=== checks after step 1 ===\nStatus: backend exit 0 after 30s" in log
+    # The PR body never carries the factory's paths.
+    assert "- backend: /x" not in github.created_prs[0][2]

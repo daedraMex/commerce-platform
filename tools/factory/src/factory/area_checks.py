@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import os
+import signal
 import socket
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .areas import BACKEND, Area, select_areas
+from .report_copy import copy_report
 from .runner import (
     build_check_env,
     ensure_agent_cleanup,
@@ -32,6 +35,34 @@ class CheckResult:
     failed_areas: tuple[Area, ...] = ()
     checked_areas: tuple[Area, ...] = ()
     skipped_areas: tuple[Area, ...] = ()
+    # One line per failed area: its name, how it ended and how long it took (#227).
+    failures: tuple[str, ...] = ()
+    # Every area's status and its full logs, for the run log and the owner; never fed
+    # to the agent, who cannot read the factory's logs.
+    summary: str = ""
+
+
+def describe_exit(code: int) -> str:
+    """``exit 1``, ``killed by SIGKILL``, or ``exit 137 (a command was killed by SIGKILL)``.
+
+    A negative code means the script itself died by a signal. A shell exits
+    128 + n when a command it ran died by signal n, which is how a check.sh
+    reports a test runner the kernel or a timeout killed.
+    """
+    if code < 0:
+        return f"killed by {_signal_name(-code)}"
+    if 128 < code < 128 + 65:
+        name = _signal_name(code - 128)
+        if name is not None:
+            return f"exit {code} (a command was killed by {name})"
+    return f"exit {code}"
+
+
+def _signal_name(number: int) -> str | None:
+    try:
+        return signal.Signals(number).name
+    except ValueError:
+        return None
 
 
 def port_in_use(port: int) -> bool:
@@ -59,8 +90,12 @@ class AreaChecks:
         agent_home: str | None = None,
         base_env: dict[str, str] | None = None,
         port_in_use: Callable[[int], bool] = port_in_use,
+        logs_dir: Path | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self._run = run
+        self._logs_dir = logs_dir
+        self._clock = clock
         self._changed_files = changed_files
         self._agent_user = agent_user
         self._agent_home = agent_home
@@ -87,9 +122,14 @@ class AreaChecks:
         """
         selected = select_areas(self._changed_files(worktree)) if areas is None else areas
         chunks: list[str] = []
+        failures: list[str] = []
+        statuses: list[str] = []
+        kept: list[tuple[str, Path]] = []
+        reports: list[tuple[Area, Path]] = []
         failed: list[Area] = []
         checked: list[Area] = []
         skipped: list[Area] = []
+        run = self._next_run(worktree)
         for area in selected:
             script = worktree / area.script
             label = f"{area.name} ({area.script.as_posix()})"
@@ -111,6 +151,7 @@ class AreaChecks:
             argv = [str(script)]
             if self._agent_user:
                 argv = sudo_argv(self._agent_user, argv, env)
+            started = self._clock()
             try:
                 result = self._run(
                     argv,
@@ -119,32 +160,115 @@ class AreaChecks:
                     env=env,
                     replace_env=True,
                 )
-            except CommandTimeout:
+            except CommandTimeout as exc:
                 kill_agent_processes(self._run, self._agent_user)
                 failed.append(area)
-                chunks.append(f"=== {label}: timed out after {CHECK_TIMEOUT_SECONDS}s ===")
+                status = f"timed out after {CHECK_TIMEOUT_SECONDS}s"
+                chunks.append(f"=== {label}: {status} ===")
+                failures.append(f"{area.name}: {status}")
+                statuses.append(f"{area.name} {status}")
+                # The output before the timeout is what explains a hang (#227).
+                log = self._write_log(worktree, area, run, label, status, exc.stdout, exc.stderr)
+                kept += [(area.name, log)] if log else []
+                reports.append((area, log)) if log else None
                 continue
             except BaseException:
                 # Ctrl+C or a stop: the check's agent processes never saw it (#197).
                 kill_agent_processes(self._run, self._agent_user)
                 raise
+            status = f"{describe_exit(result.exit_code)} after {round(self._clock() - started)}s"
             output = result.stdout
             if result.stderr:
                 output += ("\n" if output else "") + result.stderr
             body = output.strip()
-            chunks.append(f"=== {label} ===\n{body}" if body else f"=== {label} ===")
+            chunk = f"=== {label} ===\n{body}" if body else f"=== {label} ==="
+            statuses.append(f"{area.name} {status}")
             if result.exit_code != 0:
                 failed.append(area)
+                failures.append(f"{area.name}: {status}")
+                # Tells the agent a runner was killed rather than a test failing.
+                chunk += f"\n--- {area.name}: {status}"
+            chunks.append(chunk)
+            log = self._write_log(worktree, area, run, label, status, result.stdout, result.stderr)
+            if log:
+                kept.append((area.name, log))
+                if result.exit_code != 0:
+                    reports.append((area, log))
         # Tests and dev servers run as the agent; none may outlive the checks, and a
         # cleanup that cannot be trusted fails the run instead of passing silently.
         ensure_agent_cleanup(self._run, self._agent_user)
+        # Reports are copied only now: no agent process is left to change them.
+        for area, log in reports:
+            target = self._keep_report(worktree, area, run, log)
+            if target is not None:
+                kept.append((f"{area.name} report", target))
+        summary = ""
+        if statuses:
+            summary = "Status: " + "; ".join(statuses)
+        if kept:
+            summary += "\nFull logs:\n" + "\n".join(f"- {name}: {path}" for name, path in kept)
         return CheckResult(
             passed=not failed,
             output=truncate_check_output("\n\n".join(chunks).strip()),
             failed_areas=tuple(failed),
             checked_areas=tuple(checked),
             skipped_areas=tuple(skipped),
+            failures=tuple(failures),
+            summary=summary.strip(),
         )
+
+    def _next_run(self, worktree: Path) -> int:
+        """The next free check number for this worktree: logs are never overwritten.
+
+        Read from the logs already there, so a factory restart or tomorrow's retry of
+        the same ticket goes on counting.
+        """
+        taken = [0]
+        if self._logs_dir is not None and self._logs_dir.is_dir():
+            prefix = f"{worktree.name}."
+            for entry in self._logs_dir.iterdir():
+                rest = entry.name[len(prefix) :] if entry.name.startswith(prefix) else ""
+                number = rest.split(".", 1)[0]
+                if number.isdigit():
+                    taken.append(int(number))
+        return max(taken) + 1
+
+    def _write_log(self, worktree, area, run, label, status, stdout, stderr) -> Path | None:
+        """Write the area's full output; None when the factory keeps no logs."""
+        if self._logs_dir is None:
+            return None
+        self._logs_dir.mkdir(parents=True, exist_ok=True)
+        log = self._logs_dir / f"{worktree.name}.{run}.{area.name}.log"
+        log.write_text(
+            f"# {label}\n# {status}\n\n{stdout}" + (f"\n--- stderr ---\n{stderr}" if stderr else "")
+        )
+        return log
+
+    def _keep_report(self, worktree: Path, area: Area, run: int, log: Path) -> Path | None:
+        """Copy the area's report folders next to its log; the log says what happened.
+
+        The agent wrote these folders: ``copy_report`` never follows a link, keeps
+        only files and folders with the factory's own modes, and stops at its limits.
+        A copy that fails never fails the check.
+        """
+        target = self._logs_dir / f"{worktree.name}.{run}.{area.name}-report"
+        notes = []
+        for report in area.reports:
+            try:
+                copied = copy_report(worktree, report, target / report.name)
+            except OSError as exc:
+                notes.append(f"{report.as_posix()} not kept: {exc}")
+                continue
+            if copied is not None:
+                notes.append(f"{report.as_posix()}: {copied.describe()}")
+        if not notes:
+            return None
+        with log.open("a") as handle:
+            handle.write("\n" + "".join(f"# report {note}\n" for note in notes))
+        if not target.exists():
+            return None
+        os.utime(target)  # keep_days counts from now
+        return target
 
     def run_review_tests(self, worktree: Path, files: tuple[str, ...]) -> tuple[str, str]:
         """Run the reviewer's attack tests as the agent; return (status, output).
