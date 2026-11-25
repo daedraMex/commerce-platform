@@ -1,6 +1,10 @@
 """Retry a failed photo submission with another processing attempt."""
 
-from apps.photos.application.ports import PhotoProcessingQueue, PhotoSubmissionRepository
+from apps.photos.application.ports import (
+    PhotoProcessingQueue,
+    PhotoSubmissionRepository,
+    UnitOfWork,
+)
 from apps.photos.domain.errors import CannotStartProcessing
 from apps.photos.domain.submission import PhotoSubmission, SubmissionStatus
 from apps.shared.domain.exceptions import NotFoundError
@@ -18,10 +22,12 @@ class RetryPhoto:
         repository: PhotoSubmissionRepository,
         queue: PhotoProcessingQueue,
         authorizer: Authorizer,
+        unit_of_work: UnitOfWork,
     ):
         self._repository = repository
         self._queue = queue
         self._authorizer = authorizer
+        self._unit_of_work = unit_of_work
 
     def __call__(
         self, store: StoreReference, *, user_id: int, submission_id: int
@@ -35,6 +41,7 @@ class RetryPhoto:
             raise CannotStartProcessing("Only a failed photo can be retried.")
 
         submission.start_processing()
-        saved = self._repository.save(submission)
-        self._queue.enqueue(store, saved.id)
+        with self._unit_of_work():
+            saved = self._repository.save(submission)
+            self._queue.enqueue(store, saved.id)
         return saved

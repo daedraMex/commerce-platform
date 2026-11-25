@@ -513,6 +513,7 @@ class StaffPhotoRedoView(StoreScopedMixin, APIView):
             repository=get_photo_submission_repository(),
             queue=get_photo_processing_queue(),
             authorizer=get_authorizer(),
+            unit_of_work=get_photo_unit_of_work(),
         )(
             request.store,
             user_id=request.user.id,
@@ -554,6 +555,7 @@ class StaffPhotoRetryView(StoreScopedMixin, APIView):
             repository=get_photo_submission_repository(),
             queue=get_photo_processing_queue(),
             authorizer=get_authorizer(),
+            unit_of_work=get_photo_unit_of_work(),
         )(request.store, user_id=request.user.id, submission_id=pk)
         return Response(_action_body(request, submission))
 
