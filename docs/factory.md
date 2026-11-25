@@ -93,7 +93,7 @@ Run these once, as the admin user unless a step says `factory`.
     Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
-    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/rm -rf /srv/factory/agent-homes/*, /usr/bin/pkill -KILL -u factory-agent
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/rm -rf /srv/factory/agent-homes/*, /usr/bin/pkill -KILL -u factory-agent, /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*
     ```
 
     The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
@@ -102,6 +102,18 @@ Run these once, as the admin user unless a step says `factory`.
     match a second path after a space. The code validates every cleanup path
     itself, and only `factory` can use these rules: a sudoers glob is not a
     security boundary for `rm`.
+
+    The preflight's cleanup probe (#140) is its own root-owned script, so it
+    never rewrites a worktree's `check.sh`. Install it as admin, and again
+    whenever the preflight says the installed copy differs from the repo:
+    ```bash
+    sudo install -D -o root -g root -m 0755 /srv/factory/repo/tools/factory/scripts/cleanup-probe /usr/local/lib/factory/cleanup-probe
+    ```
+    The script accepts only one existing directory directly under
+    `/srv/factory/worktrees` (not a symlink), reads nothing from the
+    environment and creates `backend/.cleanup-probe` through a temp dir and a
+    rename. The preflight compares its SHA-256 with the repo copy and refuses a
+    copy that is not root-owned or is group- or world-writable.
 
     `Defaults:factory !log_allowed` stops sudo from writing the successful
     downgrade commands to the journal, including the environment named in
@@ -477,6 +489,16 @@ To upgrade an existing machine to this version:
    `journalctl --user -u factory.service -n 20`. Run the factory by hand with
    `uv run --locked` too (and `uv sync --locked`): plain `uv run` rewrites a
    stale `uv.lock`, and the self-update then stops on local changes.
+9. Cleanup probe script (#140), as admin: install it and add
+   `/usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*` to the end
+   of the rule in `/etc/sudoers.d/factory-agent` (the file in the setup steps):
+   ```bash
+   sudo install -D -o root -g root -m 0755 /srv/factory/repo/tools/factory/scripts/cleanup-probe /usr/local/lib/factory/cleanup-probe
+   sudo visudo -f /etc/sudoers.d/factory-agent
+   sudo visudo -c
+   ```
+   Then run `uv run --locked factory preflight` as `factory`. Until both are
+   done, every preflight stops at "verify cleanup probe".
 
 ## Updating the factory
 

@@ -37,21 +37,11 @@ BOT_COMMIT_EMAIL_DOMAIN = "users.noreply.github.com"
 RM_BIN = "/usr/bin/rm"
 CHECK_TIMEOUT_SECONDS = 1800
 REVIEW_TESTS_TIMEOUT_SECONDS = 600
-CHECK_SCRIPT_RELATIVE = Path("backend") / "scripts" / "check.sh"
 CLEANUP_PROBE_RELATIVE = Path("backend") / ".cleanup-probe"
-CLEANUP_PROBE_SCRIPT = """#!/usr/bin/env bash
-set -euo pipefail
-worktree="$(cd "$(dirname "$0")/../.." && pwd)"
-tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
-probe="$tmp/.cleanup-probe"
-mkdir -m 0770 "$probe"
-chgrp "$(id -gn)" "$probe"
-chmod 0770 "$probe"
-printf 'cleanup probe\\n' > "$probe/file"
-chmod 0644 "$probe/file"
-mv "$probe" "$worktree/backend/.cleanup-probe"
-"""
+# Root-owned copy of tools/factory/scripts/cleanup-probe; the preflight checks it
+# matches the repo copy (#140).
+CLEANUP_PROBE_PATH = Path("/usr/local/lib/factory/cleanup-probe")
+CLEANUP_PROBE_REPO_RELATIVE = Path("tools") / "factory" / "scripts" / "cleanup-probe"
 
 
 class GitIdentityError(RuntimeError):
@@ -632,31 +622,20 @@ class Git:
     def create_agent_cleanup_probe(self, worktree: Path) -> Path:
         """Create an agent-owned 0770 directory inside ``worktree``.
 
-        The allowed ``check.sh`` path is used as a one-shot trampoline: it
-        creates the probe in a temp dir (so its group is ``factory-agent``, not
-        the worktree's setgid group) and renames it into the worktree, exactly
-        like pytest's cache. This must run after the real check script.
+        The root-owned ``cleanup-probe`` script runs as the agent: it creates the
+        probe in a temp dir (so its group is ``factory-agent``, not the
+        worktree's setgid group) and renames it into the worktree, exactly like
+        pytest's cache. It never touches the worktree's check scripts (#140).
         """
         if not self._agent_user:
             raise WorktreeCleanupError(
                 "FACTORY_AGENT_USER is not set; cannot create the cleanup probe as the agent."
             )
         probe_dir = worktree / CLEANUP_PROBE_RELATIVE
-        script_path = worktree / CHECK_SCRIPT_RELATIVE
-        script_path.write_text(CLEANUP_PROBE_SCRIPT)
-        script_path.chmod(0o755)
-        env = build_check_env(
-            self._base_env,
-            agent_user=self._agent_user,
-            agent_home=self._agent_home,
-        )
-        argv = sudo_argv(self._agent_user, [str(script_path)], env)
         result = self._run(
-            argv,
-            str(script_path.parent),
+            ["sudo", "-n", "-u", self._agent_user, "--", str(CLEANUP_PROBE_PATH), str(worktree)],
+            cwd="/",
             timeout=120,
-            env=env,
-            replace_env=True,
         )
         if result.exit_code != 0:
             raise WorktreeCleanupError(
