@@ -10,7 +10,9 @@ from .reviews import CHANGES_REQUESTED, ReviewComment, ReviewFix
 from .shell import CommandResult, RunCommand, run_command
 from .tickets import Contracts, Ticket, parse_blocked_by, parse_contracts
 
-_CLOSES_RE = re.compile(r"(?:Closes|Part of)\s+#(\d+)", re.IGNORECASE)
+# "Part of #a, #b" in a PR's link lines: the text before its first heading (#176).
+_PART_OF_RE = re.compile(r"\bPart of\s+(#\d+(?:\s*(?:,|and)\s*#\d+)*)", re.IGNORECASE)
+_HEADING_RE = re.compile(r"^#{1,6}\s", re.MULTILINE)
 
 
 class GitHubError(RuntimeError):
@@ -216,7 +218,7 @@ class GitHub:
                 "--limit",
                 "1000",
                 "--json",
-                "number,headRefName,author,body",
+                "number,headRefName,author",
             ],
             cwd="/",
             timeout=120,
@@ -245,7 +247,8 @@ class GitHub:
                 continue
             if _commit_after(detail.get("commits") or [], submitted_at):
                 continue
-            ticket_number = _ticket_number(pr.get("body", "") or "")
+            # The branch names the ticket, as for the push guard; the body may not (#176).
+            ticket_number = _branch_ticket_number(branch, branch_prefix)
             if ticket_number is None:
                 continue
             ticket = self.get_ticket(ticket_number, token)
@@ -657,7 +660,13 @@ class GitHub:
         return {n for _pr, numbers in self._open_pr_tickets(token) for n in numbers}
 
     def _open_pr_tickets(self, token: str | None) -> list[tuple[int | None, list[int]]]:
-        """Every open PR (any author), mapped to the issues its body closes or is part of."""
+        """Every open PR (any author), mapped to the issues it closes or is part of.
+
+        Closed issues come from GitHub's own closing references, which cover every
+        closing keyword, every number and issues linked by hand (#176). "Part of #n"
+        counts only in the link lines before the first heading, never in the
+        summary below it. A parent holds only the contracts its own body declares.
+        """
         result = self._run(
             [
                 "gh",
@@ -670,7 +679,7 @@ class GitHub:
                 "--limit",
                 "1000",
                 "--json",
-                "number,body",
+                "number,body,closingIssuesReferences",
             ],
             cwd="/",
             timeout=120,
@@ -686,10 +695,52 @@ class GitHub:
             raise GitHubError("gh pr list returned an unexpected JSON shape")
         tickets: list[tuple[int | None, list[int]]] = []
         for obj in prs:
-            numbers = [int(match) for match in _CLOSES_RE.findall(obj.get("body", "") or "")]
+            numbers = self._closing_numbers(obj)
+            for number in _part_of_numbers(obj.get("body", "") or ""):
+                if number not in numbers:
+                    numbers.append(number)
             pr_number = obj.get("number")
             tickets.append((None if pr_number is None else int(pr_number), numbers))
         return tickets
+
+    def _closing_numbers(self, pr: dict) -> list[int]:
+        """Issue numbers in this repository that GitHub says ``pr`` closes.
+
+        A missing or malformed list fails the listing: reading it as "closes
+        nothing" would let the factory start a ticket that already has a PR.
+        """
+        refs = pr.get("closingIssuesReferences")
+        if not isinstance(refs, list):
+            raise GitHubError("gh pr list returned no closingIssuesReferences list")
+        owner, name = self.repo.split("/", 1)
+        numbers: list[int] = []
+        for ref in refs:
+            number = ref.get("number") if isinstance(ref, dict) else None
+            if not isinstance(number, int):
+                raise GitHubError(
+                    "gh pr list returned a closingIssuesReferences entry without a number"
+                )
+            repository = ref.get("repository") or {}
+            ref_owner = (repository.get("owner") or {}).get("login", "")
+            if (ref_owner.lower(), str(repository.get("name", "")).lower()) != (
+                owner.lower(),
+                name.lower(),
+            ):
+                continue
+            if number not in numbers:
+                numbers.append(number)
+        return numbers
+
+
+def _part_of_numbers(body: str) -> list[int]:
+    heading = _HEADING_RE.search(body)
+    link_lines = body[: heading.start()] if heading else body
+    numbers: list[int] = []
+    for group in _PART_OF_RE.findall(link_lines):
+        for match in re.findall(r"#(\d+)", group):
+            if int(match) not in numbers:
+                numbers.append(int(match))
+    return numbers
 
 
 def _declares(contracts: Contracts) -> bool:
@@ -760,8 +811,8 @@ def _commit_after(commits: list[dict], review_time: datetime) -> bool:
     return max(times) > review_time
 
 
-def _ticket_number(pr_body: str) -> int | None:
-    match = _CLOSES_RE.search(pr_body)
+def _branch_ticket_number(branch: str, branch_prefix: str) -> int | None:
+    match = re.match(rf"{re.escape(branch_prefix)}(\d+)-", branch)
     return int(match.group(1)) if match else None
 
 

@@ -718,6 +718,22 @@ class ContractGh:
         return CommandResult(0, "[]", "")
 
 
+def _issue_ref(number, repo=REPO):
+    owner, name = repo.split("/")
+    return {
+        "id": f"I_{number}",
+        "number": number,
+        "repository": {"id": "R_1", "name": name, "owner": {"id": "U_1", "login": owner}},
+        "url": f"https://github.com/{repo}/issues/{number}",
+    }
+
+
+def _open_pr(number, body, *, closes=(), other_repo_closes=()):
+    refs = [_issue_ref(n) for n in closes]
+    refs += [_issue_ref(n, "someone/else") for n in other_repo_closes]
+    return {"number": number, "body": body, "closingIssuesReferences": refs}
+
+
 CHANGES = "## Contracts\n\nChanges `photos.submission-states`.\n\n## Acceptance criteria\n"
 CONSUMES = "## Contracts\n\nConsumes `photos.submission-states`.\n\n## Acceptance criteria\n"
 CONSUMES_QUEUE = "## Contracts\n\nConsumes `photos.processing-queue`.\n"
@@ -735,7 +751,7 @@ def _ready(number, body):
 def test_a_ticket_whose_contract_an_open_pr_changes_carries_the_conflict():
     gh = ContractGh(
         ready=[_ready(170, CHANGES), _ready(100, CONSUMES), _ready(171, CONSUMES_QUEUE)],
-        prs=[{"number": 175, "body": "Closes #156. Part of #79."}],
+        prs=[_open_pr(175, "Closes #156. Part of #79.", closes=(156,))],
         bodies={156: CHANGES, 79: "Parent."},
     )
 
@@ -749,7 +765,7 @@ def test_a_ticket_whose_contract_an_open_pr_changes_carries_the_conflict():
 def test_two_consumers_never_conflict():
     gh = ContractGh(
         ready=[_ready(100, CONSUMES)],
-        prs=[{"number": 175, "body": "Closes #134."}],
+        prs=[_open_pr(175, "Closes #134.", closes=(134,))],
         bodies={134: CONSUMES},
     )
 
@@ -761,7 +777,7 @@ def test_two_consumers_never_conflict():
 def test_no_issue_body_is_read_when_no_ready_ticket_declares_contracts():
     gh = ContractGh(
         ready=[_ready(99, "## What to build\n\nA page.\n")],
-        prs=[{"number": 175, "body": "Closes #156."}],
+        prs=[_open_pr(175, "Closes #156.", closes=(156,))],
         bodies={156: CHANGES},
     )
 
@@ -774,7 +790,7 @@ def test_no_issue_body_is_read_when_no_ready_ticket_declares_contracts():
 def test_an_unreadable_pr_ticket_holds_only_tickets_that_declare_contracts():
     gh = ContractGh(
         ready=[_ready(170, CHANGES), _ready(99, "## What to build\n\nA page.\n")],
-        prs=[{"number": 175, "body": "Closes #156."}],
+        prs=[_open_pr(175, "Closes #156.", closes=(156,))],
         bodies={},
         failing_issue=156,
     )
@@ -825,3 +841,125 @@ def test_edit_pr_body_patches_the_pull_request():
 def test_edit_pr_body_raises_when_the_edit_fails():
     with pytest.raises(GitHubError, match="#101"):
         GitHub(REPO, run=ScriptedGh(CommandResult(1, "", "HTTP 422"))).edit_pr_body(101, "x", "tok")
+
+
+def _linked(prs, *ready_numbers):
+    gh = ContractGh(ready=[_ready(n, "A ticket.") for n in ready_numbers], prs=prs, bodies={})
+    tickets = GitHub(REPO, run=gh).list_tickets("TOKEN")
+    return {t.number for t in tickets if t.has_open_pr}
+
+
+def test_open_prs_are_listed_with_their_closing_references():
+    run = FakeGh()
+    GitHub(REPO, run=run).list_tickets("TOKEN")
+
+    argv = run.calls[1][0]
+    assert argv[:3] == ["gh", "pr", "list"]
+    assert "closingIssuesReferences" in argv[argv.index("--json") + 1].split(",")
+
+
+def test_any_closing_keyword_links_its_ticket():
+    # GitHub resolves "Fixes", "Resolves" and the rest; the factory reads its answer.
+    prs = [_open_pr(175, "Fixes #156\n\n## Summary\n", closes=(156,))]
+
+    assert _linked(prs, 156, 157) == {156}
+
+
+def test_every_closed_number_is_linked():
+    prs = [_open_pr(175, "Closes #156, #157\n\n## Summary\n", closes=(156, 157))]
+
+    assert _linked(prs, 156, 157, 158) == {156, 157}
+
+
+def test_a_closes_line_github_did_not_link_is_not_a_link():
+    prs = [_open_pr(175, "## Summary\n\nThis no longer closes #156.\n", closes=())]
+
+    assert _linked(prs, 156) == set()
+
+
+def test_part_of_in_the_link_lines_still_links_the_parent():
+    prs = [_open_pr(175, "Closes #156. Part of #79, #80.\n\n## Summary\n", closes=(156,))]
+
+    assert _linked(prs, 156, 79, 80) == {156, 79, 80}
+
+
+def test_a_stray_part_of_in_the_agents_summary_is_not_a_link():
+    body = "Closes #156\n\n## Summary\n\nPart of #136, like #170.\n"
+    prs = [_open_pr(175, body, closes=(156,))]
+
+    assert _linked(prs, 156, 136) == {156}
+
+
+def test_a_reference_to_another_repository_is_ignored():
+    prs = [_open_pr(175, "Closes someone/else#156\n", other_repo_closes=(156,))]
+
+    assert _linked(prs, 156) == set()
+
+
+def test_a_fixes_reference_holds_the_tickets_contracts():
+    gh = ContractGh(
+        ready=[_ready(170, CHANGES)],
+        prs=[_open_pr(175, "Fixes #156\n\n## Summary\n\nPart of #79.\n", closes=(156,))],
+        bodies={156: CHANGES, 79: CHANGES},
+    )
+
+    (ticket,) = GitHub(REPO, run=gh).list_tickets("TOKEN")
+
+    assert ticket.contract_conflicts == ("photos.submission-states held by PR #175 (#156)",)
+    assert 79 not in gh.viewed
+
+
+@pytest.mark.parametrize(
+    "pr",
+    [
+        {"number": 175, "body": "Closes #156."},
+        {"number": 175, "body": "Closes #156.", "closingIssuesReferences": None},
+        {"number": 175, "body": "", "closingIssuesReferences": [{"url": "x"}]},
+    ],
+)
+def test_an_open_pr_without_readable_closing_references_fails_closed(pr):
+    gh = ContractGh(ready=[_ready(156, "A ticket.")], prs=[pr], bodies={})
+
+    with pytest.raises(GitHubError, match="closingIssuesReferences"):
+        GitHub(REPO, run=gh).list_tickets("TOKEN")
+
+
+def test_a_review_fix_takes_its_ticket_from_the_branch_not_the_body():
+    run = FakeGh(
+        prs=[_pr(101, branch="nf/7-ticket-7", body="Part of #79. Closes #7")],
+        pr_details={
+            101: {
+                "reviews": [_review("daedraMex", "CHANGES_REQUESTED", "2026-11-10T10:00:00Z")],
+                "commits": [_commit("xolo-bot[bot]", "2026-11-10T09:00:00Z")],
+            }
+        },
+        issue=_issue(7),
+    )
+
+    (fix,) = GitHub(REPO, run=run).list_review_fixes(
+        author="xolo-bot", owner="daedraMex", token="TOKEN"
+    )
+
+    assert fix.ticket.number == 7
+    viewed = [argv[3] for argv, _cwd, _env in run.calls if argv[:3] == ["gh", "issue", "view"]]
+    assert viewed == ["7"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Closes #156. Part of #79.",
+        "Closes #156.\r\nPart of #79.\r\n\r\n## Summary\r\n\r\nPart of #136.\r\n",
+        "Closes #156.\n#99 is related.\nPart of #79.\n\n## Summary\n\nPart of #136.\n",
+    ],
+)
+def test_part_of_link_lines_without_a_heading_with_crlf_or_a_number_line(body):
+    prs = [_open_pr(175, body, closes=(156,))]
+
+    assert _linked(prs, 156, 79, 136) == {156, 79}
+
+
+def test_part_of_needs_a_word_boundary():
+    prs = [_open_pr(175, "Counterpart of #79.\n\n## Summary\n", closes=())]
+
+    assert _linked(prs, 79) == set()
