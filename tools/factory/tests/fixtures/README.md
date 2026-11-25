@@ -14,9 +14,12 @@ data.
 - `gh_issue_view_open.json` — recorded with:
   `gh issue view 21 --repo daedraMex/commerce-platform --json state`
   (issue #21 is the open test/notes issue).
-- `gh_pr_list.json` — recorded with:
-  `gh pr list --repo daedraMex/commerce-platform --state all --search 'Phase 4 / 05 in:title' --json body`
-  (the merged PR whose body contains `Closes #49`).
+- `gh_pr_list.json` — re-recorded on 2026-11-24, unedited, with:
+  `gh pr list --repo daedraMex/commerce-platform --state all --search 'Phase 4 / 05 in:title' --json number,body,closingIssuesReferences`
+  (merged PR #59, whose body starts `Closes #49. Part of #41.`). GitHub's
+  `closingIssuesReferences` lists only #49, with its repository owner and
+  name: `Part of` is not a closing keyword, so the factory reads it from the
+  link lines itself (#176).
 - `gh_pr_list_open.json` — captured on 2026-11-10 with:
   `gh pr list --repo daedraMex/commerce-platform --state merged --limit 3 --json author,headRefName`
   (merged PRs have the same author shape as open ones). GitHub Apps appear as

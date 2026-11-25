@@ -522,6 +522,13 @@ testing a branch on the machine); then update by hand with the same commands.
   `#<n> skipped: <contract> held by PR #<pr> (#<ticket>)` for a ticket that
   would otherwise be ready, and one run never takes two tickets that conflict
   on a contract.
+- "Has an open PR" and the contract holds use the same links (#176): the
+  issues GitHub lists as the PR's closing references (any closing keyword,
+  every number, or linked by hand in the sidebar), plus `Part of #n` in the
+  PR's link lines before its first heading. A `Part of #n` in the summary
+  below is not a link. A parent holds only the contracts its own body
+  declares, and epics declare none. If GitHub's list cannot be read, the run
+  stops instead of guessing.
 - The conflict check trusts the ticket's **Contracts** section, so a new ticket's
   PR is also checked against its diff: every `## <module>.<name>` section of
   `docs/contracts/` that the change edits but the ticket does not declare as
