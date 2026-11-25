@@ -29,6 +29,7 @@ type CarouselData = {
 
 type DragState = {
   id: number;
+  pointerId: number;
   startIds: number[];
   startImages: CarouselImage[];
   moved: boolean;
@@ -132,7 +133,13 @@ export function ProductCarouselPanel({
       .filter((image) => image.active)
       .map((image) => image.id)
       .filter((imageId): imageId is number => imageId !== null);
-    dragRef.current = { id, startIds, startImages, moved: false };
+    dragRef.current = {
+      id,
+      pointerId: event.pointerId,
+      startIds,
+      startImages,
+      moved: false,
+    };
     setDraggingId(id);
     setReorderError(null);
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -181,6 +188,22 @@ export function ProductCarouselPanel({
       return;
     }
     reorder.mutate({ imageIds, startImages: drag.startImages });
+  };
+
+  const cancelDrag = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return;
+    }
+    dragRef.current = null;
+    setDraggingId(null);
+    if (!drag.moved) {
+      return;
+    }
+    queryClient.setQueryData<CarouselData>(queryKey, {
+      product_id: productId,
+      images: drag.startImages,
+    });
   };
 
   if (carousel.isPending) {
@@ -332,8 +355,8 @@ export function ProductCarouselPanel({
                         }
                         onPointerMove={moveDrag}
                         onPointerUp={endDrag}
-                        onPointerCancel={endDrag}
-                        onLostPointerCapture={endDrag}
+                        onPointerCancel={cancelDrag}
+                        onLostPointerCapture={cancelDrag}
                         className="touch-none rounded-md border border-border p-1.5 text-foreground/60 disabled:opacity-40"
                       >
                         <GripVertical aria-hidden="true" className="size-4" />
