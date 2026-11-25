@@ -1062,6 +1062,49 @@ def test_retry_refuses_a_submission_that_did_not_fail(client, home, user):
     assert_problem_details(response, status=409, code="submission_cannot_start_processing")
 
 
+@pytest.mark.parametrize(
+    ("action", "status", "attempts", "redos"),
+    [
+        ("retry", PhotoSubmission.Status.FAILED, 1, 0),
+        ("redo", PhotoSubmission.Status.READY, 0, 0),
+        ("redo", PhotoSubmission.Status.FAILED, 1, 0),
+    ],
+)
+def test_an_enqueue_failure_rolls_the_save_back(
+    client, home, user, override_photo_processing_queue, action, status, attempts, redos
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    media = make_media(home) if status == PhotoSubmission.Status.READY else None
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=status,
+        result_media=media,
+        attempts=attempts,
+        corners=CORNERS,
+        crop=CROP,
+        idempotency_key=f"enqueue-failure-{action}-{status}",
+    )
+
+    class RefusingQueue:
+        def enqueue(self, store, submission_id):
+            raise RuntimeError("the broker refused the message")
+
+    override_photo_processing_queue(RefusingQueue())
+    new_crop = {"x": 2, "y": 2, "width": 6, "height": 8}
+
+    response = post_action(client, user, action, submission.pk, data={"crop": new_crop})
+
+    assert_problem_details(response, status=500, code="internal_error")
+    submission.refresh_from_db()
+    assert submission.status == status
+    assert submission.attempts == attempts
+    assert submission.redos == redos
+    assert submission.crop == CROP
+
+
 def test_discard_deletes_only_the_private_original_and_preview(client, home, user, private_storage):
     grant_membership(user=user, store=home, role_name="content_editor")
     submission_id = upload(client, user).json()["id"]

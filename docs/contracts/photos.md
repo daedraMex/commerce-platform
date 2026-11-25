@@ -55,9 +55,11 @@ class PhotoProcessingQueue(Protocol):
 - One port, one adapter: `CeleryPhotoProcessingQueue`.
 - Inside a transaction the message is sent with `transaction.on_commit`, so a rolled-back
   save never reaches the worker. Outside one, it is sent at once.
-- Callers: upload, retry and redo, each after saving the submission. Retry and redo save
-  and enqueue outside one unit of work, so a broker refusal after the save leaves the
-  submission `processing` (#172).
+- Callers: upload, retry and redo. Retry and redo save the submission and enqueue inside one
+  `UnitOfWork`, so an enqueue that raises rolls the save back: the submission keeps its
+  previous status, `attempts` and corners or crop, and the error reaches the client as a
+  problem details response. A rolled-back save is never sent, because the adapter's
+  `transaction.on_commit` hook is discarded with the transaction (#172).
 
 ## photos.catalog-port
 

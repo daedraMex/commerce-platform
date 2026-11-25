@@ -1,5 +1,6 @@
 """Fakes for photo use-case tests; they never touch storage or a database."""
 
+import copy
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
@@ -67,13 +68,22 @@ class FakePhotoSubmissionRepository:
     rows: dict[int, PhotoSubmission] = field(default_factory=dict)
     next_id: int = 1
 
-    def __init__(self, rows=()):
+    def __init__(self, rows=(), *, detached=False):
         self.rows = {row.id: row for row in rows}
         self.next_id = max(self.rows, default=0) + 1
+        self.detached = detached
 
     def get(self, store: StoreReference, submission_id: int) -> PhotoSubmission | None:
         row = self.rows.get(submission_id)
-        return row if row is not None and row.store_id == store.id else None
+        if row is None or row.store_id != store.id:
+            return None
+        return copy.deepcopy(row) if self.detached else row
+
+    def snapshot(self) -> dict[int, PhotoSubmission]:
+        return copy.deepcopy(self.rows)
+
+    def restore(self, snapshot: dict[int, PhotoSubmission]) -> None:
+        self.rows = snapshot
 
     def get_for_update(self, store: StoreReference, submission_id: int) -> PhotoSubmission | None:
         return self.get(store, submission_id)
@@ -277,8 +287,9 @@ class FakeCatalog:
 
 @dataclass
 class FakeUnitOfWork:
-    """Track whether a unit of work committed or rolled back."""
+    """Track whether a unit of work committed or rolled back, restoring a repository."""
 
+    repository: FakePhotoSubmissionRepository | None = None
     depth: int = 0
     entered: int = 0
     committed: int = 0
@@ -286,11 +297,16 @@ class FakeUnitOfWork:
 
     @contextmanager
     def __call__(self):
+        snapshot = (
+            self.repository.snapshot() if self.depth == 0 and self.repository is not None else None
+        )
         self.depth += 1
         self.entered += 1
         try:
             yield
         except Exception:
+            if snapshot is not None:
+                self.repository.restore(snapshot)
             self.rolled_back += 1
             raise
         else:
@@ -302,12 +318,15 @@ class FakeUnitOfWork:
 
 @dataclass
 class FakeProcessingQueue:
-    """Record every submission enqueued for processing."""
+    """Record every submission enqueued for processing; optionally refuse the message."""
 
     calls: list[tuple[StoreReference, int]] = field(default_factory=list)
+    error: Exception | None = None
 
     def enqueue(self, store: StoreReference, submission_id: int) -> None:
         self.calls.append((store, submission_id))
+        if self.error is not None:
+            raise self.error
 
 
 @dataclass

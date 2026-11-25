@@ -136,12 +136,22 @@ def change_group_links(repository, catalog, authorizer, unit_of_work):
     )
 
 
-def redo_photo(repository, queue, authorizer):
-    return RedoPhoto(repository=repository, queue=queue, authorizer=authorizer)
+def redo_photo(repository, queue, authorizer, unit_of_work):
+    return RedoPhoto(
+        repository=repository,
+        queue=queue,
+        authorizer=authorizer,
+        unit_of_work=unit_of_work,
+    )
 
 
-def retry_photo(repository, queue, authorizer):
-    return RetryPhoto(repository=repository, queue=queue, authorizer=authorizer)
+def retry_photo(repository, queue, authorizer, unit_of_work):
+    return RetryPhoto(
+        repository=repository,
+        queue=queue,
+        authorizer=authorizer,
+        unit_of_work=unit_of_work,
+    )
 
 
 def discard_photo(repository, uploader, authorizer):
@@ -357,16 +367,16 @@ def test_remove_never_finds_another_stores_submission(
     assert repository.rows[1].applied_at == NOW
 
 
-def test_redo_authorizes_catalog_manage_in_the_store(repository, queue, authorizer):
-    redo_photo(repository, queue, authorizer)(
+def test_redo_authorizes_catalog_manage_in_the_store(repository, queue, authorizer, unit_of_work):
+    redo_photo(repository, queue, authorizer, unit_of_work)(
         HOME, user_id=7, submission_id=1, corners=CORNERS, crop=CROP
     )
 
     assert authorizer.calls == [(7, HOME, MANAGE_CATALOG)]
 
 
-def test_redo_rejects_a_user_without_catalog_manage(repository, queue):
-    use_case = redo_photo(repository, queue, FakeAuthorizer(allowed=False))
+def test_redo_rejects_a_user_without_catalog_manage(repository, queue, unit_of_work):
+    use_case = redo_photo(repository, queue, FakeAuthorizer(allowed=False), unit_of_work)
 
     with pytest.raises(PermissionDeniedError):
         use_case(HOME, user_id=7, submission_id=1, corners=CORNERS, crop=CROP)
@@ -375,8 +385,10 @@ def test_redo_rejects_a_user_without_catalog_manage(repository, queue):
     assert repository.rows[1].result_media_id == 30
 
 
-def test_redo_moves_to_processing_keeps_the_old_media_and_enqueues(repository, queue, authorizer):
-    saved = redo_photo(repository, queue, authorizer)(
+def test_redo_moves_to_processing_keeps_the_old_media_and_enqueues(
+    repository, queue, authorizer, unit_of_work
+):
+    saved = redo_photo(repository, queue, authorizer, unit_of_work)(
         HOME,
         user_id=7,
         submission_id=1,
@@ -391,15 +403,21 @@ def test_redo_moves_to_processing_keeps_the_old_media_and_enqueues(repository, q
     assert queue.calls == [(HOME, 1)]
 
 
-def test_redo_keeps_the_stored_corners_and_crop_when_omitted(repository, queue, authorizer):
-    saved = redo_photo(repository, queue, authorizer)(HOME, user_id=7, submission_id=1)
+def test_redo_keeps_the_stored_corners_and_crop_when_omitted(
+    repository, queue, authorizer, unit_of_work
+):
+    saved = redo_photo(repository, queue, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1
+    )
 
     assert saved.corners == CORNERS
     assert saved.crop == CROP
     assert queue.calls == [(HOME, 1)]
 
 
-def test_redo_from_failed_saves_the_new_corners_and_enqueues_once(repository, queue, authorizer):
+def test_redo_from_failed_saves_the_new_corners_and_enqueues_once(
+    repository, queue, authorizer, unit_of_work
+):
     repository.rows[1] = make_submission(
         status=SubmissionStatus.FAILED,
         result_media_id=None,
@@ -408,7 +426,7 @@ def test_redo_from_failed_saves_the_new_corners_and_enqueues_once(repository, qu
     )
     new_corners = [{"x": 0.2, "y": 0.2}, {"x": 0.8, "y": 0.2}, {"x": 0.8, "y": 0.8}]
 
-    saved = redo_photo(repository, queue, authorizer)(
+    saved = redo_photo(repository, queue, authorizer, unit_of_work)(
         HOME, user_id=7, submission_id=1, corners=new_corners
     )
 
@@ -422,11 +440,59 @@ def test_redo_from_failed_saves_the_new_corners_and_enqueues_once(repository, qu
     assert queue.calls == [(HOME, 1)]
 
 
-def test_redo_refuses_the_sixth_redo_without_enqueueing(repository, queue, authorizer):
+def test_redo_rolls_the_save_back_when_enqueueing_raises():
+    repository = FakePhotoSubmissionRepository(rows=[make_submission()], detached=True)
+    queue = FakeProcessingQueue(error=RuntimeError("the broker refused the message"))
+    unit_of_work = FakeUnitOfWork(repository=repository)
+
+    with pytest.raises(RuntimeError):
+        redo_photo(repository, queue, FakeAuthorizer(), unit_of_work)(
+            HOME,
+            user_id=7,
+            submission_id=1,
+            corners=[{"x": 0.2, "y": 0.2}],
+            crop={"x": 2, "y": 2, "width": 6, "height": 8},
+        )
+
+    assert unit_of_work.rolled_back == 1
+    assert queue.calls == [(HOME, 1)]
+    stored = repository.rows[1]
+    assert stored.status is SubmissionStatus.READY
+    assert stored.result_media_id == 30
+    assert stored.redos == 0
+    assert stored.corners == CORNERS
+    assert stored.crop == CROP
+
+
+def test_retry_rolls_the_save_back_when_enqueueing_raises():
+    repository = FakePhotoSubmissionRepository(
+        rows=[make_submission(status=SubmissionStatus.FAILED, attempts=1)],
+        detached=True,
+    )
+    queue = FakeProcessingQueue(error=RuntimeError("the broker refused the message"))
+    unit_of_work = FakeUnitOfWork(repository=repository)
+
+    with pytest.raises(RuntimeError):
+        retry_photo(repository, queue, FakeAuthorizer(), unit_of_work)(
+            HOME, user_id=7, submission_id=1
+        )
+
+    assert unit_of_work.rolled_back == 1
+    assert queue.calls == [(HOME, 1)]
+    stored = repository.rows[1]
+    assert stored.status is SubmissionStatus.FAILED
+    assert stored.attempts == 1
+    assert stored.corners == CORNERS
+    assert stored.crop == CROP
+
+
+def test_redo_refuses_the_sixth_redo_without_enqueueing(
+    repository, queue, authorizer, unit_of_work
+):
     repository.rows[1] = make_submission(status=SubmissionStatus.FAILED, redos=MAX_REDOS)
 
     with pytest.raises(RedoExhausted):
-        redo_photo(repository, queue, authorizer)(
+        redo_photo(repository, queue, authorizer, unit_of_work)(
             HOME, user_id=7, submission_id=1, corners=CORNERS, crop=CROP
         )
 
@@ -434,35 +500,37 @@ def test_redo_refuses_the_sixth_redo_without_enqueueing(repository, queue, autho
     assert repository.rows[1].corners == CORNERS
 
 
-def test_redo_refuses_a_submission_that_is_still_processing(repository, queue, authorizer):
+def test_redo_refuses_a_submission_that_is_still_processing(
+    repository, queue, authorizer, unit_of_work
+):
     repository.rows[1] = make_submission(status=SubmissionStatus.PROCESSING)
 
     with pytest.raises(CannotRedo):
-        redo_photo(repository, queue, authorizer)(
+        redo_photo(repository, queue, authorizer, unit_of_work)(
             HOME, user_id=7, submission_id=1, corners=CORNERS, crop=CROP
         )
 
     assert queue.calls == []
 
 
-def test_redo_never_finds_another_stores_submission(repository, queue, authorizer):
+def test_redo_never_finds_another_stores_submission(repository, queue, authorizer, unit_of_work):
     with pytest.raises(NotFoundError):
-        redo_photo(repository, queue, authorizer)(
+        redo_photo(repository, queue, authorizer, unit_of_work)(
             ANIME, user_id=7, submission_id=1, corners=CORNERS, crop=CROP
         )
 
 
-def test_retry_authorizes_catalog_manage_in_the_store(repository, queue, authorizer):
+def test_retry_authorizes_catalog_manage_in_the_store(repository, queue, authorizer, unit_of_work):
     repository.rows[1] = make_submission(status=SubmissionStatus.FAILED)
 
-    retry_photo(repository, queue, authorizer)(HOME, user_id=7, submission_id=1)
+    retry_photo(repository, queue, authorizer, unit_of_work)(HOME, user_id=7, submission_id=1)
 
     assert authorizer.calls == [(7, HOME, MANAGE_CATALOG)]
 
 
-def test_retry_rejects_a_user_without_catalog_manage(repository, queue):
+def test_retry_rejects_a_user_without_catalog_manage(repository, queue, unit_of_work):
     repository.rows[1] = make_submission(status=SubmissionStatus.FAILED)
-    use_case = retry_photo(repository, queue, FakeAuthorizer(allowed=False))
+    use_case = retry_photo(repository, queue, FakeAuthorizer(allowed=False), unit_of_work)
 
     with pytest.raises(PermissionDeniedError):
         use_case(HOME, user_id=7, submission_id=1)
@@ -470,10 +538,12 @@ def test_retry_rejects_a_user_without_catalog_manage(repository, queue):
     assert queue.calls == []
 
 
-def test_retry_starts_a_new_attempt_and_enqueues(repository, queue, authorizer):
+def test_retry_starts_a_new_attempt_and_enqueues(repository, queue, authorizer, unit_of_work):
     repository.rows[1] = make_submission(status=SubmissionStatus.FAILED, attempts=1)
 
-    saved = retry_photo(repository, queue, authorizer)(HOME, user_id=7, submission_id=1)
+    saved = retry_photo(repository, queue, authorizer, unit_of_work)(
+        HOME, user_id=7, submission_id=1
+    )
 
     assert saved.status is SubmissionStatus.PROCESSING
     assert saved.attempts == 2
@@ -485,29 +555,31 @@ def test_retry_starts_a_new_attempt_and_enqueues(repository, queue, authorizer):
     "status",
     [SubmissionStatus.UPLOADED, SubmissionStatus.READY, SubmissionStatus.PROCESSING],
 )
-def test_retry_refuses_a_submission_that_did_not_fail(repository, queue, authorizer, status):
+def test_retry_refuses_a_submission_that_did_not_fail(
+    repository, queue, authorizer, unit_of_work, status
+):
     repository.rows[1] = make_submission(status=status, result_media_id=None)
 
     with pytest.raises(CannotStartProcessing):
-        retry_photo(repository, queue, authorizer)(HOME, user_id=7, submission_id=1)
+        retry_photo(repository, queue, authorizer, unit_of_work)(HOME, user_id=7, submission_id=1)
 
     assert queue.calls == []
 
 
-def test_retry_refuses_an_exhausted_submission(repository, queue, authorizer):
+def test_retry_refuses_an_exhausted_submission(repository, queue, authorizer, unit_of_work):
     repository.rows[1] = make_submission(status=SubmissionStatus.FAILED, attempts=MAX_ATTEMPTS)
 
     with pytest.raises(AttemptsExhausted):
-        retry_photo(repository, queue, authorizer)(HOME, user_id=7, submission_id=1)
+        retry_photo(repository, queue, authorizer, unit_of_work)(HOME, user_id=7, submission_id=1)
 
     assert queue.calls == []
 
 
-def test_retry_never_finds_another_stores_submission(repository, queue, authorizer):
+def test_retry_never_finds_another_stores_submission(repository, queue, authorizer, unit_of_work):
     repository.rows[1] = make_submission(status=SubmissionStatus.FAILED)
 
     with pytest.raises(NotFoundError):
-        retry_photo(repository, queue, authorizer)(ANIME, user_id=7, submission_id=1)
+        retry_photo(repository, queue, authorizer, unit_of_work)(ANIME, user_id=7, submission_id=1)
 
 
 def test_discard_authorizes_catalog_manage_in_the_store(repository, uploader, authorizer):
