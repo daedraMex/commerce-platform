@@ -85,6 +85,12 @@ CELERY_BROKER_URL = REDIS_URL
 CELERY_TASK_ALWAYS_EAGER = env.bool("CELERY_TASK_ALWAYS_EAGER", default=False)
 CELERY_TASK_EAGER_PROPAGATES = CELERY_TASK_ALWAYS_EAGER
 CELERY_TASK_IGNORE_RESULT = True
+CELERY_BEAT_SCHEDULE = {
+    "sweep-stale-photo-processing": {
+        "task": "apps.photos.tasks.sweep_stale_photo_processing",
+        "schedule": timedelta(minutes=5),
+    },
+}
 
 AUTH_USER_MODEL = "accounts.User"
 
@@ -122,6 +128,9 @@ R2_ENDPOINT_URL = env("R2_ENDPOINT_URL", default="")
 # Private originals and previews. Never under MEDIA_ROOT and never in a public URL.
 PRIVATE_MEDIA_ROOT = BASE_DIR / "private-media"
 PHOTO_PREVIEW_LONG_SIDE = env.int("PHOTO_PREVIEW_LONG_SIDE", default=1600)
+PHOTO_PROCESSING_STALE_AFTER = timedelta(
+    minutes=env.int("PHOTO_PROCESSING_STALE_AFTER_MINUTES", default=15)
+)
 
 if R2_BUCKET_NAME and not R2_PRIVATE_BUCKET_NAME:
     raise ImproperlyConfigured("R2_PRIVATE_BUCKET_NAME is required when R2_BUCKET_NAME is set.")

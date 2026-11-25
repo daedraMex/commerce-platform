@@ -1,5 +1,7 @@
 """Django implementation of the PhotoSubmissionRepository port (ADR-0022)."""
 
+from datetime import datetime
+
 from django.db import IntegrityError, transaction
 from django.db.models import F, Q
 from django.utils import timezone
@@ -140,6 +142,27 @@ class DjangoPhotoSubmissionRepository:
             .filter(Q(target_product_id=product_id) | Q(result_media_id__in=media_ids))
             .order_by("-created_at", "-pk")
         )
+        return [_to_entity(row) for row in rows]
+
+    def store_ids_with_stale_processing(self, updated_before: datetime) -> list[int]:
+        return list(
+            PhotoSubmissionModel.objects.filter(
+                status=SubmissionStatus.PROCESSING,
+                updated_at__lt=updated_before,
+            )
+            .order_by("store_id")
+            .values_list("store_id", flat=True)
+            .distinct()
+        )
+
+    def list_stale_processing(
+        self, store: StoreReference, updated_before: datetime
+    ) -> list[PhotoSubmission]:
+        rows = PhotoSubmissionModel.objects.filter(
+            store_id=store.id,
+            status=SubmissionStatus.PROCESSING,
+            updated_at__lt=updated_before,
+        ).order_by("pk")
         return [_to_entity(row) for row in rows]
 
     def save(self, submission: PhotoSubmission) -> PhotoSubmission:

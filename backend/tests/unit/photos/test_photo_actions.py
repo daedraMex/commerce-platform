@@ -440,31 +440,34 @@ def test_redo_from_failed_saves_the_new_corners_and_enqueues_once(
     assert queue.calls == [(HOME, 1)]
 
 
-def test_redo_rolls_the_save_back_when_enqueueing_raises():
+def test_redo_records_the_failure_when_enqueueing_raises():
     repository = FakePhotoSubmissionRepository(rows=[make_submission()], detached=True)
     queue = FakeProcessingQueue(error=RuntimeError("the broker refused the message"))
     unit_of_work = FakeUnitOfWork(repository=repository)
 
-    with pytest.raises(RuntimeError):
-        redo_photo(repository, queue, FakeAuthorizer(), unit_of_work)(
-            HOME,
-            user_id=7,
-            submission_id=1,
-            corners=[{"x": 0.2, "y": 0.2}],
-            crop={"x": 2, "y": 2, "width": 6, "height": 8},
-        )
+    saved = redo_photo(repository, queue, FakeAuthorizer(), unit_of_work)(
+        HOME,
+        user_id=7,
+        submission_id=1,
+        corners=[{"x": 0.2, "y": 0.2}],
+        crop={"x": 2, "y": 2, "width": 6, "height": 8},
+    )
 
-    assert unit_of_work.rolled_back == 1
+    assert saved.status is SubmissionStatus.FAILED
+    assert saved.failure_code == "photo_processing_unavailable"
+    assert unit_of_work.committed == 1
+    assert unit_of_work.rolled_back == 0
     assert queue.calls == [(HOME, 1)]
     stored = repository.rows[1]
-    assert stored.status is SubmissionStatus.READY
-    assert stored.result_media_id == 30
-    assert stored.redos == 0
-    assert stored.corners == CORNERS
-    assert stored.crop == CROP
+    assert stored.status is SubmissionStatus.FAILED
+    assert stored.failure_code == "photo_processing_unavailable"
+    assert stored.result_media_id is None
+    assert stored.redos == 1
+    assert stored.corners == [{"x": 0.2, "y": 0.2}]
+    assert stored.crop == {"x": 2, "y": 2, "width": 6, "height": 8}
 
 
-def test_retry_rolls_the_save_back_when_enqueueing_raises():
+def test_retry_records_the_failure_when_enqueueing_raises():
     repository = FakePhotoSubmissionRepository(
         rows=[make_submission(status=SubmissionStatus.FAILED, attempts=1)],
         detached=True,
@@ -472,16 +475,19 @@ def test_retry_rolls_the_save_back_when_enqueueing_raises():
     queue = FakeProcessingQueue(error=RuntimeError("the broker refused the message"))
     unit_of_work = FakeUnitOfWork(repository=repository)
 
-    with pytest.raises(RuntimeError):
-        retry_photo(repository, queue, FakeAuthorizer(), unit_of_work)(
-            HOME, user_id=7, submission_id=1
-        )
+    saved = retry_photo(repository, queue, FakeAuthorizer(), unit_of_work)(
+        HOME, user_id=7, submission_id=1
+    )
 
-    assert unit_of_work.rolled_back == 1
+    assert saved.status is SubmissionStatus.FAILED
+    assert saved.failure_code == "photo_processing_unavailable"
+    assert unit_of_work.committed == 1
+    assert unit_of_work.rolled_back == 0
     assert queue.calls == [(HOME, 1)]
     stored = repository.rows[1]
     assert stored.status is SubmissionStatus.FAILED
-    assert stored.attempts == 1
+    assert stored.failure_code == "photo_processing_unavailable"
+    assert stored.attempts == 2
     assert stored.corners == CORNERS
     assert stored.crop == CROP
 

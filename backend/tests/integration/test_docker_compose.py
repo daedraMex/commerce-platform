@@ -24,11 +24,16 @@ def test_compose_runs_a_celery_worker():
     assert "beat" not in worker["command"]
 
 
-def test_compose_has_no_beat_process():
+def test_compose_runs_a_celery_beat_service():
     services = load_services()
+    beat = services["beat"]
 
-    assert "beat" not in services
-    assert all("beat" not in str(service.get("command", "")) for service in services.values())
+    assert "celery" in beat["command"]
+    assert "beat" in beat["command"]
+    assert "worker" not in beat["command"]
+    assert "catalog-media" in beat["environment"]["R2_BUCKET_NAME"]
+    assert "catalog-private" in beat["environment"]["R2_PRIVATE_BUCKET_NAME"]
+    assert "rustfs" in beat["environment"]["R2_ENDPOINT_URL"]
 
 
 def test_compose_worker_uses_the_rustfs_buckets():

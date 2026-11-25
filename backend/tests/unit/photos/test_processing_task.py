@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 from celery.exceptions import Retry
 
+from apps.photos.domain.errors import ConcurrentModification
 from apps.photos.domain.submission import (
     PhotoSubmission,
     SubmissionKind,
@@ -136,6 +137,44 @@ def test_the_last_retry_records_the_failure_instead_of_retrying(monkeypatch):
 
     assert fake.retried is None
     assert calls == [(StoreReference(id=7, slug=""), 42)]
+
+
+class SweptRepository(FakePhotoSubmissionRepository):
+    """The sweep marks the row failed just before the worker tries to save it."""
+
+    def __init__(self, rows=()):
+        super().__init__(rows)
+        self.swept = False
+
+    def save(self, submission):
+        if not self.swept:
+            stored = self.rows[submission.id]
+            stored.status = SubmissionStatus.FAILED
+            stored.failure_code = "photo_processing_unavailable"
+            stored.failure_message = "Photo processing is unavailable; retry or discard this photo."
+            stored.version += 1
+            self.swept = True
+            raise ConcurrentModification("The sweep marked this submission failed.")
+        return super().save(submission)
+
+
+def test_a_worker_that_finishes_after_the_sweep_stops_without_looping(monkeypatch):
+    repository = SweptRepository(rows=[make_processing_submission()])
+    reader = FakePrivateMediaReader(contents={ORIGINAL_KEY: b"the-original"})
+    monkeypatch.setattr(tasks, "get_photo_submission_repository", lambda: repository)
+    monkeypatch.setattr(tasks, "get_catalog_service", lambda: FakeCatalog())
+    monkeypatch.setattr(tasks, "get_photo_processor", lambda: FakePhotoProcessor())
+    monkeypatch.setattr(tasks, "get_private_media_reader", lambda: reader)
+    fake = FakeTaskSelf()
+
+    with pytest.raises(Retry):
+        run_task(fake, store_id=1, submission_id=1)
+
+    run_task(fake, store_id=1, submission_id=1)
+
+    assert fake.request.retries == 1
+    assert repository.rows[1].status is SubmissionStatus.FAILED
+    assert repository.rows[1].failure_code == "photo_processing_unavailable"
 
 
 def test_a_processor_that_always_fails_ends_failed_after_the_last_retry(monkeypatch):

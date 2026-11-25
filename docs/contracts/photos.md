@@ -18,7 +18,9 @@ one updates this file and every consumer in the same pull request.
 
 When the last retry fails, the task records `failed` with `photo_processing_unavailable` and
 a short message, without spending another attempt. If recording that failure itself fails,
-the error is logged with the store and submission id instead of being dropped.
+the error is logged with the store and submission id instead of being dropped. A worker that
+finishes after `photos.sweep-processing-task` already marked the submission `failed` returns
+it unchanged, so the submission stays failed and the task does not loop.
 
 The worker loads the submission, then:
 
@@ -56,10 +58,38 @@ class PhotoProcessingQueue(Protocol):
 - Inside a transaction the message is sent with `transaction.on_commit`, so a rolled-back
   save never reaches the worker. Outside one, it is sent at once.
 - Callers: upload, retry and redo. Retry and redo save the submission and enqueue inside one
-  `UnitOfWork`, so an enqueue that raises rolls the save back: the submission keeps its
-  previous status, `attempts` and corners or crop, and the error reaches the client as a
-  problem details response. A rolled-back save is never sent, because the adapter's
-  `transaction.on_commit` hook is discarded with the transaction (#172).
+  `UnitOfWork`, so the processing save and its message stay ordered. A rolled-back save is
+  never sent, because the adapter's `transaction.on_commit` hook is discarded with the
+  transaction (#172).
+- A broker that refuses the message, or a connection error or timeout while sending, never
+  reaches the caller. The adapter logs it with the store and submission id and records
+  `failed` with `photo_processing_unavailable` through `FailExhaustedProcessing` in its own
+  transaction, because the save it belongs to is already committed. Upload, retry and redo
+  still return their normal response instead of a 500 (#224). Retry works afterwards while
+  `attempts` < 3, and redo while `redos` < 5.
+
+## photos.sweep-processing-task
+
+**Owner:** #224 (Phase 4b stale processing sweep)
+
+| | |
+|---|---|
+| Task name | `apps.photos.tasks.sweep_stale_photo_processing`, set with `name=` |
+| Kwargs | `store_id: int \| None`; `None` sweeps every store that has a stale submission, never a default store |
+| Schedule | `CELERY_BEAT_SCHEDULE` runs it every 5 minutes; `docker-compose.yml` runs a `beat` service |
+| Threshold | `settings.PHOTO_PROCESSING_STALE_AFTER`, default 15 minutes |
+
+- Finds `processing` submissions whose `updated_at` is older than the threshold and marks
+  each `failed` with `photo_processing_unavailable`, through the same failure path as
+  `photos.process-photo-task`.
+- Reads the stores that have stale submissions, then lists and updates each store's rows with
+  every query filtered by that store. A store-scoped call (`store_id`) sweeps only that one.
+- Each row is saved through `PhotoSubmissionRepository.save`, so the optimistic `version`
+  check applies: a submission that changes during the sweep raises
+  `submission_concurrent_modification` and is skipped, not overwritten.
+- A discarded submission still processing records `failed` with
+  `photo_submission_discarded`, exactly as `FailExhaustedProcessing` does.
+- A submission newer than the threshold, or in any other state, is not touched.
 
 ## photos.catalog-port
 
@@ -122,6 +152,7 @@ runs (worker start and retry); `redos` counts redos and is separate from it.
 | Upload | none | `uploaded`, then enqueued | 0 | 0 | see below |
 | Worker starts | `uploaded` | `processing` | + 1 | unchanged | none |
 | Worker finishes | `processing` | `ready` or `failed` | unchanged | unchanged | none |
+| Stale sweep | `processing` older than `PHOTO_PROCESSING_STALE_AFTER` | `failed` with `photo_processing_unavailable` | unchanged | unchanged | none |
 | Retry | `failed`, not applied or discarded, `attempts` < 3 | `processing`, then enqueued | + 1 | unchanged | `submission_cannot_start_processing`, `submission_attempts_exhausted` |
 | Redo (new corners or crop) | `ready` or `failed`, not applied or discarded, `redos` < 5 | `processing`, then enqueued | unchanged | + 1 | `submission_cannot_redo`, `submission_redo_exhausted` |
 | Apply, individual photo | `ready`, not applied or discarded | applied; status stays `ready` | unchanged | unchanged | `submission_cannot_apply` |

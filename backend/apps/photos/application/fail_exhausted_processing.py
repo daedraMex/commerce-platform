@@ -12,6 +12,26 @@ from apps.shared.domain.exceptions import NotFoundError
 from apps.shared.domain.store import StoreReference
 
 
+def mark_processing_unavailable(submission: PhotoSubmission) -> bool:
+    """Apply the exhausted-processing failure to one loaded submission.
+
+    Returns whether the submission changed. A discarded one records the discarded
+    failure; an uploaded one records the attempt the worker never saved; a processing
+    one keeps its attempts; any other state is left unchanged.
+    """
+    if submission.discarded_at is not None:
+        submission.mark_failed(DISCARDED_FAILURE_CODE, DISCARDED_FAILURE_MESSAGE)
+        return True
+
+    if submission.status is SubmissionStatus.UPLOADED:
+        submission.start_processing()
+    elif submission.status is not SubmissionStatus.PROCESSING:
+        return False
+
+    submission.mark_failed(PROCESSING_UNAVAILABLE_CODE, PROCESSING_UNAVAILABLE_MESSAGE)
+    return True
+
+
 class FailExhaustedProcessing:
     """Mark a submission whose retries ran out as failed.
 
@@ -27,14 +47,6 @@ class FailExhaustedProcessing:
         if submission is None:
             raise NotFoundError("No photo submission matches this id in this store.")
 
-        if submission.discarded_at is not None:
-            submission.mark_failed(DISCARDED_FAILURE_CODE, DISCARDED_FAILURE_MESSAGE)
-            return self._repository.save(submission)
-
-        if submission.status is SubmissionStatus.UPLOADED:
-            submission.start_processing()
-        elif submission.status is not SubmissionStatus.PROCESSING:
+        if not mark_processing_unavailable(submission):
             return submission
-
-        submission.mark_failed(PROCESSING_UNAVAILABLE_CODE, PROCESSING_UNAVAILABLE_MESSAGE)
         return self._repository.save(submission)
