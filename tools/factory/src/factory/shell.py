@@ -44,6 +44,8 @@ RunCommand = Callable[..., CommandResult]
 def merge_env(overrides: dict[str, str | None] | None) -> dict[str, str]:
     """Merge overrides over the current environment; a ``None`` value removes a key."""
     merged = os.environ.copy()
+    # The run lock's descriptor number means nothing to a child: none inherits it.
+    merged.pop("FACTORY_RUN_LOCK_FD", None)
     if overrides:
         for key, value in overrides.items():
             if value is None:

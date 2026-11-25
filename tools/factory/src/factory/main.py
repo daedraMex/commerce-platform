@@ -59,6 +59,7 @@ from .review_step import (
 )
 from .reviews import ReviewFix
 from .run_home import RunHomes
+from .run_lock import RunLocked, acquire_run_lock
 from .runner import OPENCODE_CONFIG_PATH, AgentRunner
 from .self_update import SelfUpdate
 from .sudoers import verify_sudoers_logging
@@ -980,6 +981,9 @@ def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> F
     )
 
 
+RUN_LOCK_NAME = "run.lock"
+
+
 def _startup_notifier() -> Notifier:
     """Best-effort notifier before Settings has been read successfully."""
     token = os.environ.get("FACTORY_TELEGRAM_BOT_TOKEN")
@@ -1079,9 +1083,20 @@ def main(argv: list[str] | None = None) -> int:
     if args and args[0] == "metrics":
         return metrics_main()
     notifier = _startup_notifier()
+    command = "preflight" if args and args[0] == "preflight" else "run"
     try:
         settings = Settings.from_env()
         notifier = _build_notifier(settings)
+        # Before the self-update: two runs must not move the checkout or clean
+        # each other's worktrees either. The lock lives until this process ends.
+        acquire_run_lock(settings.state_dir / RUN_LOCK_NAME, command=command)
+    except RunLocked as exc:
+        # Not a failure: the run in progress does this hour's work. No Telegram.
+        print(str(exc), file=sys.stderr)
+        return 0 if command == "run" else 1
+    except Exception as exc:
+        return _report_failure(notifier, f"run failed: startup: {short_error(exc)}")
+    try:
         commit, stop = _start(settings, notifier)
     except Exception as exc:
         return _report_failure(notifier, f"run failed: startup: {short_error(exc)}")
