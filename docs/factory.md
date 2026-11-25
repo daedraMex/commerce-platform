@@ -57,7 +57,7 @@ The main clone and the worktrees live under `/srv/factory`, outside
 │   ├── attempts.log    # mode 600; started + outcome lines per attempt, never readable by factory-agent
 │   ├── review-attempts.log  # mode 600; review ids already attempted, never readable by factory-agent
 │   └── paused          # present only while the factory is paused
-└── xolo-bot.pem        # chmod 600, see below
+└── .config/xolo-bot/private-key.pem   # chmod 600, see below
 ```
 
 ## One-time machine setup
@@ -297,7 +297,7 @@ Run these once, as the admin user unless a step says `factory`.
      identity.
    - Save the private key as a file the `factory` user owns, `chmod 600`:
      ```bash
-     install -m 600 xolo-bot.pem /home/factory/xolo-bot.pem
+     install -D -m 600 xolo-bot.pem /home/factory/.config/xolo-bot/private-key.pem
      ```
    - The factory mints a short-lived installation token on demand: one for the
      run's `gh` read calls (`list_tickets` and its blocker/PR lookups) and a
@@ -375,7 +375,7 @@ Run these once, as the admin user unless a step says `factory`.
     FACTORY_TELEGRAM_BOT_TOKEN=123456:ABC...     # from @BotFather
     FACTORY_TELEGRAM_CHAT_ID=123456789           # the one fixed chat id
     XOLO_BOT_APP_ID=123456                       # the xolo-bot App ID
-    XOLO_BOT_PRIVATE_KEY=$HOME/factory/xolo-bot.pem   # path to the private key file
+    XOLO_BOT_PRIVATE_KEY=/home/factory/.config/xolo-bot/private-key.pem   # path to the key file
     XOLO_BOT_INSTALLATION_ID=987654              # the installation on this repo
     XOLO_BOT_USER_ID=1234567                     # xolo-bot[bot] user id, for commits
     # agent isolation (the provider key is in factory-agent's own auth store):
@@ -725,7 +725,8 @@ unreachable" as before.
   **rotate it**: re-run `sudo -u factory-agent -H /usr/bin/opencode auth login`
   for the provider key (then copy it again into `~/factory/agent-auth.json`,
   step 8), issue a new Telegram token and update `secrets.env`, or
-  regenerate the xolo-bot key and replace `xolo-bot.pem`, then restart the
+  regenerate the xolo-bot key and replace
+  `/home/factory/.config/xolo-bot/private-key.pem`, then restart the
   timer. Deleting the log line is not enough.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`,
   default 3) and a time budget (`FACTORY_TIME_LIMIT_MINUTES`). Exceeding either
