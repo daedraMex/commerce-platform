@@ -518,8 +518,10 @@ def test_check_truncates_output_fed_to_the_agent(tmp_path):
 
     assert result.passed is False
     assert len(result.output) < 9000
-    assert result.output.endswith("x" * 100)
+    assert ("x" * 100 + "\n--- backend: exit 1 after") in result.output
     assert "truncated" in result.output
+    # The statuses come after the truncation, so they always survive it (#227).
+    assert result.output.rstrip().splitlines()[-1].startswith("Status: backend exit 1 after")
 
 
 class TimeoutThenRecord:

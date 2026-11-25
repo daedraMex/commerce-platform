@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import os
+import shutil
+import signal
 import socket
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +35,31 @@ class CheckResult:
     failed_areas: tuple[Area, ...] = ()
     checked_areas: tuple[Area, ...] = ()
     skipped_areas: tuple[Area, ...] = ()
+    # One line per failed area: its name, how it ended and how long it took (#227).
+    failures: tuple[str, ...] = ()
+
+
+def describe_exit(code: int) -> str:
+    """``exit 1``, ``killed by SIGKILL``, or ``exit 137 (a command was killed by SIGKILL)``.
+
+    A negative code means the script itself died by a signal. A shell exits
+    128 + n when a command it ran died by signal n, which is how a check.sh
+    reports a test runner the kernel or a timeout killed.
+    """
+    if code < 0:
+        return f"killed by {_signal_name(-code)}"
+    if 128 < code < 128 + 65:
+        name = _signal_name(code - 128)
+        if name is not None:
+            return f"exit {code} (a command was killed by {name})"
+    return f"exit {code}"
+
+
+def _signal_name(number: int) -> str | None:
+    try:
+        return signal.Signals(number).name
+    except ValueError:
+        return None
 
 
 def port_in_use(port: int) -> bool:
@@ -59,8 +87,12 @@ class AreaChecks:
         agent_home: str | None = None,
         base_env: dict[str, str] | None = None,
         port_in_use: Callable[[int], bool] = port_in_use,
+        logs_dir: Path | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ):
         self._run = run
+        self._logs_dir = logs_dir
+        self._clock = clock
         self._changed_files = changed_files
         self._agent_user = agent_user
         self._agent_home = agent_home
@@ -87,6 +119,9 @@ class AreaChecks:
         """
         selected = select_areas(self._changed_files(worktree)) if areas is None else areas
         chunks: list[str] = []
+        failures: list[str] = []
+        statuses: list[str] = []
+        kept: list[tuple[str, Path]] = []
         failed: list[Area] = []
         checked: list[Area] = []
         skipped: list[Area] = []
@@ -111,6 +146,7 @@ class AreaChecks:
             argv = [str(script)]
             if self._agent_user:
                 argv = sudo_argv(self._agent_user, argv, env)
+            started = self._clock()
             try:
                 result = self._run(
                     argv,
@@ -122,29 +158,93 @@ class AreaChecks:
             except CommandTimeout:
                 kill_agent_processes(self._run, self._agent_user)
                 failed.append(area)
-                chunks.append(f"=== {label}: timed out after {CHECK_TIMEOUT_SECONDS}s ===")
+                status = f"timed out after {CHECK_TIMEOUT_SECONDS}s"
+                chunks.append(f"=== {label}: {status} ===")
+                failures.append(f"{area.name}: {status}")
+                statuses.append(f"{area.name} {status}")
+                kept += self._keep(worktree, area, label, status, "", "", failed=True)
                 continue
             except BaseException:
                 # Ctrl+C or a stop: the check's agent processes never saw it (#197).
                 kill_agent_processes(self._run, self._agent_user)
                 raise
+            status = f"{describe_exit(result.exit_code)} after {round(self._clock() - started)}s"
             output = result.stdout
             if result.stderr:
                 output += ("\n" if output else "") + result.stderr
             body = output.strip()
-            chunks.append(f"=== {label} ===\n{body}" if body else f"=== {label} ===")
+            chunk = f"=== {label} ===\n{body}" if body else f"=== {label} ==="
+            chunks.append(f"{chunk}\n--- {area.name}: {status}")
+            statuses.append(f"{area.name} {status}")
             if result.exit_code != 0:
                 failed.append(area)
+                failures.append(f"{area.name}: {status}")
+            kept += self._keep(
+                worktree,
+                area,
+                label,
+                status,
+                result.stdout,
+                result.stderr,
+                failed=result.exit_code != 0,
+            )
         # Tests and dev servers run as the agent; none may outlive the checks, and a
         # cleanup that cannot be trusted fails the run instead of passing silently.
         ensure_agent_cleanup(self._run, self._agent_user)
+        output = truncate_check_output("\n\n".join(chunks).strip())
+        # After the truncation, so every status and path survives a long output.
+        if statuses:
+            output += "\n\nStatus: " + "; ".join(statuses)
+        if kept:
+            output += "\nFull logs:\n" + "\n".join(f"- {name}: {path}" for name, path in kept)
         return CheckResult(
             passed=not failed,
-            output=truncate_check_output("\n\n".join(chunks).strip()),
+            output=output,
             failed_areas=tuple(failed),
             checked_areas=tuple(checked),
             skipped_areas=tuple(skipped),
+            failures=tuple(failures),
         )
+
+    def _keep(
+        self,
+        worktree: Path,
+        area: Area,
+        label: str,
+        status: str,
+        stdout: str,
+        stderr: str,
+        *,
+        failed: bool,
+    ) -> list[tuple[str, Path]]:
+        """Write the area's full output, and on failure copy its reports; return the paths.
+
+        Named after the worktree, so a ticket's and a preflight's logs never mix.
+        A copy that fails never fails the check: it says so in the log instead.
+        """
+        if self._logs_dir is None:
+            return []
+        self._logs_dir.mkdir(parents=True, exist_ok=True)
+        log = self._logs_dir / f"{worktree.name}.{area.name}.log"
+        log.write_text(
+            f"# {label}\n# {status}\n\n{stdout}" + (f"\n--- stderr ---\n{stderr}" if stderr else "")
+        )
+        kept = [(area.name, log)]
+        sources = [worktree / report for report in area.reports if (worktree / report).is_dir()]
+        if failed and sources:
+            target = self._logs_dir / f"{worktree.name}.{area.name}-report"
+            try:
+                if target.exists():
+                    shutil.rmtree(target)
+                for source in sources:
+                    # The agent wrote these files: never follow its symlinks.
+                    shutil.copytree(source, target / source.name, symlinks=True)
+                os.utime(target)  # keep_days counts from now, not from the copied mtimes
+                kept.append((f"{area.name} report", target))
+            except OSError as exc:
+                with log.open("a") as handle:
+                    handle.write(f"\n# report not kept: {exc}\n")
+        return kept
 
     def run_review_tests(self, worktree: Path, files: tuple[str, ...]) -> tuple[str, str]:
         """Run the reviewer's attack tests as the agent; return (status, output).

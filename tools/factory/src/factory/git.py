@@ -17,6 +17,7 @@ from .area_checks import (
     REVIEW_TESTS_TIMEOUT_SECONDS,
     AreaChecks,
     CheckResult,
+    describe_exit,
     port_in_use,
 )
 from .areas import Area
@@ -67,6 +68,7 @@ __all__ = [
     "WorktreeCleanupError",
     "bot_commit_email",
     "commit_identity_args",
+    "describe_exit",
     "parse_git_version",
     "port_in_use",
     "verify_git_version",
@@ -84,6 +86,7 @@ class Git(GitRepo):
         bot_user_id: str | None = None,
         base_env: dict[str, str] | None = None,
         port_in_use: Callable[[int], bool] = port_in_use,
+        logs_dir: Path | None = None,
     ):
         super().__init__(run, bot_user_id=bot_user_id)
         self.checks = AreaChecks(
@@ -94,6 +97,7 @@ class Git(GitRepo):
             agent_home=agent_home,
             base_env=base_env if base_env is not None else dict(os.environ),
             port_in_use=port_in_use,
+            logs_dir=logs_dir,
         )
         self.cleanup = WorktreeCleanup(run, agent_user=agent_user)
 

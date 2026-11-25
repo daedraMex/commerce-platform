@@ -19,10 +19,20 @@ class Area:
     name: str
     script: Path
     port: int | None = None
+    # Folders the check leaves behind that explain a failure (Playwright traces, #227).
+    reports: tuple[Path, ...] = ()
 
 
 BACKEND = Area("backend", Path("backend") / "scripts" / "check.sh")
-CONSOLE = Area("console", Path("web") / "console" / "scripts" / "check.sh", port=3000)
+CONSOLE = Area(
+    "console",
+    Path("web") / "console" / "scripts" / "check.sh",
+    port=3000,
+    reports=(
+        Path("web") / "console" / "test-results",
+        Path("web") / "console" / "playwright-report",
+    ),
+)
 AREAS: tuple[Area, ...] = (BACKEND, CONSOLE)
 
 

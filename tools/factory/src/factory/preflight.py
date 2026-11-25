@@ -38,6 +38,16 @@ class PreflightError(RuntimeError):
         super().__init__(f"{step}: {detail}")
 
 
+def check_failure_message(failures: tuple[str, ...], log_path) -> str:
+    """Which areas failed and how, then the log; short enough for Telegram (#227)."""
+    tail = f"; see {log_path}"
+    room = MAX_ERROR_CHARS - len("check.sh: check.sh failed: ") - len(tail)
+    what = "; ".join(failures) or "no area reported a failure"
+    if len(what) > room:
+        what = what[: max(room - 1, 0)] + "…"
+    return f"check.sh failed: {what}{tail}"
+
+
 def short_error(text: str, *, limit: int = MAX_ERROR_CHARS) -> str:
     """Collapse an error to one bounded line for Telegram."""
     collapsed = " ".join(str(text).split())
@@ -147,7 +157,7 @@ class Preflight:
             check = self.git.check(worktree, areas=AREAS)
             if not check.passed:
                 self._write_check_log(log_path, check.output)
-                raise RuntimeError(f"check.sh failed; see {log_path}")
+                raise RuntimeError(check_failure_message(check.failures, log_path))
 
             if self.runner is not None:
                 step = "verify agent sandbox"

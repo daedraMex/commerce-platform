@@ -48,7 +48,8 @@ The main clone and the worktrees live under `/srv/factory`, outside
                         # sudoers check-script and cleanup globs match; cleaned after 14 days
 
 /home/factory/          # factory:factory, mode 700
-├── logs/               # one log file per ticket run, cleaned after 14 days
+├── logs/               # one log file per ticket run, plus each area's full check log
+                        # and a failed console check's Playwright report; cleaned after 14 days
 ├── state/              # mode 700; pause marker and the append-only ledgers
 │   ├── attempts.log    # mode 600; started + outcome lines per attempt, never readable by factory-agent
 │   ├── review-attempts.log  # mode 600; review ids already attempted, never readable by factory-agent
@@ -947,6 +948,17 @@ merge before every review fix and the conflict, ordering and prompt tests in
   see what the agent did and why it failed. A ticket's first step starts the
   file over; its reviews and every later review fix (`=== review fix step N`)
   are appended, so the original review is still there after a fix.
+- When a check fails (#227), the run's output ends with a `Status:` line (each
+  area's exit code, or the signal that killed it, and how long it ran) and the
+  paths of its full logs. Each area writes its whole output, never truncated, to
+  `~/factory/logs/<worktree>.<area>.log`, for example
+  `preflight-1795586084.console.log` or `nf-212-slug.backend.log`; the run log
+  and Telegram keep only the last 4000 characters. `exit 137 (a command was
+  killed by SIGKILL)` means a test runner was killed, usually for memory, rather
+  than failing a test. A failed console check also keeps its Playwright traces
+  and report in `~/factory/logs/<worktree>.console-report/`; open the report
+  with `pnpm exec playwright show-report <dir>/playwright-report` or a trace with
+  `pnpm exec playwright show-trace <trace.zip>`.
 - The agent keeps a running decision log in `DECISIONS.md` at the worktree
   root (git-ignored, never committed). It holds every choice, the rejected
   alternative, and why. If the agent could not decide safely it writes the open

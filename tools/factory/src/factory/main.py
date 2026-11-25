@@ -950,6 +950,7 @@ def _build_factory(settings: Settings, *, notifier: Notifier | None = None) -> F
             agent_user=settings.agent_user,
             agent_home=settings.agent_home,
             bot_user_id=settings.github_user_id,
+            logs_dir=settings.logs_dir,
         ),
         runner=AgentRunner(
             agent_user=settings.agent_user,
