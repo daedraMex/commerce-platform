@@ -138,7 +138,7 @@ describe("PhotoSubmissionCard", () => {
     const redo = screen.getByRole("button", { name: "Rehacer" });
     expect(redo).toBeEnabled();
     expect(screen.getByTestId("redos-remaining")).toHaveTextContent(
-      "Quedan 3 redos",
+      "Puedes rehacerla 3 veces más",
     );
   });
 
@@ -147,7 +147,7 @@ describe("PhotoSubmissionCard", () => {
 
     expect(screen.getByRole("button", { name: "Rehacer" })).toBeEnabled();
     expect(screen.getByTestId("redos-remaining")).toHaveTextContent(
-      "Queda 1 redo",
+      "Puedes rehacerla 1 vez más",
     );
   });
 
@@ -164,7 +164,7 @@ describe("PhotoSubmissionCard", () => {
 
     expect(screen.getByRole("button", { name: "Rehacer" })).toBeDisabled();
     expect(screen.getByTestId("redos-remaining")).toHaveTextContent(
-      "No quedan redos. Descarta esta foto y toma una nueva.",
+      "Ya no puedes rehacer esta foto. Descártala y toma una nueva.",
     );
   });
 

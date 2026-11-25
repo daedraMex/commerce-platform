@@ -439,7 +439,7 @@ test("redoes a failed photo and shows it processing again", async ({
     timeout: 15_000,
   });
   await expect(page.getByTestId("redos-remaining")).toHaveText(
-    "Quedan 5 redos",
+    "Puedes rehacerla 5 veces más",
   );
 
   const redoButton = page.getByRole("button", {

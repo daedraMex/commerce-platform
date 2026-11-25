@@ -213,7 +213,7 @@ describe("IndividualPhotoFlow", () => {
       { timeout: 5_000 },
     );
     expect(screen.getByTestId("redos-remaining")).toHaveTextContent(
-      "Quedan 5 redos",
+      "Puedes rehacerla 5 veces más",
     );
 
     fireEvent.click(redo);
@@ -300,7 +300,7 @@ describe("IndividualPhotoFlow", () => {
 
     expect(
       await screen.findByText(
-        "Ya no quedan redos para esta foto. Descártala y toma una nueva.",
+        "Ya no puedes rehacer esta foto. Descártala y toma una nueva.",
       ),
     ).toBeInTheDocument();
   }, 15_000);
