@@ -3124,8 +3124,10 @@ def test_a_run_while_another_holds_the_lock_stops_quietly(monkeypatch, capsys, t
 
 
 def test_a_run_takes_the_lock_before_the_self_update(monkeypatch, tmp_path):
+    import os
+
     import factory.main as main_module
-    from factory.run_lock import RunLocked, acquire_run_lock
+    from factory.run_lock import LOCK_ENV, RunLocked, acquire_run_lock
 
     seen = []
 
@@ -3143,3 +3145,4 @@ def test_a_run_takes_the_lock_before_the_self_update(monkeypatch, tmp_path):
 
     assert main_module.main([]) == 0
     assert seen == ["locked"]
+    os.close(int(os.environ[LOCK_ENV]))

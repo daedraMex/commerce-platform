@@ -25,12 +25,37 @@ def test_a_second_run_is_refused_and_told_who_holds_the_lock(tmp_path):
 
 def test_the_lock_goes_with_the_process(tmp_path):
     lock = tmp_path / "run.lock"
-    fd = acquire_run_lock(lock, env={}, command="run")
-    os.close(fd)  # what the kernel does when the process dies
+    holder = (
+        "import sys\n"
+        "from factory.run_lock import acquire_run_lock\n"
+        "acquire_run_lock(sys.argv[1], env={}, command='run')\n"
+        "print('held', flush=True)\n"
+    )
+
+    # A real process takes the lock and exits without releasing it.
+    out = subprocess.run(
+        [sys.executable, "-c", holder, str(lock)], capture_output=True, text=True, check=True
+    )
+    assert out.stdout.strip() == "held"
 
     again = acquire_run_lock(lock, env={}, command="run")
-
     os.close(again)
+
+
+def test_the_descriptor_survives_an_exec(tmp_path):
+    lock = tmp_path / "run.lock"
+    fd = acquire_run_lock(lock, env={}, command="run")
+
+    assert os.get_inheritable(fd)  # os.execv would close it otherwise
+    os.close(fd)
+
+
+def test_children_never_see_the_lock_descriptor(monkeypatch):
+    from factory.shell import merge_env
+
+    monkeypatch.setenv(LOCK_ENV, "7")
+
+    assert LOCK_ENV not in merge_env({"PATH": "/usr/bin"})
 
 
 def test_a_self_updated_process_keeps_the_lock_it_inherited(tmp_path):
