@@ -58,6 +58,8 @@ Definition of Done, and docs/adr/ for the decisions already taken.
   - infrastructure/: Django ORM, repositories, external gateways
   - interfaces/: DRF views and serializers, Celery tasks
 - CRUD-only modules (accounts, stores, catalog) use plain Django.
+- Other modules use the catalog only through `apps.catalog.services`, `apps.catalog.rules`
+  and the media URL builders `media_url` and `rendition_url` (ADR-0005).
 - Modules talk to each other only through services or ports; never write another
   module's models directly.
 - DRF is a thin layer: serializers validate shape, use cases enforce rules.
