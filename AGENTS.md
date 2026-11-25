@@ -75,7 +75,8 @@ rules each part.
   environment, so the generated schema is deterministic.
 - The media bucket holds public product media only; never store private files
   (invoices, customer documents) in it.
-- Never upload a supplier's watermarked image; every catalog image is our own photo.
+- A catalog image is our own photo or an image its supplier authorized in writing
+  (ADR-0033); it never shows a watermark.
 
 ## Stores (one business today, SaaS later)
 - Never hardcode store names; stores are data, created with the `create_store` command.

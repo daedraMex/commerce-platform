@@ -245,7 +245,8 @@ mostrado incluye el recargo.
 **Objetivo:** vender en tu propio dominio.
 **Entregables:** un solo `storefront` en Next.js con tema por tienda, resuelta por dominio, que
 sale en vivo con `home`: catálogo, producto (con el video público que la API devuelve desde la
-fase 4d), carrito, checkout, confirmación e historial; SEO; despliegue en Vercel (plan Pro)
+fase 4d), carrito, checkout, confirmación e historial; SEO; zoom solo en imágenes de al menos
+1,200 px de ancho (ADR-0033); despliegue en Vercel (plan Pro)
 con previews. Usa el `packages/api-client` y la sesión con BFF (ADR-0027) que ya existen desde la 4b; el tema
 completo por tienda se decide en su /grill-with-docs.
 **Criterio de salida:** alguien compra una frazada en tu dominio.
