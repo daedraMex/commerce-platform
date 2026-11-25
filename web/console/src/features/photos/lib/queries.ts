@@ -3,6 +3,7 @@ import {
   getApiV1StaffPhotosRetrieveQueryKey,
   getApiV1StaffProductsImagesRetrieveQueryKey,
   getApiV1StaffProductsListQueryKey,
+  getApiV1StaffProductsRetrieveQueryKey,
   type ApiV1StaffProductsListParams,
 } from "@commerce-platform/api-client";
 
@@ -15,6 +16,10 @@ export function photoProductsQueryKey(
   params?: ApiV1StaffProductsListParams,
 ) {
   return [...getApiV1StaffProductsListQueryKey(params), store] as const;
+}
+
+export function photoProductQueryKey(store: string, productId: number) {
+  return [...getApiV1StaffProductsRetrieveQueryKey(productId), store] as const;
 }
 
 /** One polling run of a submission: a new processing attempt starts a fresh backoff. */

@@ -482,6 +482,34 @@ def has_active_main_image():
     )
 
 
+def staff_products(store_id):
+    """The store's active products with the active main image the photo workflow needs."""
+    return (
+        Product.objects.filter(store_id=store_id, is_active=True)
+        .select_related("category")
+        .prefetch_related(
+            Prefetch(
+                "product_media",
+                queryset=main_product_images().filter(media__store_id=store_id),
+            )
+        )
+    )
+
+
+STAFF_PRODUCT_ERRORS = {
+    **STORE_ERRORS,
+    **problem_response(
+        401,
+        ("not_authenticated", "Authentication credentials were not provided."),
+        ("token_invalid", "Given token not valid for any token type"),
+    ),
+    **problem_response(
+        403,
+        ("permission_denied", CanManageCatalog.message),
+    ),
+}
+
+
 @extend_schema(
     parameters=[
         STORE_HEADER_PARAMETER,
@@ -498,16 +526,7 @@ def has_active_main_image():
             ),
             examples=[STAFF_PRODUCT_PAGE_EXAMPLE],
         ),
-        **STORE_ERRORS,
-        **problem_response(
-            401,
-            ("not_authenticated", "Authentication credentials were not provided."),
-            ("token_invalid", "Given token not valid for any token type"),
-        ),
-        **problem_response(
-            403,
-            ("permission_denied", CanManageCatalog.message),
-        ),
+        **STAFF_PRODUCT_ERRORS,
     },
 )
 class StaffProductListView(StoreScopedMixin, generics.ListAPIView):
@@ -517,16 +536,7 @@ class StaffProductListView(StoreScopedMixin, generics.ListAPIView):
 
     def get_queryset(self):
         store_id = self.request.store.id
-        queryset = (
-            Product.objects.filter(store_id=store_id, is_active=True)
-            .select_related("category")
-            .prefetch_related(
-                Prefetch(
-                    "product_media",
-                    queryset=main_product_images().filter(media__store_id=store_id),
-                )
-            )
-        )
+        queryset = staff_products(store_id)
 
         category = self.request.query_params.get("category")
         if category:
@@ -547,3 +557,36 @@ class StaffProductListView(StoreScopedMixin, generics.ListAPIView):
                 raise ValidationError({"needs_main_image": ["Use true or false."]})
 
         return queryset.order_by("name", "id")
+
+
+@extend_schema(
+    parameters=[STORE_HEADER_PARAMETER],
+    responses={
+        200: OpenApiResponse(
+            response=StaffProductSerializer,
+            description=(
+                "One of the store's active products with its active main image, for the photo "
+                "workflow."
+            ),
+            examples=[STAFF_PRODUCT_PAGE_EXAMPLE],
+        ),
+        **STAFF_PRODUCT_ERRORS,
+        **problem_response(
+            404,
+            ("not_found", "No active product matches this id in this store."),
+        ),
+    },
+)
+class StaffProductDetailView(StoreScopedMixin, generics.RetrieveAPIView):
+    store_permission_classes = [CanManageCatalog]
+    serializer_class = StaffProductSerializer
+    queryset = Product.objects.none()
+
+    def get_queryset(self):
+        return staff_products(self.request.store.id)
+
+    def get_object(self):
+        product = self.get_queryset().filter(pk=self.kwargs["pk"]).first()
+        if product is None:
+            raise NotFound("No active product matches this id in this store.")
+        return product

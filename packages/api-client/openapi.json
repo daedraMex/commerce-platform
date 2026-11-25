@@ -4838,6 +4838,195 @@
         ]
       }
     },
+    "/api/v1/staff/products/{id}/": {
+      "get": {
+        "description": "Opt a view into resolving request.store and checking store-level permissions.\n\nThe order is fixed (ADR-0019): authentication and global permissions (401), then the\nstore (400), then the view's ``store_permission_classes`` (403).",
+        "operationId": "api_v1_staff_products_retrieve",
+        "parameters": [
+          {
+            "description": "Slug of the store the request is scoped to, such as home.",
+            "in": "header",
+            "name": "X-Store",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "StaffProductPage": {
+                    "summary": "Staff product page",
+                    "value": {
+                      "category": {
+                        "name": "Frazada",
+                        "slug": "frazada"
+                      },
+                      "id": 12,
+                      "main_image": {
+                        "alt_text": "Blue flannel blanket with a moon pattern",
+                        "height": 800,
+                        "medium_url": "https://media.example.com/stores/1/media/renditions/abc123-800w-v1.webp",
+                        "position": 1,
+                        "role": "main",
+                        "thumbnail_url": "https://media.example.com/stores/1/media/renditions/abc123-320w-v1.webp",
+                        "url": "https://media.example.com/stores/1/media/abc123.jpg",
+                        "variant": null,
+                        "width": 1200
+                      },
+                      "name": "Frazada Térmica",
+                      "needs_main_image": false,
+                      "slug": "frazada-termica"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/StaffProduct"
+                }
+              }
+            },
+            "description": "One of the store's active products with its active main image, for the photo workflow."
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "StoreHeaderInvalid": {
+                    "summary": "store_header_invalid",
+                    "value": {
+                      "code": "store_header_invalid",
+                      "detail": "The X-Store header is not a valid store slug.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreHeaderMissing": {
+                    "summary": "store_header_missing",
+                    "value": {
+                      "code": "store_header_missing",
+                      "detail": "The X-Store header is required.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  },
+                  "StoreNotFound": {
+                    "summary": "store_not_found",
+                    "value": {
+                      "code": "store_not_found",
+                      "detail": "No active store matches the X-Store header.",
+                      "status": 400,
+                      "title": "Bad Request",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The X-Store header is required. The X-Store header is not a valid store slug. No active store matches the X-Store header."
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotAuthenticated": {
+                    "summary": "not_authenticated",
+                    "value": {
+                      "code": "not_authenticated",
+                      "detail": "Authentication credentials were not provided.",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  },
+                  "TokenInvalid": {
+                    "summary": "token_invalid",
+                    "value": {
+                      "code": "token_invalid",
+                      "detail": "Given token not valid for any token type",
+                      "status": 401,
+                      "title": "Unauthorized",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "Authentication credentials were not provided. Given token not valid for any token type"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "PermissionDenied": {
+                    "summary": "permission_denied",
+                    "value": {
+                      "code": "permission_denied",
+                      "detail": "You do not have permission to manage the catalog.",
+                      "status": 403,
+                      "title": "Forbidden",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "You do not have permission to manage the catalog."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "NotFound": {
+                    "summary": "not_found",
+                    "value": {
+                      "code": "not_found",
+                      "detail": "No active product matches this id in this store.",
+                      "status": 404,
+                      "title": "Not Found",
+                      "type": "about:blank"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "No active product matches this id in this store."
+          }
+        },
+        "security": [
+          {
+            "jwtAuth": []
+          }
+        ],
+        "tags": [
+          "api"
+        ]
+      }
+    },
     "/api/v1/staff/products/{id}/images/": {
       "get": {
         "description": "Return one product's carousel for staff review and ordering.",

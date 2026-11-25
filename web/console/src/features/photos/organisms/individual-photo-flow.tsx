@@ -18,7 +18,7 @@ import {
   apiV1StaffPhotosRemoveCreate,
   apiV1StaffPhotosRetryCreate,
   useApiV1CatalogCategoriesList,
-  useApiV1StaffProductsList,
+  useApiV1StaffProductsRetrieve,
   type PhotoSubmission,
 } from "@commerce-platform/api-client";
 
@@ -41,7 +41,7 @@ import {
 import {
   photoCarouselQueryKey,
   photoCategoriesQueryKey,
-  photoProductsQueryKey,
+  photoProductQueryKey,
 } from "../lib/queries";
 import { redoPhoto, uploadPhoto } from "../lib/upload";
 import { PhotoEditor } from "../molecules/photo-editor";
@@ -59,6 +59,7 @@ type PhotoStage = "capture" | "edit" | "status";
 type ProblemBody = {
   code?: string;
   detail?: string;
+  status?: number;
 };
 
 function problemOf(error: unknown): ProblemBody | null {
@@ -112,14 +113,13 @@ export function IndividualPhotoFlow({
   const t = useTranslations("Photos");
   const queryClient = useQueryClient();
 
-  const products = useApiV1StaffProductsList(
-    { page_size: 100 },
-    { query: { queryKey: photoProductsQueryKey(store, { page_size: 100 }) } },
-  );
+  const productQuery = useApiV1StaffProductsRetrieve(productId, {
+    query: { queryKey: photoProductQueryKey(store, productId) },
+  });
   const categories = useApiV1CatalogCategoriesList({
     query: { queryKey: photoCategoriesQueryKey(store) },
   });
-  const product = products.data?.results.find((item) => item.id === productId);
+  const product = productQuery.data;
   const categoryShape = product
     ? categories.data?.find((category) => category.slug === product.category.slug)
         ?.shape
@@ -302,8 +302,9 @@ export function IndividualPhotoFlow({
     setStage("edit");
   };
 
-  const productQueryError = products.isError;
-  const productMissing = products.data !== undefined && !product;
+  const productMissing =
+    productQuery.isError && problemOf(productQuery.error)?.status === 404;
+  const productQueryError = productQuery.isError && !productMissing;
 
   return (
     <main data-store={store} className="mx-auto w-full max-w-md p-3 sm:p-4">
@@ -316,7 +317,8 @@ export function IndividualPhotoFlow({
         </Button>
       </div>
 
-      {products.isPending || (categories.isPending && !categories.data) ? (
+      {productQuery.isPending ||
+      (categories.isPending && !categories.data) ? (
         <p className="py-8 text-center text-sm text-foreground/60">
           {t("loading")}
         </p>
@@ -327,7 +329,7 @@ export function IndividualPhotoFlow({
             variant="outline"
             size="sm"
             className="mt-2"
-            onClick={() => products.refetch()}
+            onClick={() => productQuery.refetch()}
           >
             {t("retry")}
           </Button>
