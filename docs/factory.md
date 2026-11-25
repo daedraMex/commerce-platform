@@ -249,7 +249,7 @@ Run these once, as the admin user unless a step says `factory`.
     cd /srv/factory/repo
     git remote set-url --push origin https://github.com/daedraMex/commerce-platform.git
     cd tools/factory
-    uv sync
+    uv sync --locked
     ```
 
     The clone must belong to group `factory`, never to `factory-work` or any
@@ -425,7 +425,9 @@ Run these once, as the admin user unless a step says `factory`.
       requests always go through her approval.
     - **main checks**: require the "Backend", "Console", "Level 2 E2E",
       "Celery broker" and "Ticket link" checks, with **Require branches to be
-      up to date before merging**. No bypass actors.
+      up to date before merging**. No bypass actors. Add "Factory" once it
+      has been green on `main` for a week (#216), and add it to the list in
+      ADR-0032 in the same change.
 
     In the repository settings, turn on **Always suggest updating pull request
     branches**. Do not give the factory or any agent a bypass. Agents (the
@@ -462,6 +464,19 @@ To upgrade an existing machine to this version:
    ```
    Then run `factory preflight` by hand: it makes a run home and asks both
    models to answer from one.
+8. Locked services (#216), as `factory`: both services now run
+   `uv run --locked`, so a stale `uv.lock` stops the run instead of being
+   rewritten in the checkout. The self-update does not copy unit files, so copy
+   them and reload:
+   ```bash
+   cp /srv/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
+   cp /srv/factory/repo/tools/factory/systemd/factory-metrics.service ~/.config/systemd/user/
+   systemctl --user daemon-reload && systemctl --user restart factory.timer
+   ```
+   The next hourly run should start; check it with
+   `journalctl --user -u factory.service -n 20`. Run the factory by hand with
+   `uv run --locked` too (and `uv sync --locked`): plain `uv run` rewrites a
+   stale `uv.lock`, and the self-update then stops on local changes.
 
 ## Updating the factory
 
@@ -483,7 +498,7 @@ cd /srv/factory/repo
 git status --short          # see what is there before touching it
 git switch main             # if it was on another branch
 git merge --ff-only origin/main
-cd tools/factory && uv sync
+cd tools/factory && uv sync --locked
 ```
 Set `FACTORY_SELF_UPDATE=0` in `secrets.env` to turn it off (for example while
 testing a branch on the machine); then update by hand with the same commands.
@@ -719,7 +734,7 @@ unreachable" as before.
   source; when every attack passes, Important findings are listed in the PR body
   as **Unproven** and do not block; tests that cannot give a verdict (import
   error, timeout) prove nothing, and the findings block as before. Turn it on
-  only after one `FACTORY_REVIEW_TESTS=1 uv run factory` by hand on the machine.
+  only after one `FACTORY_REVIEW_TESTS=1 uv run --locked factory` by hand on the machine.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** the commit its checks ran on, each area check
   script that passed or was skipped, the agent steps used and the last lines of
@@ -932,7 +947,7 @@ first real night:
 ```bash
 cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
-uv run factory preflight
+uv run --locked factory preflight
 ```
 
 It uses the real tools and the real code paths, not fakes: it fetches
@@ -969,7 +984,7 @@ As `factory`:
 ```bash
 cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
-uv run factory
+uv run --locked factory
 ```
 
 ## Weekly metrics
@@ -989,7 +1004,7 @@ Telegram does not accept makes the command exit non-zero. By hand:
 ```bash
 cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
-uv run factory metrics
+uv run --locked factory metrics
 ```
 
 ## Stopping it

@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 RUNBOOK = Path(__file__).resolve().parents[3] / "docs" / "factory.md"
@@ -35,7 +36,7 @@ def test_runbook_documents_the_sudoers_migration():
 def test_runbook_says_run_the_preflight_after_any_change():
     text = RUNBOOK.read_text()
 
-    assert "uv run factory preflight" in text
+    assert "uv run --locked factory preflight" in text
     assert "first after any machine or factory change" in text
 
 
@@ -189,3 +190,22 @@ def test_runbook_documents_the_final_sudoers_file_exactly():
     assert "Sudo's `*` does not cross `/`" in flat
     assert "a sudoers glob is not a security boundary for `rm`" in flat
     assert "/usr/bin/install" not in text
+
+
+def test_runbook_says_to_copy_the_locked_service_units_and_reload():
+    text = RUNBOOK.read_text()
+
+    section = text.split("## Migrating an existing machine", 1)[1].split("\n## ", 1)[0]
+    assert "uv run --locked" in section
+    assert "cp /srv/factory/repo/tools/factory/systemd/factory.service" in section
+    assert "cp /srv/factory/repo/tools/factory/systemd/factory-metrics.service" in section
+    assert "systemctl --user daemon-reload" in section
+
+
+def test_runbook_runs_the_factory_with_a_locked_environment():
+    # Plain `uv run`/`uv sync` rewrite a stale uv.lock in the checkout, which the
+    # self-update then refuses as local changes (#216).
+    text = RUNBOOK.read_text()
+
+    assert "uv run factory" not in text
+    assert re.search(r"^\s*(cd tools/factory && )?uv sync\s*$", text, re.MULTILINE) is None
