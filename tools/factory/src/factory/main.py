@@ -10,11 +10,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .areas import BACKEND, Area, select_areas
+from .attempt_loop import DECISIONS_FILE, Attempt, AttemptLoop
 from .cleanup import cleanup_old
 from .config import Settings
 from .contract_diff import touched_contract_ids, undeclared_contracts
 from .credentials import GithubAppTokenProvider, TokenProvider
-from .decisions import DECISIONS_HEADER, extract_decisions, extract_open_question, extract_summary
+from .decisions import DECISIONS_HEADER, extract_decisions, extract_summary
 from .diff import DiffStats, is_dependency_path, non_dependency_change, touches_protected_paths
 from .git import CheckResult, Git, verify_git_version
 from .github import GitHub, GitHubError
@@ -50,11 +51,9 @@ from .review_step import (
     Finding,
     PrePrReview,
     attack_test_paths,
-    build_reviewer_feedback,
     compose_reviewer_prompt,
     inline_opencode_config,
     parse_review,
-    stuck_reason,
     suggested_ticket_body,
     suggested_ticket_title,
 )
@@ -77,7 +76,6 @@ from .tickets import (
     worktree_path,
 )
 
-DECISIONS_FILE = "DECISIONS.md"
 IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
 LOG_TAIL_LINES = 30
 FACTORY_BOT_LOGIN = "xolo-bot"
@@ -337,15 +335,12 @@ class Factory:
         if self.git.remote_branch_exists(
             self.settings.repo_dir, branch, token
         ) and not self.github.has_open_pr_for_branch(branch, token):
-            return self._stuck(
+            return self._stuck_after(
                 ticket,
+                Attempt(0, "", failing_check=_orphan_branch_check(branch)),
                 model=model,
-                decisions="",
                 log_path=self._log_path(ticket),
                 worktree=None,
-                open_question=None,
-                failing_check=_orphan_branch_check(branch),
-                attempts=0,
             )
         self._remove_stale_ticket_worktree(worktree, branch)
         # Each ticket fetches its own base; it must not depend on the preflight's fetch.
@@ -355,127 +350,42 @@ class Factory:
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
         log_path = self._log_path(ticket)
-        deadline = time.monotonic() + self.settings.time_limit_seconds
-        made = 0
-        decisions = ""
-        feedback = ""
-        failed_areas = ()
-        review_feedback = ""
-        previous_findings: tuple[Finding, ...] = ()
-        for _step in range(1, self.settings.attempts + 1):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return self._stuck(
-                    ticket,
-                    model=model,
-                    decisions=decisions,
-                    log_path=log_path,
-                    worktree=worktree,
-                    open_question=None,
-                    failing_check="time budget exceeded",
-                    attempts=made,
-                )
-            prompt = compose_prompt(
+        attempt = self._attempt_loop().run(
+            worktree=worktree,
+            model=model,
+            builder_config=builder_config,
+            compose=lambda feedback: compose_prompt(
                 ticket,
                 model=model,
                 branch=branch,
                 command_template=command_template,
                 overlay=self.overlay,
-                feedback=feedback,
-                failed_areas=failed_areas,
-                review_feedback=review_feedback,
+                feedback=feedback.check_output,
+                failed_areas=feedback.failed_areas,
+                review_feedback=feedback.review,
+            ),
+            write_log=lambda step, result: self._write_log(ticket, result, step=step, model=model),
+            review=lambda step, previous, deadline: self._pre_pr_review(
+                ticket, worktree=worktree, step=step, previous=previous, deadline=deadline
+            ),
+        )
+        if not attempt.passed:
+            return self._stuck_after(
+                ticket, attempt, model=model, log_path=log_path, worktree=worktree
             )
-            result = self.runner.run(
-                worktree=worktree,
-                model=model,
-                prompt=prompt,
-                timeout_seconds=int(remaining),
-                config_content=builder_config,
-            )
-            made += 1
-            self._write_log(ticket, result, step=_step, model=model)
-            decisions = self.git.read_file(worktree, DECISIONS_FILE)
-            open_question = extract_open_question(decisions)
-
-            if open_question:
-                return self._stuck(
-                    ticket,
-                    model=model,
-                    decisions=decisions,
-                    log_path=log_path,
-                    worktree=worktree,
-                    open_question=open_question,
-                    failing_check="decision needed",
-                    attempts=made,
-                )
-            if result.timed_out:
-                return self._stuck(
-                    ticket,
-                    model=model,
-                    decisions=decisions,
-                    log_path=log_path,
-                    worktree=worktree,
-                    open_question=None,
-                    failing_check="time budget exceeded",
-                    attempts=made,
-                )
-            check = self.git.check(worktree)
-            if check.passed:
-                review = self._pre_pr_review(
-                    ticket,
-                    worktree=worktree,
-                    step=_step,
-                    previous=previous_findings,
-                    deadline=deadline,
-                )
-                stuck_check = review.stuck_check(last_step=_step >= self.settings.attempts)
-                if stuck_check is not None:
-                    return self._stuck(
-                        ticket,
-                        model=model,
-                        decisions=decisions,
-                        log_path=log_path,
-                        worktree=worktree,
-                        open_question=None,
-                        failing_check=stuck_check,
-                        attempts=made,
-                    )
-                if review.blocking:
-                    feedback = ""
-                    failed_areas = ()
-                    review_feedback = build_reviewer_feedback(review.findings, review.attack)
-                    previous_findings = review.findings
-                    continue
-                return self._success(
-                    ticket,
-                    model=model,
-                    branch=branch,
-                    worktree=worktree,
-                    decisions=decisions,
-                    log_path=log_path,
-                    attempts=made,
-                    checked_areas=check.checked_areas,
-                    skipped_areas=check.skipped_areas,
-                    check_output=check.output,
-                    review_lines=review.pr_lines(previous_findings),
-                    suggested=review.result.suggested,
-                )
-            # The open review findings stay in the next prompt until a review passes.
-            feedback = check.output
-            failed_areas = check.failed_areas
-        return self._stuck(
+        return self._success(
             ticket,
             model=model,
-            decisions=decisions,
-            log_path=log_path,
+            branch=branch,
             worktree=worktree,
-            open_question=None,
-            failing_check=(
-                f"check failed; {stuck_reason(open_findings[0])}"
-                if (open_findings := [f for f in previous_findings if f.tag == "Important"])
-                else f"step budget exceeded ({self.settings.attempts} attempts)"
-            ),
-            attempts=made,
+            decisions=attempt.decisions,
+            log_path=log_path,
+            attempts=attempt.attempts,
+            checked_areas=attempt.check.checked_areas,
+            skipped_areas=attempt.check.skipped_areas,
+            check_output=attempt.check.output,
+            review_lines=attempt.review.pr_lines(attempt.previous_findings),
+            suggested=attempt.review.result.suggested,
         )
 
     def _open_suggested_tickets(
@@ -521,40 +431,24 @@ class Factory:
         self.git.fetch_main(self.settings.repo_dir)
         builder_config = self._builder_config()
         if not self.git.merge_main(worktree):
-            return self._review_stuck(
+            return self._stuck_after(
                 ticket,
+                Attempt(0, "", failing_check=MERGE_CONFLICT_CHECK),
                 model=model,
-                decisions="",
                 log_path=log_path,
                 worktree=worktree,
-                open_question=None,
-                failing_check=MERGE_CONFLICT_CHECK,
-                attempts=0,
+                skip_if_closed=False,
             )
         # Measured after the merge, so files that main brought in are not
         # counted as the agent's changes by the protected-path check.
         base_sha = self.git.head_sha(worktree)
         self.git.write_file(worktree, DECISIONS_FILE, DECISIONS_HEADER)
         command_template = read_command_body(self.git.read_file(worktree, IMPLEMENT_COMMAND_PATH))
-        deadline = time.monotonic() + self.settings.time_limit_seconds
-        made = 0
-        decisions = ""
-        feedback = ""
-        failed_areas = ()
-        for _step in range(1, self.settings.attempts + 1):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return self._review_stuck(
-                    ticket,
-                    model=model,
-                    decisions=decisions,
-                    log_path=log_path,
-                    worktree=worktree,
-                    open_question=None,
-                    failing_check="time budget exceeded",
-                    attempts=made,
-                )
-            prompt = compose_review_prompt(
+        attempt = self._attempt_loop().run(
+            worktree=worktree,
+            model=model,
+            builder_config=builder_config,
+            compose=lambda feedback: compose_review_prompt(
                 ticket,
                 model=model,
                 branch=branch,
@@ -562,66 +456,31 @@ class Factory:
                 overlay=self.overlay,
                 review_body=fix.review_body,
                 comments=fix.comments,
-                feedback=feedback,
-                failed_areas=failed_areas,
-            )
-            result = self.runner.run(
-                worktree=worktree,
+                feedback=feedback.check_output,
+                failed_areas=feedback.failed_areas,
+            ),
+            write_log=lambda step, result: self._write_log(
+                ticket, result, step=step, model=model, review_fix=True
+            ),
+        )
+        if not attempt.passed:
+            return self._stuck_after(
+                ticket,
+                attempt,
                 model=model,
-                prompt=prompt,
-                timeout_seconds=int(remaining),
-                config_content=builder_config,
+                log_path=log_path,
+                worktree=worktree,
+                skip_if_closed=False,
             )
-            made += 1
-            self._write_log(ticket, result, step=_step, model=model, review_fix=True)
-            decisions = self.git.read_file(worktree, DECISIONS_FILE)
-            open_question = extract_open_question(decisions)
-
-            if open_question:
-                return self._review_stuck(
-                    ticket,
-                    model=model,
-                    decisions=decisions,
-                    log_path=log_path,
-                    worktree=worktree,
-                    open_question=open_question,
-                    failing_check="decision needed",
-                    attempts=made,
-                )
-            if result.timed_out:
-                return self._review_stuck(
-                    ticket,
-                    model=model,
-                    decisions=decisions,
-                    log_path=log_path,
-                    worktree=worktree,
-                    open_question=None,
-                    failing_check="time budget exceeded",
-                    attempts=made,
-                )
-            check = self.git.check(worktree)
-            if check.passed:
-                return self._review_success(
-                    fix,
-                    model=model,
-                    worktree=worktree,
-                    decisions=decisions,
-                    log_path=log_path,
-                    base_sha=base_sha,
-                    attempts=made,
-                    check=check,
-                )
-            feedback = check.output
-            failed_areas = check.failed_areas
-        return self._review_stuck(
-            ticket,
+        return self._review_success(
+            fix,
             model=model,
-            decisions=decisions,
-            log_path=log_path,
             worktree=worktree,
-            open_question=None,
-            failing_check=f"step budget exceeded ({self.settings.attempts} attempts)",
-            attempts=made,
+            decisions=attempt.decisions,
+            log_path=log_path,
+            base_sha=base_sha,
+            attempts=attempt.attempts,
+            check=attempt.check,
         )
 
     def _review_success(
@@ -855,6 +714,37 @@ class Factory:
         )
         self._notify(self.notifier.send_pr_ready, info)
         return TicketResult(ticket=ticket, ok=True)
+
+    def _attempt_loop(self) -> AttemptLoop:
+        return AttemptLoop(
+            runner=self.runner,
+            git=self.git,
+            attempts=self.settings.attempts,
+            time_limit_seconds=self.settings.time_limit_seconds,
+        )
+
+    def _stuck_after(
+        self,
+        ticket: Ticket,
+        attempt: Attempt,
+        *,
+        model: str,
+        log_path: Path,
+        worktree: Path | None,
+        skip_if_closed: bool = True,
+    ) -> TicketResult:
+        """The one stuck flow for every way a ticket or review fix stops."""
+        return self._stuck(
+            ticket,
+            model=model,
+            decisions=attempt.decisions,
+            log_path=log_path,
+            worktree=worktree,
+            open_question=attempt.open_question,
+            failing_check=attempt.failing_check or "",
+            attempts=attempt.attempts,
+            skip_if_closed=skip_if_closed,
+        )
 
     def _stuck(
         self,
