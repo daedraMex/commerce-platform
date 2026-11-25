@@ -509,7 +509,16 @@ To upgrade an existing machine to this version:
 
 ## Updating the factory
 
-The factory updates its own code (#215). Before anything else, every run and
+One factory runs at a time (#233). Every run and every `factory preflight`
+first takes an exclusive lock on `state/run.lock`, before anything else; a
+second one stops at once with `another factory run is in progress: pid N, run
+since <time>`, sends nothing to Telegram, and exits 0 for the hourly run (the run
+in progress does the hour's work) or 1 for a manual preflight. So a preflight by
+hand is safe at any time: it either runs alone or waits for you to run it again.
+The kernel releases the lock when the process ends, so it never stays stuck, and
+the self-update below keeps it across its re-exec.
+
+The factory updates its own code (#215). After the lock, every run and
 every `factory preflight` fetches `origin/main` in `/srv/factory/repo`. When the
 checkout is behind, on `main` and clean, it fast-forwards, runs
 `uv sync --locked` in `tools/factory` (a stale `uv.lock` fails instead of being
