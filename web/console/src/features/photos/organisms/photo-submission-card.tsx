@@ -60,6 +60,8 @@ export function PhotoSubmissionCard({
   const state = photoCardState(submission);
   const busy = busyAction !== null;
   const canRetry = state === "failed" && submission.attempts < 3;
+  const canRedo = state === "pending" || state === "failed";
+  const redosExhausted = submission.redos_remaining <= 0;
 
   const labels: Record<PhotoCardState, string> = {
     approved: t("inCarousel"),
@@ -163,6 +165,17 @@ export function PhotoSubmissionCard({
         </p>
       ) : null}
 
+      {canRedo ? (
+        <p
+          data-testid="redos-remaining"
+          className="text-xs text-foreground/60"
+        >
+          {redosExhausted
+            ? t("redosExhaustedHint")
+            : t("redosRemaining", { count: submission.redos_remaining })}
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         {state === "pending" ? (
           <Button onClick={onApply} disabled={busy}>
@@ -176,8 +189,12 @@ export function PhotoSubmissionCard({
           </Button>
         ) : null}
 
-        {state === "pending" ? (
-          <Button variant="outline" onClick={onRedo} disabled={busy}>
+        {canRedo ? (
+          <Button
+            variant="outline"
+            onClick={onRedo}
+            disabled={busy || redosExhausted}
+          >
             <RotateCcw aria-hidden="true" />
             {t("redo")}
           </Button>

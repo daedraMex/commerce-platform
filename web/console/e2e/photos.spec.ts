@@ -397,6 +397,76 @@ test("edits one photo with pointer corners, uploads it and approves it", async (
   await expect(card).not.toHaveClass(/border-accent/);
 });
 
+test("redoes a failed photo and shows it processing again", async ({
+  page,
+}, testInfo) => {
+  await signIn(page);
+  await page.goto("/anime/photos/new?product=14");
+
+  await expect(page.getByTestId("photo-page-heading")).toHaveText(
+    "Almohada Luna",
+  );
+
+  const imageBase64 = await page.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 800;
+    canvas.height = 600;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return "";
+    }
+    context.fillStyle = "#f4efe3";
+    context.fillRect(0, 0, 800, 600);
+    context.fillStyle = "#4f46e5";
+    context.fillRect(80, 70, 640, 460);
+    context.fillStyle = "#ffffff";
+    context.font = "48px sans-serif";
+    context.fillText("Almohada", 250, 320);
+    return canvas.toDataURL("image/png").split(",")[1] ?? "";
+  });
+
+  await page.getByLabel("Tomar foto").setInputFiles({
+    name: "almohada-luna.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(imageBase64, "base64"),
+  });
+
+  await expect(page.getByTestId("photo-editor")).toBeVisible();
+  await page.getByRole("button", { name: "Enviar foto" }).click();
+
+  const card = page.getByTestId("photo-submission-card");
+  await expect(card).toHaveAttribute("data-state", "failed", {
+    timeout: 15_000,
+  });
+  await expect(page.getByTestId("redos-remaining")).toHaveText(
+    "Quedan 5 redos",
+  );
+
+  const redoButton = page.getByRole("button", {
+    name: "Rehacer",
+    exact: true,
+  });
+  await expect(redoButton).toBeEnabled();
+  await redoButton.click();
+
+  await expect(page.getByTestId("photo-editor")).toBeVisible();
+  const redoResponse = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().includes("/redo"),
+  );
+  await page.getByRole("button", { name: "Rehacer foto" }).click();
+
+  const response = await redoResponse;
+  expect(response.status()).toBe(200);
+  expect(((await response.json()) as { status: string }).status).toBe(
+    "processing",
+  );
+  await expect(card).toHaveAttribute("data-state", "processing");
+  await expect(page.getByTestId("photo-state-label")).toHaveText("Procesando…");
+  await attachScreenshot(page, testInfo, "photos-redo-failed-processing.png");
+});
+
 test("reorders the product carousel by touch and shows the new cover", async ({
   page,
 }, testInfo) => {
