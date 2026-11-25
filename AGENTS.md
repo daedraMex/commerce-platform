@@ -13,8 +13,8 @@ enabled for our own stores first (feature flags) and rolled out to others after.
 Read GLOSSARY.md for the domain vocabulary, ROADMAP.md for phases and the
 Definition of Done, and docs/adr/ for the decisions already taken.
 Read docs/architecture.md when a ticket touches more than one module, adds a module,
-or crosses the backend, the console and the factory: it maps the code and points to
-the ADR that rules each part.
+or crosses areas (backend, console, factory): it maps the code and names the ADR that
+rules each part.
 
 ## Development workflow
 - This project uses the Matt Pocock skills workflow (skills in .agents/skills):
@@ -46,7 +46,7 @@ the ADR that rules each part.
 - backend/: Python 3.12 managed with uv, Django 5.2 LTS, Django REST Framework, Celery, PostgreSQL 16, Redis 7
 - web/storefront/: one Next.js + TypeScript app; the store and its theme are resolved by domain (later)
 - mobile/: Kotlin Multiplatform + Compose Multiplatform, Material 3 (later, ADR-0029)
-- packages/api-client/: TypeScript client generated from the OpenAPI schema (later)
+- packages/api-client/: TypeScript client generated from the OpenAPI schema
 - Deploy: backend on a VPS with Dokploy, storefront on Vercel
 - Tickets: GitHub Issues
 

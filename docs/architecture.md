@@ -1,9 +1,9 @@
 # Architecture
 
-A map of the code as it is today: what each part is, where it lives and which
-document decides its rules. Read it when a ticket touches more than one module, adds a
-module, or crosses the backend, the console and the factory; for work inside one module,
-that module's code, its ADRs and its contract are enough. Decisions live in `docs/adr/`,
+A map of the code as it is today: what each part is, where it lives, and the ADR that
+rules each part. Read it when a ticket touches more than one module, adds a module, or
+crosses areas (backend, console, factory); for work inside one module, that module's
+code, its ADRs and its contract are enough. Decisions live in `docs/adr/`,
 vocabulary in `GLOSSARY.md`; this page only points to them.
 
 ## Repository
@@ -69,44 +69,50 @@ import-linter keeps `domain/` and `application/` free of frameworks and infrastr
 
 ### A store-scoped request
 
-1. `StoreHeaderMiddleware` (`apps/shared/interfaces/middleware.py`) resolves `X-Store`
-   through the `StoreResolver` port and sets `request.store`; store-scoped endpoints opt in,
-   and a missing or unknown store is a 400 (ADR-0016).
-2. The view validates shape and calls a use case; the use case checks permission through
-   the `Authorizer` port (ADR-0019, ADR-0021), never `user.has_perm()`.
-3. Every query filters by the store; every error is RFC 9457 problem details with a stable
+1. `StoreHeaderMiddleware` (`apps/shared/interfaces/middleware.py`) only copies the raw
+   `X-Store` header to `request.store_slug`.
+2. A store-scoped view opts in with `StoreScopedMixin` (`apps/shared/interfaces/views.py`):
+   after authentication (401) it resolves the slug through the `StoreResolver` port, sets
+   `request.store` or returns 400 for a missing or unknown store (ADR-0016), then runs the
+   view's `store_permission_classes` (403) (ADR-0019).
+3. The view validates shape and calls a use case; the use case checks the action through
+   the `Authorizer` port (ADR-0021), never `user.has_perm()`.
+4. Every query filters by the store; every error is RFC 9457 problem details with a stable
    `code` (ADR-0014, `config/exceptions.py`).
 
 ### Background work
 
-Celery tasks receive the store explicitly. Today's task is `process_photo`
-(`apps/photos/interfaces/tasks.py`), queued after an upload through the
-`PhotoProcessingQueue` port; its name, arguments and retries are the contract
-`photos.process-photo-task`. `backend/tests/broker/` runs it through a real Redis broker.
+Celery tasks receive the store explicitly. Today's task is `process_photo`, registered
+as `apps.photos.tasks.process_photo` (`apps/photos/interfaces/tasks.py`) and queued
+through the `PhotoProcessingQueue` port after an upload, a redo or a retry; its name,
+arguments and retries are the contract `photos.process-photo-task`. `backend/tests/broker/` runs it through a real Redis broker.
 
 ### Media
 
-Product media are public objects in an S3-compatible bucket (RustFS locally, see the
-README), addressed by content hash per store; renditions come from `media_url` and
-`rendition_url`. Photo originals awaiting approval are private and read through the
-`PrivateMediaReader` port. The public bucket never holds private files.
+Product media are public objects in an S3-compatible bucket (Cloudflare R2 in production,
+RustFS locally; ADR-0028 and the README), addressed by content hash per store; renditions
+come from `media_url` and `rendition_url`. Photo originals and previews are private, in
+their own bucket, and read through the `PrivateMediaReader` port. The public bucket never
+holds private files.
 
 ## Console (Quetzal)
 
 Next.js App Router in `web/console/`, routes under `src/app/[store]/` (photos is real;
 inventory, orders, refunds and social are placeholders). The browser never holds the API
-token: `src/app/api/auth/` signs in and out and `src/app/api/backend/[...path]` proxies to
+token: `src/app/api/auth/` signs in and out and `src/app/api/backend/` (a catch-all route) proxies to
 the backend with an httpOnly session cookie (ADR-0027). Data comes from the generated
 client in `packages/api-client/` through React Query; regenerate it after an API change
 (`dump_openapi`, then `pnpm generate:client`). Features live in `src/features/<name>/`
-and do not import each other; shared UI lives in `src/components/` (atoms to templates).
+and do not import each other (eslint-plugin-boundaries in `web/console/eslint.config.mjs`);
+shared UI lives in `src/components/` (atoms to templates).
 
 ## Contracts
 
 A contract between modules has one owner and one written source in
 `docs/contracts/<module>.md` (ADR-0031); today `docs/contracts/photos.md` holds the processing task,
 the processing queue, the catalog port and the submission states. A ticket names the
-sections it touches, and the factory never runs two tickets on the same section.
+sections it touches, and the factory never runs two tickets that change the same section
+at once.
 
 ## Night factory
 
@@ -120,8 +126,10 @@ approves (ADR-0025, ADR-0032). Its code: `attempt_loop.py` (steps), `publisher.p
 
 ## Checks
 
-| Area | Command | CI job |
-| --- | --- | --- |
-| backend | `backend/scripts/check.sh` (ruff, import-linter, migrations, schema, pytest) | Backend, Celery broker |
-| console | `web/console/scripts/check.sh` (client, lint, types, unit, level-1 Playwright) | Console, Level 2 E2E |
-| factory | `cd tools/factory && uv run pytest` | Factory |
+| CI job | Runs |
+| --- | --- |
+| Backend | `backend/scripts/check.sh`: ruff, import-linter, migrations, schema, pytest |
+| Celery broker | `pytest tests/broker -m real_broker` against a real Redis and worker |
+| Console | `web/console/scripts/check.sh`: client, lint, types, unit, level-1 Playwright |
+| Level 2 E2E | `test:e2e:level2`: Playwright against the running backend stack |
+| Factory | in `tools/factory/`: `uv lock --check`, ruff check and format, `uv run --locked pytest` |
