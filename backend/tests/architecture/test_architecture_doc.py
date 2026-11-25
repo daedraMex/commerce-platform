@@ -5,8 +5,8 @@ mislead them. Checked: every backticked path, every cited ADR and every CI job i
 checks table. Planned parts (the storefront, the mobile app) are not checked.
 """
 
+import os
 import re
-import subprocess
 
 from tests.architecture.support import BACKEND_DIR
 
@@ -26,14 +26,29 @@ _ADR = re.compile(r"ADR-(\d{4})")
 _CI_ROW = re.compile(r"^\| ([A-Z][A-Za-z0-9 ]+?) \| `", re.MULTILINE)
 
 
+# Never git: on the factory machine the checks run as factory-agent in a worktree
+# that factory owns, and git refuses it ("dubious ownership"). Walk the files instead.
+_SKIPPED_DIRS = {
+    ".git",
+    ".venv",
+    "node_modules",
+    "__pycache__",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    "test-results",
+    "playwright-report",
+    "dist",
+    "build",
+}
+
+
 def _tracked_names():
-    out = subprocess.run(
-        ["git", "ls-files"], cwd=REPO_DIR, capture_output=True, text=True, check=True
-    ).stdout
     names = {}
-    for line in out.splitlines():
-        name = line.rsplit("/", 1)[-1]
-        names[name] = names.get(name, 0) + 1
+    for _dirpath, dirnames, filenames in os.walk(REPO_DIR):
+        dirnames[:] = [name for name in dirnames if name not in _SKIPPED_DIRS]
+        for name in filenames:
+            names[name] = names.get(name, 0) + 1
     return names
 
 
