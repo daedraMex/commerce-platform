@@ -14,9 +14,10 @@ import time
 from collections.abc import Callable
 
 from .areas import AREAS
+from .cleanup_probe import verify_cleanup_probe
 from .config import Settings
 from .credentials import TokenProvider
-from .git import Git, verify_git_version
+from .git import CLEANUP_PROBE_PATH, CLEANUP_PROBE_REPO_RELATIVE, Git, verify_git_version
 from .github import GitHub
 from .isolation import sensitive_paths, verify_isolation, write_protected_paths
 from .model_health import ModelChecks
@@ -61,6 +62,7 @@ class Preflight:
         verify_isolation_fn: Callable[..., None] = verify_isolation,
         verify_git_version_fn: Callable[[], None] = verify_git_version,
         verify_sudoers_logging_fn: Callable[[], None] = verify_sudoers_logging,
+        verify_cleanup_probe_fn: Callable[[], None] | None = None,
         runner=None,
         model_checks: ModelChecks | None = None,
         recheck_models: bool = False,
@@ -74,6 +76,11 @@ class Preflight:
         self._verify_isolation = verify_isolation_fn
         self._verify_git_version = verify_git_version_fn
         self._verify_sudoers_logging = verify_sudoers_logging_fn
+        self._verify_cleanup_probe = verify_cleanup_probe_fn or (
+            lambda: verify_cleanup_probe(
+                CLEANUP_PROBE_PATH, settings.repo_dir / CLEANUP_PROBE_REPO_RELATIVE
+            )
+        )
         # The agent runner, when given, proves the cleanup works and that OpenCode
         # starts as the agent with the real env (read-only config home, #153).
         self.runner = runner
@@ -121,6 +128,9 @@ class Preflight:
 
             step = "verify sudoers logging"
             self._verify_sudoers_logging()
+
+            step = "verify cleanup probe"
+            self._verify_cleanup_probe()
 
             step = "remove preflight leftovers"
             self._remove_preflight_leftovers()

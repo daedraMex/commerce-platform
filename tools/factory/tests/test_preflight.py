@@ -168,6 +168,9 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
     def verify_sudoers_logging():
         verified.append(("verify_sudoers_logging",))
 
+    def verify_cleanup_probe():
+        verified.append(("verify_cleanup_probe",))
+
     return Preflight(
         settings,
         git=git or FakeGit(events=events),
@@ -178,6 +181,7 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
         verify_isolation_fn=verify_isolation,
         verify_git_version_fn=verify_git_version,
         verify_sudoers_logging_fn=verify_sudoers_logging,
+        verify_cleanup_probe_fn=verify_cleanup_probe,
     )
 
 
@@ -197,6 +201,7 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
         "verify_git_version",
         "verify_commit_identity",
         "verify_sudoers_logging",
+        "verify_cleanup_probe",
         "verify_no_leaked_worktrees",
         "create_worktree",
         "check",
@@ -204,7 +209,7 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
         "remove_worktree",
         "delete_branch",
     ]
-    assert events[6] == (
+    assert events[7] == (
         "create_worktree",
         Path(tmp_path / "worktrees" / "preflight-42"),
         "preflight-42",
@@ -705,3 +710,19 @@ def test_preflight_names_every_missing_label_within_the_message_limit(tmp_path):
     assert not reason.endswith("…")
     for name in REQUIRED_LABELS:
         assert name in reason
+
+
+def test_a_stale_cleanup_probe_stops_the_preflight_before_any_worktree(tmp_path):
+    events = []
+
+    def stale():
+        raise RuntimeError("cleanup probe differs from the repo")
+
+    preflight = build_preflight(tmp_path, events=events)
+    preflight._verify_cleanup_probe = stale
+
+    with pytest.raises(PreflightError) as excinfo:
+        preflight.run()
+
+    assert excinfo.value.step == "verify cleanup probe"
+    assert "create_worktree" not in [event[0] for event in events]

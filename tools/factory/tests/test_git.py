@@ -5,7 +5,6 @@ import pytest
 from factory.areas import AREAS, BACKEND, CONSOLE
 from factory.git import (
     BOT_COMMIT_NAME,
-    CLEANUP_PROBE_SCRIPT,
     Git,
     GitIdentityError,
     GitVersionError,
@@ -232,13 +231,12 @@ def test_remove_worktree_requires_the_agent_user(tmp_path):
     assert run.calls == []
 
 
-def test_create_agent_cleanup_probe_uses_the_check_script_as_agent(tmp_path):
+def test_create_agent_cleanup_probe_runs_the_installed_script_as_agent(tmp_path):
     worktree = tmp_path / "worktrees" / "nf-7-x"
     scripts = worktree / "backend" / "scripts"
     scripts.mkdir(parents=True)
     check = scripts / "check.sh"
     check.write_text("#!/bin/sh\n")
-    probe = worktree / "backend" / ".cleanup-probe"
     run = RecordingRun()
 
     result = Git(
@@ -248,26 +246,19 @@ def test_create_agent_cleanup_probe_uses_the_check_script_as_agent(tmp_path):
         base_env={"PATH": "/usr/bin", "HOME": "/home/factory", "LANG": "C"},
     ).create_agent_cleanup_probe(worktree)
 
-    assert result == probe
-    assert check.read_text() == CLEANUP_PROBE_SCRIPT
-    assert check.stat().st_mode & 0o777 == 0o755
-    argv, cwd, env, replace_env = run.calls[0]
+    assert result == worktree / "backend" / ".cleanup-probe"
+    assert check.read_text() == "#!/bin/sh\n"
+    argv, cwd, _env, _replace_env = run.calls[0]
     assert argv == [
         "sudo",
         "-n",
-        "--preserve-env=PATH,HOME,LANG,SECRET_KEY,DEBUG,ALLOWED_HOSTS,REDIS_URL,PYTEST_ADDOPTS",
         "-u",
         "factory-agent",
         "--",
-        str(check),
+        "/usr/local/lib/factory/cleanup-probe",
+        str(worktree),
     ]
-    assert cwd == str(scripts)
-    assert replace_env is True
-    assert env["HOME"] == "/home/factory-agent"
-    assert env["PYTEST_ADDOPTS"] == "-p no:cacheprovider"
-    assert "mkdir -m 0770" in CLEANUP_PROBE_SCRIPT
-    assert "chgrp" in CLEANUP_PROBE_SCRIPT
-    assert 'mv "$probe" "$worktree/backend/.cleanup-probe"' in CLEANUP_PROBE_SCRIPT
+    assert cwd == "/"
 
 
 def test_create_agent_cleanup_probe_raises_on_failure(tmp_path):

@@ -182,7 +182,8 @@ def test_runbook_documents_the_final_sudoers_file_exactly():
         "/srv/factory/worktrees/*/web/console/scripts/check.sh, "
         "/usr/bin/rm -rf /srv/factory/worktrees/*, "
         "/usr/bin/rm -rf /srv/factory/agent-homes/*, "
-        "/usr/bin/pkill -KILL -u factory-agent",
+        "/usr/bin/pkill -KILL -u factory-agent, "
+        "NOSETENV: /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*",
     )
     sudoers = "\n".join(f"    {line}" for line in lines)
 
@@ -209,3 +210,17 @@ def test_runbook_runs_the_factory_with_a_locked_environment():
 
     assert "uv run factory" not in text
     assert re.search(r"^\s*(cd tools/factory && )?uv sync\s*$", text, re.MULTILINE) is None
+
+
+def test_runbook_installs_the_root_owned_cleanup_probe():
+    text = RUNBOOK.read_text()
+    install = (
+        "sudo install -D -o root -g root -m 0755 "
+        "/srv/factory/repo/tools/factory/scripts/cleanup-probe "
+        "/usr/local/lib/factory/cleanup-probe"
+    )
+
+    assert text.count(install) == 2  # setup and migration
+    migration = text.split("## Migrating an existing machine", 1)[1].split("\n## ", 1)[0]
+    assert "NOSETENV: /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*" in migration
+    assert "verify cleanup probe" in migration
