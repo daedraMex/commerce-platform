@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -72,3 +73,15 @@ def test_a_missing_repo_copy_fails(tmp_path):
 
     with pytest.raises(CleanupProbeError, match="repo copy"):
         verify_cleanup_probe(installed, repo, owner_uid=os.getuid())
+
+
+def test_every_failure_keeps_the_install_command_within_the_telegram_limit(tmp_path):
+    from factory.git import CLEANUP_PROBE_PATH
+    from factory.preflight import MAX_ERROR_CHARS
+
+    repo = Path("/srv/factory/repo/tools/factory/scripts/cleanup-probe")
+    install = f"sudo install -D -o root -g root -m 0755 {repo} {CLEANUP_PROBE_PATH}"
+    # "preflight failed: verify cleanup probe: " plus the longest reason.
+    longest = f"{CLEANUP_PROBE_PATH} is group- or world-writable; as admin: {install}"
+
+    assert len("verify cleanup probe: " + longest) <= MAX_ERROR_CHARS

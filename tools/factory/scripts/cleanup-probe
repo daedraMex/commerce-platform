@@ -1,11 +1,14 @@
-#!/bin/bash
+#!/bin/bash -p
 # Creates backend/.cleanup-probe in one factory worktree, as factory-agent, so the
 # preflight can prove the worktree cleanup removes agent-owned files (#140).
 # Installed root-owned at /usr/local/lib/factory/cleanup-probe and run with
 #   sudo -n -u factory-agent -- /usr/local/lib/factory/cleanup-probe <worktree>
 # In sudoers, the * in /srv/factory/worktrees/* matches any argument, so this
-# script checks the path itself. It reads nothing from the environment, because
-# the sudoers rule carries SETENV.
+# script checks the path itself. Its sudoers entry is NOSETENV, so sudo resets
+# the environment, and -p ignores BASH_ENV, ENV, SHELLOPTS and imported
+# functions. The checks are not a boundary against factory (it can already run
+# code as factory-agent through check.sh); they keep a mistake from writing
+# outside a worktree.
 set -euo pipefail
 PATH=/usr/bin:/bin
 
@@ -29,6 +32,12 @@ esac
 [ ! -L "$worktree" ] && [ -d "$worktree" ] || refuse "$worktree is not a directory"
 [ ! -L "$worktree/backend" ] && [ -d "$worktree/backend" ] \
   || refuse "$worktree/backend is not a directory"
+# Resolve once and work from there, so a symlink swapped in after the checks
+# cannot redirect the rename.
+cd -P -- "$worktree/backend"
+[ "$(pwd -P)" = "$worktree/backend" ] || refuse "$worktree/backend resolves elsewhere"
+[ ! -e .cleanup-probe ] && [ ! -L .cleanup-probe ] \
+  || refuse "$worktree/backend/.cleanup-probe already exists"
 
 tmp="$(mktemp -d /tmp/cleanup-probe.XXXXXX)"
 trap 'rm -rf "$tmp"' EXIT
@@ -38,5 +47,5 @@ chgrp "$(id -gn)" "$probe"
 chmod 0770 "$probe"
 printf 'cleanup probe\n' > "$probe/file"
 chmod 0644 "$probe/file"
-# -T: fail on an existing probe instead of moving this one inside it.
-mv -T "$probe" "$worktree/backend/.cleanup-probe"
+# -T: never move the probe inside a directory that appeared since the check.
+mv -T -- "$probe" .cleanup-probe

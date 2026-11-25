@@ -93,7 +93,7 @@ Run these once, as the admin user unless a step says `factory`.
     Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
-    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/rm -rf /srv/factory/agent-homes/*, /usr/bin/pkill -KILL -u factory-agent, /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/rm -rf /srv/factory/agent-homes/*, /usr/bin/pkill -KILL -u factory-agent, NOSETENV: /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*
     ```
 
     The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
@@ -110,10 +110,14 @@ Run these once, as the admin user unless a step says `factory`.
     sudo install -D -o root -g root -m 0755 /srv/factory/repo/tools/factory/scripts/cleanup-probe /usr/local/lib/factory/cleanup-probe
     ```
     The script accepts only one existing directory directly under
-    `/srv/factory/worktrees` (not a symlink), reads nothing from the
-    environment and creates `backend/.cleanup-probe` through a temp dir and a
-    rename. The preflight compares its SHA-256 with the repo copy and refuses a
-    copy that is not root-owned or is group- or world-writable.
+    `/srv/factory/worktrees` (not a symlink) and creates
+    `backend/.cleanup-probe` through a temp dir and a rename. Its entry is the
+    last of the rule and tagged `NOSETENV`, so sudo resets its environment, and
+    it runs as `bash -p`. These checks keep a mistake inside the worktrees; they
+    are not a boundary against `factory`, which can already run code as
+    `factory-agent` through `check.sh`. The preflight compares its SHA-256 with
+    the repo copy and refuses a copy that is not root-owned or is group- or
+    world-writable.
 
     `Defaults:factory !log_allowed` stops sudo from writing the successful
     downgrade commands to the journal, including the environment named in
@@ -490,8 +494,8 @@ To upgrade an existing machine to this version:
    `uv run --locked` too (and `uv sync --locked`): plain `uv run` rewrites a
    stale `uv.lock`, and the self-update then stops on local changes.
 9. Cleanup probe script (#140), as admin: install it and add
-   `/usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*` to the end
-   of the rule in `/etc/sudoers.d/factory-agent` (the file in the setup steps):
+   `NOSETENV: /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*` to
+   the end of the rule in `/etc/sudoers.d/factory-agent` (the file in the setup steps):
    ```bash
    sudo install -D -o root -g root -m 0755 /srv/factory/repo/tools/factory/scripts/cleanup-probe /usr/local/lib/factory/cleanup-probe
    sudo visudo -f /etc/sudoers.d/factory-agent

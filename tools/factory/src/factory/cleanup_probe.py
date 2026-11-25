@@ -32,6 +32,9 @@ def verify_cleanup_probe(installed: Path, repo_copy: Path, *, owner_uid: int = 0
         raise CleanupProbeError(f"{installed} must be owned by root; as admin: {install}")
     if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
         raise CleanupProbeError(f"{installed} is group- or world-writable; as admin: {install}")
-    actual = hashlib.sha256(installed.read_bytes()).hexdigest()
+    try:
+        actual = hashlib.sha256(installed.read_bytes()).hexdigest()
+    except OSError as exc:
+        raise CleanupProbeError(f"cannot read {installed}: {exc}; as admin: {install}") from exc
     if actual != expected:
         raise CleanupProbeError(f"{installed} differs from the repo copy; as admin: {install}")

@@ -25,6 +25,7 @@ def probe(tmp_path):
         return subprocess.run([str(script), *args], capture_output=True, text=True)
 
     run.root = root
+    run.script = script
     return run
 
 
@@ -36,11 +37,9 @@ def _worktree(root, name="preflight-42"):
 
 def test_the_script_is_executable_bash_with_a_fixed_root():
     text = SCRIPT.read_text()
-    assert text.startswith("#!/bin/bash\n")
+    assert text.startswith("#!/bin/bash -p\n")
     assert ROOT_LINE in text
     assert SCRIPT.stat().st_mode & stat.S_IXUSR
-    # SETENV in the sudoers rule would let the factory set any variable, so the
-    # script reads nothing from the environment.
     assert "${FACTORY" not in text and "$HOME" not in text
     assert "mktemp -d /tmp/" in text
 
@@ -103,13 +102,41 @@ def test_refuses_a_symlinked_worktree_or_backend(probe, tmp_path):
     assert not (outside / "backend" / ".cleanup-probe").exists()
 
 
-def test_fails_instead_of_nesting_into_an_existing_probe(probe):
+@pytest.mark.parametrize("kind", ["full", "empty", "symlink"])
+def test_refuses_an_existing_probe(probe, tmp_path, kind):
     worktree = _worktree(probe.root)
     existing = worktree / "backend" / ".cleanup-probe"
-    existing.mkdir()
-    (existing / "keep").write_text("x")
+    if kind == "symlink":
+        existing.symlink_to(tmp_path)
+    else:
+        existing.mkdir()
+        if kind == "full":
+            (existing / "keep").write_text("x")
 
     result = probe(str(worktree))
 
     assert result.returncode != 0
-    assert not (existing / ".cleanup-probe").exists()
+    assert "refusing" in result.stderr
+    assert not (tmp_path / ".cleanup-probe").exists()
+    if kind != "symlink":
+        assert not (existing / ".cleanup-probe").exists()
+
+
+def test_injected_bash_env_and_functions_do_not_run(probe, tmp_path):
+    worktree = _worktree(probe.root)
+    marker = tmp_path / "ran"
+    hook = tmp_path / "hook.sh"
+    hook.write_text(f"touch {marker}\n")
+    env = {
+        "PATH": os.environ["PATH"],
+        "BASH_ENV": str(hook),
+        "BASH_FUNC_mv%%": f"() {{ touch {marker}; }}",
+    }
+
+    result = subprocess.run(
+        [str(probe.script), str(worktree)], capture_output=True, text=True, env=env
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists()
+    assert (worktree / "backend" / ".cleanup-probe" / "file").exists()

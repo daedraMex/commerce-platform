@@ -183,7 +183,7 @@ def test_runbook_documents_the_final_sudoers_file_exactly():
         "/usr/bin/rm -rf /srv/factory/worktrees/*, "
         "/usr/bin/rm -rf /srv/factory/agent-homes/*, "
         "/usr/bin/pkill -KILL -u factory-agent, "
-        "/usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*",
+        "NOSETENV: /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*",
     )
     sudoers = "\n".join(f"    {line}" for line in lines)
 
@@ -222,5 +222,5 @@ def test_runbook_installs_the_root_owned_cleanup_probe():
 
     assert text.count(install) == 2  # setup and migration
     migration = text.split("## Migrating an existing machine", 1)[1].split("\n## ", 1)[0]
-    assert "/usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*" in migration
+    assert "NOSETENV: /usr/local/lib/factory/cleanup-probe /srv/factory/worktrees/*" in migration
     assert "verify cleanup probe" in migration
