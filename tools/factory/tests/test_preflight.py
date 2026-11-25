@@ -171,6 +171,9 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
     def verify_cleanup_probe():
         verified.append(("verify_cleanup_probe",))
 
+    def verify_agent_scheduling(agent):
+        verified.append(("verify_agent_scheduling", agent))
+
     return Preflight(
         settings,
         git=git or FakeGit(events=events),
@@ -182,6 +185,7 @@ def build_preflight(tmp_path, *, git=None, github=None, notifier=None, verified=
         verify_git_version_fn=verify_git_version,
         verify_sudoers_logging_fn=verify_sudoers_logging,
         verify_cleanup_probe_fn=verify_cleanup_probe,
+        verify_agent_scheduling_fn=verify_agent_scheduling,
     )
 
 
@@ -202,6 +206,7 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
         "verify_commit_identity",
         "verify_sudoers_logging",
         "verify_cleanup_probe",
+        "verify_agent_scheduling",
         "verify_no_leaked_worktrees",
         "create_worktree",
         "check",
@@ -209,7 +214,7 @@ def test_preflight_runs_real_steps_in_order_and_returns_tickets(tmp_path):
         "remove_worktree",
         "delete_branch",
     ]
-    assert events[7] == (
+    assert events[8] == (
         "create_worktree",
         Path(tmp_path / "worktrees" / "preflight-42"),
         "preflight-42",
@@ -723,4 +728,23 @@ def test_a_stale_cleanup_probe_stops_the_preflight_before_any_worktree(tmp_path)
         preflight.run()
 
     assert excinfo.value.step == "verify cleanup probe"
+    assert "create_worktree" not in [event[0] for event in events]
+
+
+def test_an_agent_that_can_schedule_work_stops_the_preflight_before_any_worktree(tmp_path):
+    events = []
+    seen = []
+
+    def can_schedule(agent):
+        seen.append(agent)
+        raise RuntimeError("factory-agent can schedule work: cron: not in /etc/cron.deny")
+
+    preflight = build_preflight(tmp_path, events=events)
+    preflight._verify_agent_scheduling = can_schedule
+
+    with pytest.raises(PreflightError) as excinfo:
+        preflight.run()
+
+    assert excinfo.value.step == "verify agent scheduling"
+    assert seen == ["factory-agent"]
     assert "create_worktree" not in [event[0] for event in events]

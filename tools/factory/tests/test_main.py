@@ -594,6 +594,7 @@ def build_factory(
         preflight_verify_git_version=_noop_verify_git_version,
         preflight_verify_sudoers_logging=_noop_verify_sudoers_logging,
         preflight_verify_cleanup_probe=lambda: None,
+        preflight_verify_agent_scheduling=lambda _agent: None,
         preflight_clock=lambda: 42,
         ledger=ledger,
         review_attempts=review_attempts,

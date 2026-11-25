@@ -124,6 +124,7 @@ class Factory:
         preflight_verify_git_version=verify_git_version,
         preflight_verify_sudoers_logging=verify_sudoers_logging,
         preflight_verify_cleanup_probe=None,
+        preflight_verify_agent_scheduling=None,
         preflight_clock=None,
         ledger: AttemptLedger | None = None,
         review_attempts: ReviewAttemptLedger | None = None,
@@ -142,6 +143,7 @@ class Factory:
         self._preflight_verify_git_version = preflight_verify_git_version
         self._preflight_verify_sudoers_logging = preflight_verify_sudoers_logging
         self._preflight_verify_cleanup_probe = preflight_verify_cleanup_probe
+        self._preflight_verify_agent_scheduling = preflight_verify_agent_scheduling
         self._preflight_clock = preflight_clock
         self.ledger = ledger or AttemptLedger(settings.state_dir)
         self.review_attempts = review_attempts or ReviewAttemptLedger(settings.state_dir)
@@ -275,6 +277,7 @@ class Factory:
             verify_git_version_fn=self._preflight_verify_git_version,
             verify_sudoers_logging_fn=self._preflight_verify_sudoers_logging,
             verify_cleanup_probe_fn=self._preflight_verify_cleanup_probe,
+            verify_agent_scheduling_fn=self._preflight_verify_agent_scheduling,
             runner=self.runner,
             recheck_models=recheck_models,
         ).run(token=token)
