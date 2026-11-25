@@ -156,7 +156,7 @@ class Preflight:
             step = "check.sh"
             check = self.git.check(worktree, areas=AREAS)
             if not check.passed:
-                self._write_check_log(log_path, check.output)
+                self._write_check_log(log_path, f"{check.output}\n\n{check.summary}".strip())
                 raise RuntimeError(check_failure_message(check.failures, log_path))
 
             if self.runner is not None:

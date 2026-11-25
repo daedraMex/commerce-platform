@@ -35,10 +35,22 @@ def cleanup_old(
             if entry.stat().st_mtime < now - keep_days * 86400:
                 if entry.is_dir():
                     if remove_dir is None:
-                        shutil.rmtree(entry)
+                        shutil.rmtree(entry, onexc=_make_writable_and_retry)
                     else:
                         remove_dir(entry)
                 else:
                     entry.unlink()
         except FileNotFoundError:
             continue
+
+
+def _make_writable_and_retry(function, path, _exc):
+    """rmtree's error hook: a read-only folder must not stop the cleanup (#227)."""
+    import os
+    import stat
+
+    parent = os.path.dirname(path)
+    os.chmod(parent, stat.S_IRWXU)
+    if os.path.isdir(path) and not os.path.islink(path):
+        os.chmod(path, stat.S_IRWXU)
+    function(path)

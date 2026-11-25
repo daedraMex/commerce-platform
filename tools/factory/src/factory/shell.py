@@ -14,7 +14,21 @@ INTERRUPT_GRACE_SECONDS = 5
 
 
 class CommandTimeout(RuntimeError):
-    """Raised when an external command exceeds its time limit."""
+    """Raised when an external command exceeds its time limit.
+
+    Carries what the command printed before it was stopped (#227).
+    """
+
+    def __init__(self, message: str = "", *, stdout: str = "", stderr: str = ""):
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _text(value) -> str:
+    if value is None:
+        return ""
+    return value.decode(errors="replace") if isinstance(value, bytes) else value
 
 
 @dataclass(frozen=True)
@@ -66,7 +80,11 @@ def run_command(
         stdout, stderr = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
         _terminate_process_group(proc, grace_seconds=TIMEOUT_GRACE_SECONDS)
-        raise CommandTimeout(f"command timed out after {timeout}s: {' '.join(argv)}") from exc
+        raise CommandTimeout(
+            f"command timed out after {timeout}s: {' '.join(argv)}",
+            stdout=_text(exc.output),
+            stderr=_text(exc.stderr),
+        ) from exc
     except BaseException:
         # Ctrl+C or SystemExit reaches only the factory: the command runs in its own
         # session. Stop it before the caller's cleanup deletes the files it is
