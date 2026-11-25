@@ -22,13 +22,13 @@ from .github import GitHub, GitHubError
 from .holds import LabelHolds
 from .isolation import verify_isolation
 from .ledger import AttemptLedger
+from .limit_gate import FACTORY_BOT_LOGIN, FACTORY_BRANCH_PREFIX, LimitGate
 from .metrics import MetricsGitHub, run_metrics
 from .model_health import REVIEWER_FAILURE_ALERT_AT, ReviewerFailures
 from .models import STRONG_MODEL_LABEL, select_model
 from .notify import (
     Notifier,
     NullNotifier,
-    PausedInfo,
     PrReadyInfo,
     ReviewAddressedInfo,
     ReviewerFailingInfo,
@@ -76,8 +76,6 @@ from .tickets import (
 
 IMPLEMENT_COMMAND_PATH = ".opencode/commands/implement.md"
 LOG_TAIL_LINES = 30
-FACTORY_BOT_LOGIN = "xolo-bot"
-FACTORY_BRANCH_PREFIX = "nf/"
 OWNER_LOGIN = "daedraMex"
 MERGE_CONFLICT_CHECK = "branch conflicts with main; a human must merge main"
 EVIDENCE_NOT_UPDATED_CHECK = "PR body evidence not updated; nothing was pushed"
@@ -151,15 +149,18 @@ class Factory:
         self.reviewer_failures = reviewer_failures or ReviewerFailures(settings.state_dir)
 
     def run(self) -> list[TicketResult]:
-        token, open_prs, paused_for = self._run_limits()
-        if paused_for is not None:
-            self._enter_pause(paused_for)
+        gate = self.limit_gate
+        limits = gate.limits()
+        if limits.paused_for is not None:
+            gate.pause(limits.paused_for)
             return []
+        token = limits.token
         review_fix = self._select_review_fix(token)
-        if review_fix is None and open_prs >= self.settings.max_open_prs:
-            self._enter_pause(self._open_pr_pause_reason(open_prs))
+        capped = None if review_fix is not None else gate.open_pr_cap(limits.open_prs)
+        if capped is not None:
+            gate.pause(capped)
             return []
-        self.pause_state.clear()
+        gate.resume()
         cleanup_old(
             self.settings.worktrees_dir,
             keep_days=self.settings.keep_days,
@@ -206,34 +207,6 @@ class Factory:
                 continue
             self.label_holds.remove(number)
         return held
-
-    def _run_limits(self) -> tuple[str | None, int, str | None]:
-        """Mint a token, read the open-PR count and check the daily cap.
-
-        The open-PR cap is not applied here: a review fix on an existing PR
-        must still run when the cap is reached. It is checked before a new
-        ticket is picked. The daily cap does apply to every attempt.
-        """
-        try:
-            token = self.token_provider.mint(self.settings.repo)
-            open_prs = self.github.count_open_factory_prs(
-                author=FACTORY_BOT_LOGIN,
-                branch_prefix=FACTORY_BRANCH_PREFIX,
-                token=token,
-            )
-        except Exception:
-            return None, 0, "GitHub unreachable"
-        if self.ledger.count_today() >= self.settings.max_tickets_per_day:
-            return token, open_prs, "daily limit reached"
-        return token, open_prs, None
-
-    def _open_pr_pause_reason(self, open_prs: int) -> str:
-        noun = "PR" if open_prs == 1 else "PRs"
-        return f"{open_prs} {noun} waiting for review"
-
-    def _enter_pause(self, reason: str) -> None:
-        if self.pause_state.enter(reason):
-            self._notify(self.notifier.send_paused, PausedInfo(reason=reason))
 
     def _execute(self, ticket: Ticket, operation, phase: str) -> TicketResult:
         started_at = self.ledger.now()
@@ -614,6 +587,17 @@ class Factory:
         )
         self._notify(self.notifier.send_pr_ready, info)
         return TicketResult(ticket=ticket, ok=True)
+
+    @property
+    def limit_gate(self) -> LimitGate:
+        return LimitGate(
+            settings=self.settings,
+            github=self.github,
+            token_provider=self.token_provider,
+            ledger=self.ledger,
+            pause_state=self.pause_state,
+            notify_paused=lambda info: self._notify(self.notifier.send_paused, info),
+        )
 
     @property
     def publisher(self) -> Publisher:
