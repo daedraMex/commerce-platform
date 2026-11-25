@@ -178,15 +178,70 @@ describe("ProductCarouselPanel", () => {
     );
   });
 
-  it("ends the drag and sends the order when pointer capture is lost", async () => {
-    let orderedIds: number[] | null = null;
+  it("cancels the drag and restores the starting order when the pointer is cancelled", async () => {
+    let putCount = 0;
     server.use(
       http.get(CAROUSEL_URL, () =>
         HttpResponse.json({ product_id: 12, images: IMAGES.slice(0, 2) }),
       ),
-      http.put(ORDER_URL, async ({ request }) => {
-        const body = (await request.json()) as { image_ids: number[] };
-        orderedIds = body.image_ids;
+      http.put(ORDER_URL, async () => {
+        putCount += 1;
+        return HttpResponse.json({
+          product_id: 12,
+          images: [IMAGES[1], IMAGES[0]],
+        });
+      }),
+    );
+
+    renderPanel();
+
+    const items = await screen.findAllByTestId("carousel-image");
+    const handles = screen.getAllByTestId("carousel-drag-handle");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => items[0] ?? null),
+    });
+
+    fireEvent.pointerDown(handles[1] as HTMLElement, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(handles[1] as HTMLElement, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
+        "Segunda foto",
+      ),
+    );
+
+    fireEvent.pointerCancel(handles[1] as HTMLElement, { pointerId: 1 });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
+        "Primera foto",
+      ),
+    );
+    expect(putCount).toBe(0);
+    for (const item of screen.getAllByTestId("carousel-image")) {
+      expect(item).not.toHaveClass("opacity-60");
+    }
+  });
+
+  it("cancels the drag when pointer capture is lost with no pointerup before it", async () => {
+    let putCount = 0;
+    server.use(
+      http.get(CAROUSEL_URL, () =>
+        HttpResponse.json({ product_id: 12, images: IMAGES.slice(0, 2) }),
+      ),
+      http.put(ORDER_URL, async () => {
+        putCount += 1;
         return HttpResponse.json({
           product_id: 12,
           images: [IMAGES[1], IMAGES[0]],
@@ -224,12 +279,68 @@ describe("ProductCarouselPanel", () => {
 
     fireEvent.lostPointerCapture(handles[1] as HTMLElement, { pointerId: 1 });
 
-    await waitFor(() => expect(orderedIds).toEqual([102, 101]));
     await waitFor(() =>
-      expect(screen.getAllByTestId("carousel-image")[0]).not.toHaveClass(
-        "opacity-60",
+      expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
+        "Primera foto",
       ),
     );
+    expect(putCount).toBe(0);
+    for (const item of screen.getAllByTestId("carousel-image")) {
+      expect(item).not.toHaveClass("opacity-60");
+    }
+  });
+
+  it("saves exactly once when pointerup is followed by the browser losing pointer capture", async () => {
+    let putCount = 0;
+    server.use(
+      http.get(CAROUSEL_URL, () =>
+        HttpResponse.json({ product_id: 12, images: IMAGES.slice(0, 2) }),
+      ),
+      http.put(ORDER_URL, async ({ request }) => {
+        putCount += 1;
+        const body = (await request.json()) as { image_ids: number[] };
+        expect(body.image_ids).toEqual([102, 101]);
+        return HttpResponse.json({
+          product_id: 12,
+          images: [IMAGES[1], IMAGES[0]],
+        });
+      }),
+    );
+
+    renderPanel();
+
+    const items = await screen.findAllByTestId("carousel-image");
+    const handles = screen.getAllByTestId("carousel-drag-handle");
+    Object.defineProperty(document, "elementFromPoint", {
+      configurable: true,
+      value: vi.fn(() => items[0] ?? null),
+    });
+
+    fireEvent.pointerDown(handles[1] as HTMLElement, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(handles[1] as HTMLElement, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 0,
+      clientY: 0,
+    });
+
+    await waitFor(() =>
+      expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
+        "Segunda foto",
+      ),
+    );
+
+    fireEvent.pointerUp(handles[1] as HTMLElement, { pointerId: 1 });
+    fireEvent.lostPointerCapture(handles[1] as HTMLElement, { pointerId: 1 });
+
+    await waitFor(() => expect(putCount).toBe(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(putCount).toBe(1);
     expect(screen.getAllByTestId("carousel-image")[0]).toHaveTextContent(
       "Segunda foto",
     );
