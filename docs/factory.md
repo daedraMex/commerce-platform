@@ -93,13 +93,15 @@ Run these once, as the admin user unless a step says `factory`.
     Defaults:factory !log_allowed
     Defaults>factory-agent umask=0007
     Defaults>factory-agent umask_override
-    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/pkill -KILL -u factory-agent
+    factory ALL=(factory-agent) NOPASSWD:SETENV: /usr/bin/opencode, /usr/bin/cat, /usr/bin/test, /srv/factory/worktrees/*/backend/scripts/check.sh, /srv/factory/worktrees/*/web/console/scripts/check.sh, /usr/bin/rm -rf /srv/factory/worktrees/*, /usr/bin/rm -rf /srv/factory/agent-homes/*, /usr/bin/pkill -KILL -u factory-agent
     ```
 
     The file lives at `/etc/sudoers.d/factory-agent`. Sudo's `*` does not
-    cross `/`, so the two worktree globs match exactly one flat worktree
-    directory. The code still validates every cleanup path itself: a sudoers
-    glob is not a security boundary for `rm`.
+    cross `/` in a command's path, so the two check-script globs match one
+    flat worktree directory. In arguments it does: the `rm -rf` globs also
+    match a second path after a space. The code validates every cleanup path
+    itself, and only `factory` can use these rules: a sudoers glob is not a
+    security boundary for `rm`.
 
     `Defaults:factory !log_allowed` stops sudo from writing the successful
     downgrade commands to the journal, including the environment named in
@@ -135,6 +137,8 @@ Run these once, as the admin user unless a step says `factory`.
     ```bash
     sudo install -d -m 755 -o factory -g factory /srv/factory
     sudo install -d -m 2770 -o factory -g factory-work /srv/factory/worktrees
+    sudo install -d -m 2770 -o factory -g factory-work /srv/factory/agent-homes   # one fresh OpenCode home per run (#158)
+    sudo apt install ripgrep   # OpenCode uses the system rg instead of fetching one into each run home
     sudo install -d -m 700 -o factory -g factory /home/factory/state
     sudo chmod 700 /home/factory
     ```
@@ -245,7 +249,7 @@ Run these once, as the admin user unless a step says `factory`.
     cd /srv/factory/repo
     git remote set-url --push origin https://github.com/daedraMex/commerce-platform.git
     cd tools/factory
-    uv sync
+    uv sync --locked
     ```
 
     The clone must belong to group `factory`, never to `factory-work` or any
@@ -289,9 +293,21 @@ Run these once, as the admin user unless a step says `factory`.
    ```bash
    sudo -u factory-agent -H /usr/bin/opencode auth login   # choose the provider, paste the key
    sudo -u factory-agent -H /usr/bin/opencode auth list    # expect the provider to be listed
+   sudo install -d -m 700 -o factory -g factory /home/factory/factory
+   sudo install -m 600 -o factory -g factory /home/factory-agent/.local/share/opencode/auth.json /home/factory/factory/agent-auth.json
    ```
-   The factory starts OpenCode with `HOME=/home/factory-agent`, so it finds
-   that store on every run. Do **not** put the key in `secrets.env` and do
+   The last line gives the factory its own copy of the keys (`FACTORY_AGENT_AUTH_FILE`,
+   default `~/factory/agent-auth.json`), which the agent cannot write. Every
+   OpenCode run (builder, reviewer, the preflight's model check) gets a fresh home
+   under `/srv/factory/agent-homes/` (`FACTORY_AGENT_HOMES_DIR`) holding only that
+   copy and a gitconfig that trusts the worktrees, and the home is deleted after
+   the run (#158). The copy is refused unless every entry is a plain API key
+   (`{"type": "api", "key": ...}`): a `wellknown` entry would make OpenCode fetch
+   and merge a remote config. **After every `auth login` (a new or rotated key),
+   run that `install` line again**; the preflight fails with the reason until the
+   copy is valid. The tool caches (uv and its Pythons, pnpm, corepack,
+   Playwright) stay shared in `/home/factory-agent`, which OpenCode no longer
+   reads. Do **not** put the key in `secrets.env` and do
    **not** set `FACTORY_PROVIDER_ENV_VARS`: passing it through
    `sudo --preserve-env` is exactly what used to write it to the journal. On an
    existing machine, delete any `DEEPSEEK_API_KEY`/`FACTORY_PROVIDER_ENV_VARS`
@@ -409,7 +425,9 @@ Run these once, as the admin user unless a step says `factory`.
       requests always go through her approval.
     - **main checks**: require the "Backend", "Console", "Level 2 E2E",
       "Celery broker" and "Ticket link" checks, with **Require branches to be
-      up to date before merging**. No bypass actors.
+      up to date before merging**. No bypass actors. Add "Factory" once it
+      has been green on `main` for a week (#216), and add it to the list in
+      ADR-0032 in the same change.
 
     In the repository settings, turn on **Always suggest updating pull request
     branches**. Do not give the factory or any agent a bypass. Agents (the
@@ -436,6 +454,54 @@ To upgrade an existing machine to this version:
    systemctl --user daemon-reload && systemctl --user restart factory.timer
    ```
 6. Clean any leftover worktrees, then run `factory preflight`.
+7. Fresh OpenCode homes (#158), as admin: create the homes directory, install
+   ripgrep, add `/usr/bin/rm -rf /srv/factory/agent-homes/*` to the sudoers
+   file (step 1) and give the factory its copy of the keys:
+   ```bash
+   sudo install -d -m 2770 -o factory -g factory-work /srv/factory/agent-homes
+   sudo apt install ripgrep
+   sudo install -m 600 -o factory -g factory /home/factory-agent/.local/share/opencode/auth.json /home/factory/factory/agent-auth.json
+   ```
+   Then run `factory preflight` by hand: it makes a run home and asks both
+   models to answer from one.
+8. Locked services (#216), as `factory`: both services now run
+   `uv run --locked`, so a stale `uv.lock` stops the run instead of being
+   rewritten in the checkout. The self-update does not copy unit files, so copy
+   them and reload:
+   ```bash
+   cp /srv/factory/repo/tools/factory/systemd/factory.service ~/.config/systemd/user/
+   cp /srv/factory/repo/tools/factory/systemd/factory-metrics.service ~/.config/systemd/user/
+   systemctl --user daemon-reload && systemctl --user restart factory.timer
+   ```
+   The next hourly run should start; check it with
+   `journalctl --user -u factory.service -n 20`. Run the factory by hand with
+   `uv run --locked` too (and `uv sync --locked`): plain `uv run` rewrites a
+   stale `uv.lock`, and the self-update then stops on local changes.
+
+## Updating the factory
+
+The factory updates its own code (#215). Before anything else, every run and
+every `factory preflight` fetches `origin/main` in `/srv/factory/repo`. When the
+checkout is behind, on `main` and clean, it fast-forwards, runs
+`uv sync --locked` in `tools/factory` (a stale `uv.lock` fails instead of being
+rewritten) and re-executes the same command, so that run already uses the new
+code; the journal gets one `self-update <old> -> <new>` line. `factory preflight` prints the commit it runs
+(`preflight ok at <sha> (N tickets listed)`), and every "Night factory aborted"
+message names it too.
+
+It never resets or discards anything there. A checkout on another branch, with
+local changes or diverged from `origin/main`, or a failed `uv sync`, stops the
+run with one Telegram message naming the reason and both commits. To fix it,
+as `factory`:
+```bash
+cd /srv/factory/repo
+git status --short          # see what is there before touching it
+git switch main             # if it was on another branch
+git merge --ff-only origin/main
+cd tools/factory && uv sync --locked
+```
+Set `FACTORY_SELF_UPDATE=0` in `secrets.env` to turn it off (for example while
+testing a branch on the machine); then update by hand with the same commands.
 
 ## How tickets become agent-ready
 
@@ -570,8 +636,11 @@ unreachable" as before.
   closed.
 - **Env allowlist.** The factory launches `/usr/bin/opencode` as
   `sudo -n --preserve-env=<explicit list> -u factory-agent -- /usr/bin/opencode
-  ...` with an explicit environment — `PATH`, `HOME` (the agent's home), `LANG`,
-  `DATABASE_URL`, `XDG_CONFIG_HOME` (the read-only config home),
+  ...` with an explicit environment — `PATH`, `HOME` and `XDG_DATA_HOME`,
+  `XDG_CACHE_HOME`, `XDG_STATE_HOME` (the run's fresh home, #158), `LANG`,
+  `DATABASE_URL`, `XDG_CONFIG_HOME` (the read-only config home), the shared tool
+  caches in the agent's own home (`UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`,
+  `npm_config_store_dir`, `COREPACK_HOME`, `PLAYWRIGHT_BROWSERS_PATH`),
   `OPENCODE_DISABLE_CLAUDE_CODE`, `OPENCODE_DISABLE_EXTERNAL_SKILLS` and
   `OPENCODE_CONFIG_CONTENT` (main's `opencode.factory.json` for the builder,
   `opencode.reviewer.json` plus `OPENCODE_DISABLE_PROJECT_CONFIG` for the
@@ -584,8 +653,8 @@ unreachable" as before.
   cleanup sudo refuses fails the run, so nothing the agent started can change
   files later. The model
   provider key is
-  not in it: the agent reads its own OpenCode auth store from its home, so the
-  key never crosses sudo. The backend check runner gets the same downgrade with
+  not in it: OpenCode reads it from the run home's auth store, a copy of the
+  factory's `agent-auth.json`, so the key never crosses sudo. The backend check runner gets the same downgrade with
   only `PATH`, `HOME`, `LANG` and `DATABASE_URL`, plus a fixed set of non-secret
   test settings (`SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `REDIS_URL`,
   `PYTEST_ADDOPTS=-p no:cacheprovider`) that match CI's backend job so Django
@@ -613,7 +682,8 @@ unreachable" as before.
   token or the xolo-bot private key) ever appears in the journal, a log file, a
   pull request or anywhere else it should not, treat it as compromised and
   **rotate it**: re-run `sudo -u factory-agent -H /usr/bin/opencode auth login`
-  for the provider key, issue a new Telegram token and update `secrets.env`, or
+  for the provider key (then copy it again into `~/factory/agent-auth.json`,
+  step 8), issue a new Telegram token and update `secrets.env`, or
   regenerate the xolo-bot key and replace `xolo-bot.pem`, then restart the
   timer. Deleting the log line is not enough.
 - **Per-ticket budget.** Each ticket has a step budget (`FACTORY_ATTEMPTS`,
@@ -640,12 +710,10 @@ unreachable" as before.
   review that works resets the count. A review that never reached the model (no
   time left in the budget, REVIEW.md or the config unreadable) does not count. `strong-model` tickets skip the
   review, because the builder model never reviews its own work;
-  `FACTORY_PRE_PR_REVIEW=0` turns it off. Known gap (#158): the agent's home
-  (`/home/factory-agent`) is still its own and is reused across runs, and
-  OpenCode reads from it at every start (`auth.json`, its local database, the
-  cached `rg`, `~/.gitconfig`). A builder could use it to blind the reviewer in
-  later runs; the reviewer is advisory, and the owner's approval, the
-  protected-path guard and the worktree fingerprint still gate every PR.
+  `FACTORY_PRE_PR_REVIEW=0` turns it off. Each OpenCode run has its own fresh
+  home (#158), so nothing a builder writes there (`auth.json`, OpenCode's
+  database, a cached `rg`, `~/.gitconfig`) is loaded by the reviewer or a later
+  run.
 - **Important is narrow; the rest becomes a ticket.** `REVIEW.md` limits
   Important to an unmet acceptance criterion or something the change introduces
   that crashes, corrupts data, opens a security hole or leaks across stores. Work
@@ -666,7 +734,7 @@ unreachable" as before.
   source; when every attack passes, Important findings are listed in the PR body
   as **Unproven** and do not block; tests that cannot give a verdict (import
   error, timeout) prove nothing, and the findings block as before. Turn it on
-  only after one `FACTORY_REVIEW_TESTS=1 uv run factory` by hand on the machine.
+  only after one `FACTORY_REVIEW_TESTS=1 uv run --locked factory` by hand on the machine.
 - **Pull request body.** Besides the summary and decisions, every factory PR
   lists under **Verification** the commit its checks ran on, each area check
   script that passed or was skipped, the agent steps used and the last lines of
@@ -879,7 +947,7 @@ first real night:
 ```bash
 cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
-uv run factory preflight
+uv run --locked factory preflight
 ```
 
 It uses the real tools and the real code paths, not fakes: it fetches
@@ -888,7 +956,9 @@ factory reads or writes is missing (`REQUIRED_LABELS` in `tickets.py`; the
 message gives the `gh label create` command for each), creates a throwaway
 `preflight-<timestamp>` worktree from the fresh `origin/main`, runs every
 present area's `check.sh` in it as `factory-agent` with the real check
-environment, verifies isolation,
+environment, verifies isolation, deletes run homes a killed run left in
+`/srv/factory/agent-homes/`, makes and deletes one (which validates the
+factory's copy of the provider keys) and requires a system `rg`,
 the git version, the bot commit identity and the effective sudo `!log_allowed`
 policy, asks `FACTORY_MODEL` and, with the review on, `FACTORY_STRONG_MODEL`
 for a fixed answer with the reviewer's read-only config (hourly runs at most
@@ -914,7 +984,7 @@ As `factory`:
 ```bash
 cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
-uv run factory
+uv run --locked factory
 ```
 
 ## Weekly metrics
@@ -934,7 +1004,7 @@ Telegram does not accept makes the command exit non-zero. By hand:
 ```bash
 cd /srv/factory/repo/tools/factory
 set -a; source ~/factory/secrets.env; set +a
-uv run factory metrics
+uv run --locked factory metrics
 ```
 
 ## Stopping it

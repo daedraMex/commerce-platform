@@ -568,6 +568,7 @@ def make_submission(
     status=PhotoSubmission.Status.READY,
     result_media=None,
     attempts=1,
+    redos=0,
     idempotency_key="action-key",
     corners=None,
     crop=None,
@@ -584,6 +585,7 @@ def make_submission(
         status=status,
         result_media=result_media,
         attempts=attempts,
+        redos=redos,
         original_key=f"stores/{store.id}/photos/originals/{idempotency_key}.jpg",
         preview_key=f"stores/{store.id}/photos/previews/{idempotency_key}.jpg",
         corners=corners,
@@ -898,7 +900,31 @@ def test_redo_validates_the_shape_of_corners_and_crop(client, home, user, field,
     assert submission.crop == CROP
 
 
-def test_redo_refuses_a_photo_that_is_not_ready(client, home, user):
+@pytest.mark.parametrize(
+    "status", [PhotoSubmission.Status.UPLOADED, PhotoSubmission.Status.PROCESSING]
+)
+def test_redo_refuses_a_photo_that_is_neither_ready_nor_failed(client, home, user, status):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=status,
+        result_media=None,
+        idempotency_key="redo-not-redoable-key",
+    )
+
+    response = post_action(client, user, "redo", submission.pk, data={"crop": CROP})
+
+    assert_problem_details(response, status=409, code="submission_cannot_redo")
+    submission.refresh_from_db()
+    assert submission.redos == 0
+
+
+def test_redo_from_failed_replaces_the_corners_and_enqueues(
+    client, home, user, override_photo_processing_queue
+):
     grant_membership(user=user, store=home, role_name="content_editor")
     product = make_product(home)
     submission = make_submission(
@@ -907,12 +933,92 @@ def test_redo_refuses_a_photo_that_is_not_ready(client, home, user):
         product=product,
         status=PhotoSubmission.Status.FAILED,
         result_media=None,
+        attempts=3,
         idempotency_key="redo-failed-key",
+        corners=CORNERS,
+        crop=CROP,
     )
+    submission.failure_code = "quad_out_of_bounds"
+    submission.failure_message = "Corners outside the photo."
+    submission.save()
+    queued = []
+
+    class RecordingQueue:
+        def enqueue(self, store, submission_id):
+            queued.append((store.id, submission_id))
+
+    override_photo_processing_queue(RecordingQueue())
+    new_corners = [
+        {"x": 0.2, "y": 0.2},
+        {"x": 0.8, "y": 0.2},
+        {"x": 0.8, "y": 0.8},
+        {"x": 0.2, "y": 0.8},
+    ]
+
+    response = post_action(client, user, "redo", submission.pk, data={"corners": new_corners})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "processing"
+    assert body["corners"] == new_corners
+    assert body["failure_code"] == ""
+    assert body["attempts"] == 3
+    assert body["redos"] == 1
+    assert body["redos_remaining"] == 4
+    assert queued == [(home.id, submission.pk)]
+    submission.refresh_from_db()
+    assert submission.status == PhotoSubmission.Status.PROCESSING
+    assert submission.redos == 1
+    assert submission.attempts == 3
+
+
+@pytest.mark.parametrize("status", [PhotoSubmission.Status.READY, PhotoSubmission.Status.FAILED])
+def test_the_sixth_redo_is_refused_and_not_enqueued(
+    client, home, user, override_photo_processing_queue, status
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=status,
+        result_media=None,
+        redos=5,
+        idempotency_key="redo-exhausted-key",
+        corners=CORNERS,
+        crop=CROP,
+    )
+    queued = []
+
+    class RecordingQueue:
+        def enqueue(self, store, submission_id):
+            queued.append((store.id, submission_id))
+
+    override_photo_processing_queue(RecordingQueue())
 
     response = post_action(client, user, "redo", submission.pk, data={"crop": CROP})
 
-    assert_problem_details(response, status=409, code="submission_cannot_redo")
+    body = assert_problem_details(response, status=409, code="submission_redo_exhausted")
+    assert "discard" in body["detail"].lower()
+    assert queued == []
+    submission.refresh_from_db()
+    assert submission.redos == 5
+    assert submission.status == status
+
+
+def test_detail_exposes_the_redos_used_and_remaining(client, home, user):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home, user, product=product, redos=2, idempotency_key="detail-redos-key"
+    )
+
+    response = get_detail(client, user, submission.pk)
+
+    assert response.status_code == 200
+    assert response.json()["redos"] == 2
+    assert response.json()["redos_remaining"] == 3
 
 
 def test_retry_enqueues_a_failed_submission_with_another_attempt(
@@ -997,6 +1103,7 @@ def test_discard_refuses_an_applied_submission(client, home, user):
     [
         ("apply", PhotoSubmission.Status.READY),
         ("redo", PhotoSubmission.Status.READY),
+        ("redo", PhotoSubmission.Status.FAILED),
         ("retry", PhotoSubmission.Status.FAILED),
         ("discard", PhotoSubmission.Status.UPLOADED),
     ],

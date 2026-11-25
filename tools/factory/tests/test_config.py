@@ -141,6 +141,15 @@ def test_from_env_turns_the_pre_pr_review_on_by_default_and_reads_the_switch():
     assert Settings.from_env({**base, "FACTORY_PRE_PR_REVIEW": "0"}).pre_pr_review is False
 
 
+def test_from_env_turns_the_self_update_on_by_default_and_reads_the_switch():
+    base = {
+        "FACTORY_MODEL": "deepseek/deepseek-flash",
+        "FACTORY_STRONG_MODEL": "deepseek/deepseek-v4-pro",
+    }
+    assert Settings.from_env(base).self_update is True
+    assert Settings.from_env({**base, "FACTORY_SELF_UPDATE": "0"}).self_update is False
+
+
 def test_from_env_reads_the_agent_config_home():
     base = {
         "FACTORY_MODEL": "deepseek/deepseek-flash",

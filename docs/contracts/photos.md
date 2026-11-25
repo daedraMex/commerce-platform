@@ -112,20 +112,21 @@ several products, `/links/`) were merged by #96 and follow this table.
 
 A **photo submission** has a status (`uploaded`, `processing`, `ready`, `failed`) and two
 timestamps that are not states: **applied** (`applied_at`) and **discarded**
-(`discarded_at`). `MAX_ATTEMPTS` is 3.
+(`discarded_at`). `MAX_ATTEMPTS` is 3. `MAX_REDOS` is 5. `attempts` counts processing
+runs (worker start and retry); `redos` counts redos and is separate from it.
 
-| Action | Allowed from | Moves to | `attempts` | Refusal `code` |
-|---|---|---|---|---|
-| Upload | none | `uploaded`, then enqueued | 0 | see below |
-| Worker starts | `uploaded` | `processing` | + 1 | none |
-| Worker finishes | `processing` | `ready` or `failed` | unchanged | none |
-| Retry | `failed`, not applied or discarded, `attempts` < 3 | `processing`, then enqueued | + 1 | `submission_cannot_start_processing`, `submission_attempts_exhausted` |
-| Redo (new corners or crop) | `ready`, not applied or discarded | `processing`, then enqueued | unchanged | `submission_cannot_redo` |
-| Apply, individual photo | `ready`, not applied or discarded | applied; status stays `ready` | unchanged | `submission_cannot_apply` |
-| Apply, group photo | `ready` with a result, not discarded; applied or not | applied; links synced to the products sent | unchanged | `submission_cannot_apply` (no products, not a group, not ready), `catalog_store_mismatch` |
-| Change links, group photo | `ready`, applied | links synced to the products sent; an empty list keeps the photo applied | unchanged | `submission_cannot_change_links` |
-| Remove from carousel | applied individual photo | not applied; Media kept | unchanged | `submission_cannot_remove` |
-| Discard | not applied, not discarded | discarded; status unchanged; private original and preview deleted | unchanged | `submission_cannot_discard` |
+| Action | Allowed from | Moves to | `attempts` | `redos` | Refusal `code` |
+|---|---|---|---|---|---|
+| Upload | none | `uploaded`, then enqueued | 0 | 0 | see below |
+| Worker starts | `uploaded` | `processing` | + 1 | unchanged | none |
+| Worker finishes | `processing` | `ready` or `failed` | unchanged | unchanged | none |
+| Retry | `failed`, not applied or discarded, `attempts` < 3 | `processing`, then enqueued | + 1 | unchanged | `submission_cannot_start_processing`, `submission_attempts_exhausted` |
+| Redo (new corners or crop) | `ready` or `failed`, not applied or discarded, `redos` < 5 | `processing`, then enqueued | unchanged | + 1 | `submission_cannot_redo`, `submission_redo_exhausted` |
+| Apply, individual photo | `ready`, not applied or discarded | applied; status stays `ready` | unchanged | unchanged | `submission_cannot_apply` |
+| Apply, group photo | `ready` with a result, not discarded; applied or not | applied; links synced to the products sent | unchanged | unchanged | `submission_cannot_apply` (no products, not a group, not ready), `catalog_store_mismatch` |
+| Change links, group photo | `ready`, applied | links synced to the products sent; an empty list keeps the photo applied | unchanged | unchanged | `submission_cannot_change_links` |
+| Remove from carousel | applied individual photo | not applied; Media kept | unchanged | unchanged | `submission_cannot_remove` |
+| Discard | not applied, not discarded | discarded; status unchanged; private original and preview deleted | unchanged | unchanged | `submission_cannot_discard` |
 
 **Every action:**
 
@@ -163,15 +164,21 @@ timestamps that are not states: **applied** (`applied_at`) and **discarded**
   processing pipeline and fails later as `failed` with a `quad_*`, `crop_invalid` or
   `crop_missing_source` code.
 - A redo field left out keeps its stored value; a field sent as `null` is malformed.
-- A failed redo cannot be redone (it is not `ready`), and retry reuses the same corners and
-  crop. Discard is then the only way out.
+- A photo whose processing failed can be redone with new corners or crop: the new values
+  replace the stored ones. Retry still reuses the same corners and crop.
+- The sixth redo is refused with 409 `submission_redo_exhausted`, and a message that tells
+  staff to discard the photo and take a new one.
 
 **Preview:** the private preview response carries `Cache-Control: private, no-store` and
 `X-Content-Type-Options: nosniff`. A reader refuses a key outside `stores/{store.id}/`,
 failing closed as not found.
 
-**Redo** clears `result_media_id`: the previous Media is kept, but the submission no longer
-points to it.
+**Redo** clears `result_media_id` and the failure code and message: the previous Media is
+kept, but the submission no longer points to it. Each redo adds 1 to `redos`, from `ready` or
+from `failed`.
+
+**Photo detail** exposes `redos` and `redos_remaining` (`MAX_REDOS` minus `redos`, never
+below 0), so the console can disable the redo action.
 
 **Discard while queued or `processing`:** the discard's save bumps `version`, so the worker's
 next save fails with `submission_concurrent_modification` and Celery retries. The retry sees

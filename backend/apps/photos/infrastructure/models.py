@@ -49,6 +49,7 @@ class PhotoSubmission(models.Model):
     failure_code = models.CharField(max_length=100, blank=True)
     failure_message = models.TextField(blank=True)
     attempts = models.PositiveSmallIntegerField(default=0)
+    redos = models.PositiveSmallIntegerField(default=0)
     version = models.PositiveIntegerField(default=0)
     result_media = models.ForeignKey(
         "catalog.Media",

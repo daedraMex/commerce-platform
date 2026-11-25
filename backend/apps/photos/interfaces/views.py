@@ -106,6 +106,8 @@ PHOTO_SUBMISSION_EXAMPLE = OpenApiExample(
         "linked_product_ids": [],
         "pipeline_version": "2026-11-11.2",
         "attempts": 1,
+        "redos": 0,
+        "redos_remaining": 5,
         "version": 4,
         "applied_at": "2026-11-12T09:32:00Z",
         "discarded_at": None,
@@ -478,7 +480,7 @@ class StaffPhotoRemoveView(StoreScopedMixin, APIView):
     responses={
         200: OpenApiResponse(
             response=PhotoSubmissionSerializer,
-            description="The submission back in processing with a new attempt queued.",
+            description="The submission back in processing with a new run queued.",
             examples=[PHOTO_SUBMISSION_EXAMPLE],
         ),
         **ACTION_ERRORS,
@@ -490,13 +492,17 @@ class StaffPhotoRemoveView(StoreScopedMixin, APIView):
             409,
             (
                 "submission_cannot_redo",
-                "Only a ready photo can be redone.",
+                "Only a ready or failed photo can be redone.",
+            ),
+            (
+                "submission_redo_exhausted",
+                "This photo was already redone 5 times. Discard it and take a new photo.",
             ),
         ),
     },
 )
 class StaffPhotoRedoView(StoreScopedMixin, APIView):
-    """Redo a ready photo with new corners or crop, keeping the previous result Media."""
+    """Redo a ready or failed photo with new corners or crop, keeping the previous result Media."""
 
     def post(self, request, pk, *args, **kwargs):
         serializer = RedoPhotoSerializer(data=request.data or {})

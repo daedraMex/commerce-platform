@@ -17,9 +17,11 @@ from apps.photos.domain.errors import (
     CannotRedo,
     CannotRemove,
     CannotStartProcessing,
+    RedoExhausted,
 )
 from apps.photos.domain.submission import (
     MAX_ATTEMPTS,
+    MAX_REDOS,
     PhotoSubmission,
     SubmissionKind,
     SubmissionStatus,
@@ -397,8 +399,43 @@ def test_redo_keeps_the_stored_corners_and_crop_when_omitted(repository, queue, 
     assert queue.calls == [(HOME, 1)]
 
 
-def test_redo_refuses_a_submission_that_is_not_ready(repository, queue, authorizer):
-    repository.rows[1] = make_submission(status=SubmissionStatus.FAILED)
+def test_redo_from_failed_saves_the_new_corners_and_enqueues_once(repository, queue, authorizer):
+    repository.rows[1] = make_submission(
+        status=SubmissionStatus.FAILED,
+        result_media_id=None,
+        failure_code="quad_out_of_bounds",
+        failure_message="Corners outside the photo.",
+    )
+    new_corners = [{"x": 0.2, "y": 0.2}, {"x": 0.8, "y": 0.2}, {"x": 0.8, "y": 0.8}]
+
+    saved = redo_photo(repository, queue, authorizer)(
+        HOME, user_id=7, submission_id=1, corners=new_corners
+    )
+
+    assert saved.status is SubmissionStatus.PROCESSING
+    assert saved.corners == new_corners
+    assert saved.crop == CROP
+    assert saved.redos == 1
+    assert saved.attempts == 1
+    assert saved.failure_code == ""
+    assert repository.rows[1].corners == new_corners
+    assert queue.calls == [(HOME, 1)]
+
+
+def test_redo_refuses_the_sixth_redo_without_enqueueing(repository, queue, authorizer):
+    repository.rows[1] = make_submission(status=SubmissionStatus.FAILED, redos=MAX_REDOS)
+
+    with pytest.raises(RedoExhausted):
+        redo_photo(repository, queue, authorizer)(
+            HOME, user_id=7, submission_id=1, corners=CORNERS, crop=CROP
+        )
+
+    assert queue.calls == []
+    assert repository.rows[1].corners == CORNERS
+
+
+def test_redo_refuses_a_submission_that_is_still_processing(repository, queue, authorizer):
+    repository.rows[1] = make_submission(status=SubmissionStatus.PROCESSING)
 
     with pytest.raises(CannotRedo):
         redo_photo(repository, queue, authorizer)(

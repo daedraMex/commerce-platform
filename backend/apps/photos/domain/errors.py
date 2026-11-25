@@ -35,6 +35,10 @@ class CannotRedo(PhotoSubmissionError):
     code = "submission_cannot_redo"
 
 
+class RedoExhausted(PhotoSubmissionError):
+    code = "submission_redo_exhausted"
+
+
 class CannotApply(PhotoSubmissionError):
     code = "submission_cannot_apply"
 

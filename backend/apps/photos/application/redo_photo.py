@@ -1,4 +1,4 @@
-"""Redo a ready photo with new corners or crop, keeping the previous Media."""
+"""Redo a ready or failed photo with new corners or crop, keeping the previous Media."""
 
 from apps.photos.application.ports import PhotoProcessingQueue, PhotoSubmissionRepository
 from apps.photos.domain.submission import PhotoSubmission
@@ -9,7 +9,7 @@ from apps.shared.domain.store import StoreReference
 
 
 class RedoPhoto:
-    """Authorize, move a ready submission back to processing and re-enqueue it."""
+    """Authorize, move a ready or failed submission back to processing and re-enqueue it."""
 
     def __init__(
         self,

@@ -135,6 +135,67 @@ jobs:
       - name: Celery tasks through Redis
         run: uv run pytest tests/broker -m real_broker
 
+  factory:
+    name: Factory
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tools/factory
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+
+      # The check steps are skipped, not the job, so "Factory" still reports and
+      # can be a required check (#216). The factory tests also read docs/factory.md
+      # and the workflows.
+      - name: Detect factory changes
+        id: changes
+        working-directory: .
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="HEAD^"
+            head="HEAD"
+          fi
+          changed="$(git diff --name-only "$base...$head")"
+          if printf '%s\n' "$changed" | grep -Eq '^(tools/factory/|docs/factory\.md$|\.github/workflows/)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+            echo "no factory changes"
+          fi
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e  # v10.3.2
+        if: steps.changes.outputs.relevant == 'true'
+        with:
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: tools/factory/uv.lock
+
+      - name: Lock file
+        if: steps.changes.outputs.relevant == 'true'
+        run: uv lock --check
+
+      - name: Lint
+        if: steps.changes.outputs.relevant == 'true'
+        run: uv run --locked ruff check .
+
+      - name: Format
+        if: steps.changes.outputs.relevant == 'true'
+        run: uv run --locked ruff format --check .
+
+      - name: Tests
+        if: steps.changes.outputs.relevant == 'true'
+        env:
+          PYTEST_ADDOPTS: "-p no:cacheprovider"
+        run: uv run --locked pytest -q
+
   console:
     name: Console
     runs-on: ubuntu-latest

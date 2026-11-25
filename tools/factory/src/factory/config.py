@@ -64,10 +64,17 @@ class Settings:
     deploy_key: Path = field(default_factory=lambda: Path.home() / ".ssh" / "commerce_deploy")
     handoff_host: str | None = None
     pre_pr_review: bool = False
+    # Move /srv/factory/repo to origin/main before every run (#215); off in tests.
+    self_update: bool = False
     # Off until the machine is ready: the reviewer's attack tests run through the
     # backend check.sh --review-tests mode, which the sudoers rule already allows.
     review_tests: bool = False
     agent_config_home: Path = Path("/srv/factory/agent-config")
+    # A fresh OpenCode home per run, and the factory-owned provider keys it gets (#158).
+    agent_homes_dir: Path = Path("/srv/factory/agent-homes")
+    agent_auth_file: Path = field(
+        default_factory=lambda: Path.home() / "factory" / "agent-auth.json"
+    )
 
     def __post_init__(self) -> None:
         for name, value in (
@@ -99,9 +106,16 @@ class Settings:
             max_tickets_per_day=_read_int(env, "FACTORY_MAX_TICKETS_PER_DAY", 6),
             attempts=_read_int(env, "FACTORY_ATTEMPTS", 3),
             pre_pr_review=_read(env, "FACTORY_PRE_PR_REVIEW") not in ("0", "false", "no"),
+            self_update=_read(env, "FACTORY_SELF_UPDATE") not in ("0", "false", "no"),
             review_tests=_read(env, "FACTORY_REVIEW_TESTS") in ("1", "true", "yes"),
             agent_config_home=Path(
                 _read(env, "FACTORY_AGENT_CONFIG_HOME") or "/srv/factory/agent-config"
+            ),
+            agent_homes_dir=Path(
+                _read(env, "FACTORY_AGENT_HOMES_DIR") or "/srv/factory/agent-homes"
+            ),
+            agent_auth_file=Path(
+                _read(env, "FACTORY_AGENT_AUTH_FILE") or str(home / "factory" / "agent-auth.json")
             ),
             repo_dir=Path(_read(env, "FACTORY_REPO_DIR") or "/srv/factory/repo"),
             worktrees_dir=Path(_read(env, "FACTORY_WORKTREES_DIR") or "/srv/factory/worktrees"),
