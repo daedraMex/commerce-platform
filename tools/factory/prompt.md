@@ -39,4 +39,9 @@ fetch it from GitHub.
    (backend, console), read `docs/architecture.md` before you change code: it
    maps the code and names the ADR that rules each part. Otherwise skip it.
 
+10. Do not end your turn while a check you ran is failing and you can still fix
+    it inside this worktree. A failed command or test is a reason to keep
+    working, not to write the summary. End your turn only when every check you
+    ran passes, or when rule 4 applies: write the open question and stop.
+
 Work only inside this worktree. Do not read or write files outside it.
