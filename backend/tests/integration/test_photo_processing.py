@@ -1,9 +1,11 @@
+from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.utils import timezone
 
 from apps.catalog.media import rendition_key
 from apps.catalog.models import (
@@ -18,6 +20,7 @@ from apps.catalog.models import (
 from apps.catalog.repositories import DjangoCatalogRepository, DjangoMediaFiles
 from apps.catalog.services import CatalogService
 from apps.photos.application.process_photo import ProcessPhotoSubmission
+from apps.photos.application.sweep_stale_processing import SweepStaleProcessing
 from apps.photos.domain.pipeline import PIPELINE_VERSION
 from apps.photos.domain.submission import SubmissionStatus
 from apps.photos.infrastructure.media_uploader import get_private_storage
@@ -331,6 +334,36 @@ def test_a_processing_submission_keeps_its_existing_attempt(media_root, private_
 
     assert saved.status is SubmissionStatus.READY
     assert saved.attempts == 2
+
+
+def test_a_worker_that_finishes_after_the_sweep_leaves_the_submission_failed(
+    media_root, private_storage
+):
+    store = make_store()
+    user = make_user()
+    original = write_original(store, key="swept.jpg")
+    submission = make_submission(
+        store,
+        user,
+        key="swept",
+        kind=PhotoSubmission.Kind.GROUP,
+        original_key=original,
+        status=PhotoSubmission.Status.PROCESSING,
+        attempts=1,
+    )
+    reference = StoreReference(id=store.id, slug=store.slug)
+
+    SweepStaleProcessing(
+        repository=DjangoPhotoSubmissionRepository(),
+        stale_after=timedelta(minutes=15),
+    )(timezone.now() + timedelta(hours=1))
+
+    saved = process_photo()(reference, submission.pk)
+
+    assert saved.status is SubmissionStatus.FAILED
+    assert saved.failure_code == "photo_processing_unavailable"
+    assert saved.result_media_id is None
+    assert Media.objects.filter(store=store).count() == 0
 
 
 def test_reprocessing_a_ready_submission_does_not_duplicate_media(media_root, private_storage):

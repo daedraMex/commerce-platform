@@ -5,6 +5,7 @@ Pure Python: no Django, DRF or infrastructure imports belong here.
 
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import BinaryIO, Protocol
 
 from apps.catalog.services import (
@@ -177,4 +178,14 @@ class PhotoSubmissionRepository(Protocol):
         media_ids: list[int],
     ) -> list[PhotoSubmission]:
         """Return the store's live submissions targeting the product or producing its media."""
+        ...
+
+    def store_ids_with_stale_processing(self, updated_before: datetime) -> list[int]:
+        """Return ids of stores with a processing submission older than ``updated_before``."""
+        ...
+
+    def list_stale_processing(
+        self, store: StoreReference, updated_before: datetime
+    ) -> list[PhotoSubmission]:
+        """Return the store's processing submissions older than ``updated_before``."""
         ...

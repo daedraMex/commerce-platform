@@ -107,6 +107,30 @@ services:
       storage-init:
         condition: service_completed_successfully
 
+  beat:
+    build:
+      context: ./backend
+    command: celery -A config beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    environment:
+      SECRET_KEY: "${SECRET_KEY:-change-me}"
+      DEBUG: "${DEBUG:-True}"
+      ALLOWED_HOSTS: "${ALLOWED_HOSTS:-localhost,127.0.0.1}"
+      DATABASE_URL: postgres://shop:shop@postgres:5432/shop
+      REDIS_URL: redis://redis:6379/0
+      R2_BUCKET_NAME: "${R2_BUCKET_NAME:-catalog-media}"
+      R2_PRIVATE_BUCKET_NAME: "${R2_PRIVATE_BUCKET_NAME:-catalog-private}"
+      R2_ACCESS_KEY_ID: "${R2_ACCESS_KEY_ID:-rustfsadmin}"
+      R2_SECRET_ACCESS_KEY: "${R2_SECRET_ACCESS_KEY:-rustfsadmin}"
+      R2_ENDPOINT_URL: "${R2_ENDPOINT_URL:-http://rustfs:9000}"
+      MEDIA_BASE_URL: "${MEDIA_BASE_URL:-http://localhost:9000/catalog-media}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      storage-init:
+        condition: service_completed_successfully
+
 volumes:
   postgres_data:
   rustfs_data:

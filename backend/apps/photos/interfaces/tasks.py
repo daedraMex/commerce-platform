@@ -3,9 +3,12 @@
 import logging
 
 from celery import shared_task
+from django.conf import settings
+from django.utils import timezone
 
 from apps.photos.application.fail_exhausted_processing import FailExhaustedProcessing
 from apps.photos.application.process_photo import ProcessPhotoSubmission
+from apps.photos.application.sweep_stale_processing import SweepStaleProcessing
 from apps.shared.domain.exceptions import NotFoundError
 from apps.shared.domain.store import StoreReference
 from config.dependencies import (
@@ -61,3 +64,13 @@ def _record_exhausted_failure(store: StoreReference, submission_id: int) -> None
             submission_id,
             extra={"store_id": store.id, "submission_id": submission_id},
         )
+
+
+@shared_task(name="apps.photos.tasks.sweep_stale_photo_processing")
+def sweep_stale_photo_processing(store_id=None):
+    """Fail processing submissions whose message was lost, for one store or every store."""
+    store = StoreReference(id=store_id, slug="") if store_id is not None else None
+    SweepStaleProcessing(
+        repository=get_photo_submission_repository(),
+        stale_after=settings.PHOTO_PROCESSING_STALE_AFTER,
+    )(timezone.now(), store=store)

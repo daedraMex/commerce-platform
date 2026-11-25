@@ -159,6 +159,29 @@ def test_a_replay_does_not_enqueue_again(upload_photo, queue):
     assert len(queue.calls) == 1
 
 
+def test_an_enqueue_failure_leaves_the_upload_failed_without_raising(
+    repository, uploader, catalog, authorizer
+):
+    queue = FakeProcessingQueue(error=RuntimeError("the broker refused the message"))
+    use_case = UploadPhoto(
+        repository=repository,
+        uploader=uploader,
+        catalog=catalog,
+        authorizer=authorizer,
+        queue=queue,
+    )
+
+    result = use_case(command())
+
+    assert result.created is True
+    assert result.submission.status is SubmissionStatus.FAILED
+    assert result.submission.failure_code == "photo_processing_unavailable"
+    stored = repository.rows[result.submission.id]
+    assert stored.status is SubmissionStatus.FAILED
+    assert stored.failure_code == "photo_processing_unavailable"
+    assert stored.attempts == 1
+
+
 def test_the_same_key_and_payload_returns_the_original_without_uploading_again(
     upload_photo, uploader, repository
 ):

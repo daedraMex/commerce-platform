@@ -17,7 +17,7 @@ from apps.catalog.services import (
 )
 from apps.photos.application.ports import ProcessedPhoto, UploadedPhoto
 from apps.photos.domain.errors import DuplicateIdempotencyKey
-from apps.photos.domain.submission import PhotoSubmission
+from apps.photos.domain.submission import PhotoSubmission, SubmissionStatus
 from apps.shared.domain.exceptions import PermissionDeniedError
 from apps.shared.domain.store import StoreReference
 
@@ -116,6 +116,27 @@ class FakePhotoSubmissionRepository:
         self.rows[submission.id] = submission
         self.next_id += 1
         return submission
+
+    def store_ids_with_stale_processing(self, updated_before) -> list[int]:
+        return sorted(
+            {
+                row.store_id
+                for row in self.rows.values()
+                if row.status is SubmissionStatus.PROCESSING
+                and row.updated_at is not None
+                and row.updated_at < updated_before
+            }
+        )
+
+    def list_stale_processing(self, store, updated_before) -> list[PhotoSubmission]:
+        return [
+            copy.deepcopy(row)
+            for row in sorted(self.rows.values(), key=lambda row: row.id)
+            if row.store_id == store.id
+            and row.status is SubmissionStatus.PROCESSING
+            and row.updated_at is not None
+            and row.updated_at < updated_before
+        ]
 
     def save(self, submission: PhotoSubmission) -> PhotoSubmission:
         submission.version += 1

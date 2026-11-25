@@ -1063,15 +1063,24 @@ def test_retry_refuses_a_submission_that_did_not_fail(client, home, user):
 
 
 @pytest.mark.parametrize(
-    ("action", "status", "attempts", "redos"),
+    ("action", "status", "attempts", "redos", "expected_attempts", "expected_redos"),
     [
-        ("retry", PhotoSubmission.Status.FAILED, 1, 0),
-        ("redo", PhotoSubmission.Status.READY, 0, 0),
-        ("redo", PhotoSubmission.Status.FAILED, 1, 0),
+        ("retry", PhotoSubmission.Status.FAILED, 1, 0, 2, 0),
+        ("redo", PhotoSubmission.Status.READY, 0, 0, 0, 1),
+        ("redo", PhotoSubmission.Status.FAILED, 1, 0, 1, 1),
     ],
 )
-def test_an_enqueue_failure_rolls_the_save_back(
-    client, home, user, override_photo_processing_queue, action, status, attempts, redos
+def test_an_enqueue_failure_records_the_failure_without_a_500(
+    client,
+    home,
+    user,
+    override_photo_processing_queue,
+    action,
+    status,
+    attempts,
+    redos,
+    expected_attempts,
+    expected_redos,
 ):
     grant_membership(user=user, store=home, role_name="content_editor")
     product = make_product(home)
@@ -1083,6 +1092,7 @@ def test_an_enqueue_failure_rolls_the_save_back(
         status=status,
         result_media=media,
         attempts=attempts,
+        redos=redos,
         corners=CORNERS,
         crop=CROP,
         idempotency_key=f"enqueue-failure-{action}-{status}",
@@ -1097,12 +1107,111 @@ def test_an_enqueue_failure_rolls_the_save_back(
 
     response = post_action(client, user, action, submission.pk, data={"crop": new_crop})
 
-    assert_problem_details(response, status=500, code="internal_error")
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["failure_code"] == "photo_processing_unavailable"
     submission.refresh_from_db()
-    assert submission.status == status
-    assert submission.attempts == attempts
-    assert submission.redos == redos
-    assert submission.crop == CROP
+    assert submission.status == PhotoSubmission.Status.FAILED
+    assert submission.failure_code == "photo_processing_unavailable"
+    assert submission.attempts == expected_attempts
+    assert submission.redos == expected_redos
+    assert submission.crop == (new_crop if action == "redo" else CROP)
+
+
+def test_a_broker_send_failure_during_upload_is_not_a_500(
+    client,
+    home,
+    user,
+    private_storage,
+    monkeypatch,
+    django_capture_on_commit_callbacks,
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+
+    def refuse(name, kwargs):
+        raise RuntimeError("the broker is down")
+
+    monkeypatch.setattr(processing_queue.app, "send_task", refuse)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = upload(client, user)
+
+    assert response.status_code == 201
+    submission = PhotoSubmission.objects.get(pk=response.json()["id"])
+    assert submission.status == PhotoSubmission.Status.FAILED
+    assert submission.failure_code == "photo_processing_unavailable"
+    assert submission.attempts == 1
+
+
+def test_a_broker_send_failure_during_retry_is_not_a_500(
+    client,
+    home,
+    user,
+    monkeypatch,
+    django_capture_on_commit_callbacks,
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=PhotoSubmission.Status.FAILED,
+        result_media=None,
+        attempts=1,
+        idempotency_key="broker-retry-key",
+    )
+
+    def refuse(name, kwargs):
+        raise RuntimeError("the broker is down")
+
+    monkeypatch.setattr(processing_queue.app, "send_task", refuse)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = post_action(client, user, "retry", submission.pk)
+
+    assert response.status_code == 200
+    submission.refresh_from_db()
+    assert submission.status == PhotoSubmission.Status.FAILED
+    assert submission.failure_code == "photo_processing_unavailable"
+    assert submission.attempts == 2
+
+
+def test_a_broker_send_failure_during_redo_is_not_a_500(
+    client,
+    home,
+    user,
+    monkeypatch,
+    django_capture_on_commit_callbacks,
+):
+    grant_membership(user=user, store=home, role_name="content_editor")
+    product = make_product(home)
+    submission = make_submission(
+        home,
+        user,
+        product=product,
+        status=PhotoSubmission.Status.READY,
+        result_media=make_media(home),
+        corners=CORNERS,
+        crop=CROP,
+        idempotency_key="broker-redo-key",
+    )
+
+    def refuse(name, kwargs):
+        raise RuntimeError("the broker is down")
+
+    monkeypatch.setattr(processing_queue.app, "send_task", refuse)
+    new_crop = {"x": 2, "y": 2, "width": 6, "height": 8}
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = post_action(client, user, "redo", submission.pk, data={"crop": new_crop})
+
+    assert response.status_code == 200
+    submission.refresh_from_db()
+    assert submission.status == PhotoSubmission.Status.FAILED
+    assert submission.failure_code == "photo_processing_unavailable"
+    assert submission.redos == 1
+    assert submission.crop == new_crop
 
 
 def test_discard_deletes_only_the_private_original_and_preview(client, home, user, private_storage):

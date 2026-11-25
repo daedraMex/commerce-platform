@@ -1,5 +1,6 @@
 """Create a Photo submission from one staff upload, idempotently (ADR-0028)."""
 
+import logging
 from dataclasses import dataclass
 
 from apps.photos.application.fingerprints import photo_request_fingerprint
@@ -9,6 +10,9 @@ from apps.photos.application.ports import (
     PhotoProcessingQueue,
     PhotoSubmissionRepository,
     UploadedPhoto,
+)
+from apps.photos.application.record_processing_unavailable import (
+    record_processing_unavailable,
 )
 from apps.photos.domain.errors import DuplicateIdempotencyKey, InvalidSubmissionTarget
 from apps.photos.domain.submission import (
@@ -20,6 +24,8 @@ from apps.photos.domain.submission import (
 from apps.shared.domain.permissions import MANAGE_CATALOG
 from apps.shared.domain.ports import Authorizer
 from apps.shared.domain.store import StoreReference
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,7 +120,18 @@ class UploadPhoto:
             if replay is None:
                 raise
             return UploadPhotoResult(submission=replay, created=False)
-        self._queue.enqueue(command.store, saved.id)
+        try:
+            self._queue.enqueue(command.store, saved.id)
+        except Exception:
+            logger.exception(
+                "Could not enqueue photo processing for store %s submission %s",
+                command.store.id,
+                saved.id,
+                extra={"store_id": command.store.id, "submission_id": saved.id},
+            )
+            failed = record_processing_unavailable(self._repository, command.store, saved.id)
+            if failed is not None:
+                saved = failed
         return UploadPhotoResult(submission=saved, created=True)
 
     def _delete_uploaded(self, store: StoreReference, uploaded: UploadedPhoto) -> None:
