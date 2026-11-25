@@ -197,3 +197,11 @@ def test_compose_review_prompt_says_the_agent_cannot_run_git():
     assert "cannot run git" in prompt
     assert "Never imitate a git operation by editing files" in prompt
     assert "`OPEN QUESTION:`" in prompt
+
+
+def test_the_overlay_points_to_the_architecture_map_with_its_condition():
+    text = PROMPT_OVERLAY.read_text()
+
+    assert "read `docs/architecture.md` first" in text
+    assert "more than one module" in text
+    assert "Otherwise skip it." in text

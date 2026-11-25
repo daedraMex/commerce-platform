@@ -126,7 +126,10 @@ It is safe to run at any time. Phase 6 schedules it with Celery Beat.
 
 ## Layout
 
+See `docs/architecture.md` for how the parts fit together.
+
 - `backend/`: Django project (`config/`) and its modules (`apps/`), managed with uv
 - `web/console/`: Quetzal, the staff console (Next.js App Router)
 - `packages/api-client/`: the generated API client used by the console
+- `tools/factory/`: the night factory, which builds `ready-for-agent` tickets unattended (`docs/factory.md`)
 - `docker-compose.yml`: PostgreSQL 16, Redis 7, RustFS, the bucket initializer and the Celery worker for local development

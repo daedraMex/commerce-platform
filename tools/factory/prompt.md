@@ -35,4 +35,8 @@ fetch it from GitHub.
 
 8. Do not commit. Leave your changes in the worktree; the runner commits them.
 
+9. When the ticket touches more than one module, adds a module, or crosses the
+   backend, the console and the factory, read `docs/architecture.md` first: it
+   maps the code and names the ADR that rules each part. Otherwise skip it.
+
 Work only inside this worktree. Do not read or write files outside it.

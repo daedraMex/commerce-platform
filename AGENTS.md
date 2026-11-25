@@ -12,6 +12,9 @@ enabled for our own stores first (feature flags) and rolled out to others after.
 
 Read GLOSSARY.md for the domain vocabulary, ROADMAP.md for phases and the
 Definition of Done, and docs/adr/ for the decisions already taken.
+Read docs/architecture.md when a ticket touches more than one module, adds a module,
+or crosses the backend, the console and the factory: it maps the code and points to
+the ADR that rules each part.
 
 ## Development workflow
 - This project uses the Matt Pocock skills workflow (skills in .agents/skills):
