@@ -20,3 +20,15 @@ The label link uses a subdomain of `berlekgroup.com`, the group domain the opera
 - Until Phase 6a, `q.berlekgroup.com` redirects from the `berlekgroup.com` hosting to a temporary page, such as the TikTok Shop or WhatsApp. From Phase 6a it points to the platform, which owns the redirect; an unknown store or SKU gets a plain not-found page.
 - Before printing in bulk, a test label on the 63x22 mm keychain tag confirms the QR code scans with both the USB scanner and a phone camera.
 - The label link is not the public product URL: Phase 7 chooses the product page URLs freely.
+
+## Amendment (2026-11-26)
+
+From Phase 6a the platform that answers `q.berlekgroup.com` is the Django
+backend. `GET /<store>/<SKU>` returns a 302 to a per-store target built from a
+template; the Phase 6a target is WhatsApp,
+`https://wa.me/<number>?text=<urlencoded text>`, with the text
+"Hola <store name>, me interesa <SKU>" and the SKU URL-encoded. A store may set
+its own number; otherwise one shared number is used. Unknown or inactive stores
+and SKUs get a minimal friendly noindex 404 page with no data leak. Phase 7
+changes only the target template to the storefront product page; the label link
+format and the route never change.

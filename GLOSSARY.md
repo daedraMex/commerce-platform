@@ -27,6 +27,10 @@ _Avoid_: API key, token, secret (as the name of the thing)
 The group of stores a feature is enabled for at a given stage; our own stores are always the first ring.
 _Avoid_: Beta group, cohort
 
+**Initial load**:
+The one-time act of creating a store, applying its catalog definition and importing its catalog into production before staff take over.
+_Avoid_: Seed, bootstrap, migration
+
 ### People and access
 
 **User**:
@@ -98,6 +102,10 @@ _Avoid_: Pattern, print, model
 **Collection**:
 A hand-picked group of a store's products that cuts across categories, such as a season or a theme; a product may be in several or none.
 _Avoid_: Catalog, season, campaign
+
+**Catalog definition**:
+The versioned, per-store file that lists the store's categories, with their option and attribute schemas, and its suppliers, from which a store's catalog is set up before its rows are imported.
+_Avoid_: Schema file, fixture, seed
 
 **Supplier**:
 A business a store buys products from, such as a manufacturer whose designs the store resells.
