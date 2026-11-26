@@ -19,6 +19,7 @@
   "dependencies": {
     "@commerce-platform/api-client": "workspace:*",
     "@radix-ui/react-slot": "^1.5.0",
+    "@sentry/nextjs": "^11.19.0",
     "@tanstack/react-query": "^5.107.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
