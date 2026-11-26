@@ -32,7 +32,7 @@ import {
   cropToPixels,
   DEFAULT_CROP,
   DEFAULT_QUAD,
-  GROUP_CROP_ASPECT,
+  CROP_ASPECT,
   type NormalizedCrop,
   type PixelCrop,
 } from "../lib/geometry";
@@ -104,7 +104,7 @@ export function GroupPhotoFlow({ store }: GroupPhotoFlowProps) {
   const aspectScale = cropAspectScale(
     naturalSize.width,
     naturalSize.height,
-    GROUP_CROP_ASPECT,
+    CROP_ASPECT,
   );
   const isApplied = Boolean(submission?.applied_at);
   const isDiscarded = Boolean(submission?.discarded_at);
@@ -169,7 +169,7 @@ export function GroupPhotoFlow({ store }: GroupPhotoFlowProps) {
     setNaturalSize(size);
     if (!initializedCrop.current && size.width > 0 && size.height > 0) {
       initializedCrop.current = true;
-      setCrop(cropForAspect(size.width, size.height, GROUP_CROP_ASPECT));
+      setCrop(cropForAspect(size.width, size.height, CROP_ASPECT));
     }
   };
 
