@@ -76,6 +76,38 @@ function failedSubmission(
   };
 }
 
+const FIRST_PROCESSED_MEDIUM_URL =
+  "https://media.example.test/stores/1/media/renditions/photo-701-800w-v1.webp";
+const REDONE_PROCESSED_MEDIUM_URL =
+  "https://media.example.test/stores/1/media/renditions/photo-702-redo-800w-v1.webp";
+
+function processedResult(id: number, mediumUrl: string) {
+  return {
+    media_id: id + 1000,
+    url: `https://media.example.test/stores/1/media/photo-${id}.jpg`,
+    thumbnail_url: `https://media.example.test/stores/1/media/renditions/photo-${id}-320w-v1.webp`,
+    medium_url: mediumUrl,
+    width: 658,
+    height: 823,
+  };
+}
+
+function readySubmission(
+  id: number,
+  mediumUrl: string,
+  overrides: Partial<PhotoSubmission> = {},
+): PhotoSubmission {
+  return failedSubmission(id, {
+    status: "ready",
+    attempts: 1,
+    failure_code: "",
+    failure_message: "",
+    result: processedResult(id, mediumUrl),
+    version: 4,
+    ...overrides,
+  });
+}
+
 function firstPageWithoutTarget() {
   return Array.from({ length: 100 }, (_, index) => ({
     id: index + 1,
@@ -303,5 +335,213 @@ describe("IndividualPhotoFlow", () => {
         "Ya no puedes rehacer esta foto. Descártala y toma una nueva.",
       ),
     ).toBeInTheDocument();
+  }, 15_000);
+
+  it("shows the processed medium image once the photo is ready", async () => {
+    server.use(
+      http.get(LIST_URL, () =>
+        HttpResponse.json({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [TARGET],
+        }),
+      ),
+      http.get(DETAIL_URL, () => HttpResponse.json(TARGET)),
+      http.get(CAROUSEL_URL, () =>
+        HttpResponse.json({ product_id: TARGET.id, images: [] }),
+      ),
+      http.post(PHOTO_UPLOAD_URL, () =>
+        HttpResponse.json(
+          failedSubmission(701, {
+            status: "uploaded",
+            attempts: 0,
+            failure_code: "",
+            failure_message: "",
+            version: 1,
+          }),
+          { status: 201 },
+        ),
+      ),
+      http.get("*/api/v1/staff/photos/701/", () =>
+        HttpResponse.json(
+          readySubmission(701, FIRST_PROCESSED_MEDIUM_URL),
+        ),
+      ),
+    );
+
+    renderFlow();
+    await screen.findByTestId("photo-page-heading");
+    fireEvent.change(screen.getByLabelText("Tomar foto"), {
+      target: {
+        files: [new File(["photo"], "frazada.png", { type: "image/png" })],
+      },
+    });
+    await screen.findByTestId("photo-editor");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar foto" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("photo-submission-card")).toHaveAttribute(
+        "data-state",
+        "pending",
+      ),
+    );
+    expect(
+      screen.getByRole("img", {
+        name: "Vista previa de la foto procesada",
+      }),
+    ).toHaveAttribute("src", FIRST_PROCESSED_MEDIUM_URL);
+  }, 15_000);
+
+  it.each(["uploaded", "processing", "failed"] as const)(
+    "keeps the original preview while the photo is %s",
+    async (status) => {
+      server.use(
+        http.get(LIST_URL, () =>
+          HttpResponse.json({
+            count: 1,
+            next: null,
+            previous: null,
+            results: [TARGET],
+          }),
+        ),
+        http.get(DETAIL_URL, () => HttpResponse.json(TARGET)),
+        http.get(CAROUSEL_URL, () =>
+          HttpResponse.json({ product_id: TARGET.id, images: [] }),
+        ),
+        http.post(PHOTO_UPLOAD_URL, () =>
+          HttpResponse.json(
+            failedSubmission(703, {
+              status: "uploaded",
+              attempts: 0,
+              failure_code: "",
+              failure_message: "",
+              version: 1,
+            }),
+            { status: 201 },
+          ),
+        ),
+        http.get("*/api/v1/staff/photos/:id/", ({ params }) =>
+          HttpResponse.json(
+            failedSubmission(Number(params.id), {
+              status,
+              result: null,
+              failure_code:
+                status === "failed" ? "quad_self_intersecting" : "",
+              failure_message:
+                status === "failed" ? "The corners cross each other." : "",
+            }),
+          ),
+        ),
+      );
+
+      renderFlow();
+      await screen.findByTestId("photo-page-heading");
+      fireEvent.change(screen.getByLabelText("Tomar foto"), {
+        target: {
+          files: [new File(["photo"], "frazada.png", { type: "image/png" })],
+        },
+      });
+      await screen.findByTestId("photo-editor");
+      fireEvent.click(screen.getByRole("button", { name: "Enviar foto" }));
+
+      await waitFor(() =>
+        expect(screen.getByTestId("photo-submission-card")).toHaveAttribute(
+          "data-state",
+          status === "failed" ? "failed" : "processing",
+        ),
+      );
+      const image = screen.getByRole("img", {
+        name: "Vista previa de la foto procesada",
+      });
+      expect(image.getAttribute("src")).toMatch(/^blob:/);
+      expect(image).not.toHaveAttribute("src", FIRST_PROCESSED_MEDIUM_URL);
+    },
+    15_000,
+  );
+
+  it("shows the new processed result after a redo", async () => {
+    let phase: "ready" | "redo" = "ready";
+    server.use(
+      http.get(LIST_URL, () =>
+        HttpResponse.json({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [TARGET],
+        }),
+      ),
+      http.get(DETAIL_URL, () => HttpResponse.json(TARGET)),
+      http.get(CAROUSEL_URL, () =>
+        HttpResponse.json({ product_id: TARGET.id, images: [] }),
+      ),
+      http.post(PHOTO_UPLOAD_URL, () => {
+        phase = "ready";
+        return HttpResponse.json(
+          failedSubmission(702, {
+            status: "uploaded",
+            attempts: 0,
+            failure_code: "",
+            failure_message: "",
+            version: 1,
+          }),
+          { status: 201 },
+        );
+      }),
+      http.get("*/api/v1/staff/photos/702/", () =>
+        HttpResponse.json(
+          readySubmission(
+            702,
+            phase === "ready"
+              ? FIRST_PROCESSED_MEDIUM_URL
+              : REDONE_PROCESSED_MEDIUM_URL,
+          ),
+        ),
+      ),
+      http.post("*/api/v1/staff/photos/702/redo", () => {
+        phase = "redo";
+        return HttpResponse.json(
+          failedSubmission(702, {
+            status: "processing",
+            result: null,
+            redos: 1,
+            redos_remaining: 4,
+            failure_code: "",
+            failure_message: "",
+            version: 5,
+          }),
+        );
+      }),
+    );
+
+    renderFlow();
+    await screen.findByTestId("photo-page-heading");
+    fireEvent.change(screen.getByLabelText("Tomar foto"), {
+      target: {
+        files: [new File(["photo"], "frazada.png", { type: "image/png" })],
+      },
+    });
+    await screen.findByTestId("photo-editor");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar foto" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("img", {
+          name: "Vista previa de la foto procesada",
+        }),
+      ).toHaveAttribute("src", FIRST_PROCESSED_MEDIUM_URL),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Rehacer" }));
+    await screen.findByTestId("photo-editor");
+    fireEvent.click(screen.getByRole("button", { name: "Rehacer foto" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("img", {
+          name: "Vista previa de la foto procesada",
+        }),
+      ).toHaveAttribute("src", REDONE_PROCESSED_MEDIUM_URL),
+    );
   }, 15_000);
 });
