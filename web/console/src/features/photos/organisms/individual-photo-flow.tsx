@@ -149,7 +149,8 @@ export function IndividualPhotoFlow({
     submission?.id ?? null,
     submission !== null && !submission.discarded_at,
   );
-  const statusImageUrl = previewUrl ?? localUrl;
+  const statusImageUrl =
+    submission?.result?.medium_url ?? previewUrl ?? localUrl;
   const editorImageUrl = localUrl ?? previewUrl;
 
   usePhotoPolling({

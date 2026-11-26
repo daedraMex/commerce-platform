@@ -89,7 +89,8 @@ export function GroupPhotoFlow({ store }: GroupPhotoFlowProps) {
     submission?.id ?? null,
     submission !== null && !submission.discarded_at,
   );
-  const statusImageUrl = previewUrl ?? localUrl;
+  const statusImageUrl =
+    submission?.result?.medium_url ?? previewUrl ?? localUrl;
 
   usePhotoPolling({
     store,

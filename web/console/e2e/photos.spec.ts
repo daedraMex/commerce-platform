@@ -227,6 +227,11 @@ test("crops a group photo to 4:5, selects products in order and manages links", 
     "En espera",
     { timeout: 15_000 },
   );
+  await expect(
+    page
+      .getByTestId("group-photo-status")
+      .getByAltText("Vista previa de la foto procesada"),
+  ).toHaveAttribute("src", /\/renditions\/photo-\d+-800w-v1\.webp$/);
   await attachScreenshot(page, testInfo, "photos-group-ready.png");
 
   const applyResponse = page.waitForResponse(
@@ -377,6 +382,11 @@ test("edits one photo with pointer corners, uploads it and approves it", async (
   await expect(page.getByTestId("photo-state-label")).toHaveText("En espera", {
     timeout: 15_000,
   });
+  await expect(
+    page
+      .getByTestId("photo-submission-card")
+      .getByAltText("Vista previa de la foto procesada"),
+  ).toHaveAttribute("src", /\/renditions\/photo-\d+-800w-v1\.webp$/);
   await attachScreenshot(page, testInfo, "photo-ready-pending.png");
 
   await page.getByRole("button", { name: "Aprobar" }).click();
