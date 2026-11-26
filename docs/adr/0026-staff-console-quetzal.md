@@ -45,3 +45,12 @@ Quetzal is deployed with Dokploy on the VPS, next to the backend, on its own sub
 - Before the night factory takes console tickets, a human pull request adds `web/console/scripts/check.sh` (lint, typecheck, unit and level-1 tests), teaches the factory to run the check of every area a ticket touched, and adds that script to the documented sudoers rule; `tools/factory/` and `.github/` are protected paths.
 - The level-2 end-to-end job lives in `.github/workflows/`, so a human writes it.
 - The photo pipeline itself (HEIC conversion, direct or proxied upload, corner math, Celery processing) is decided in the Phase 4b grilling, not here.
+
+## Amendment (2026-11-26)
+
+Quetzal ships as a production container next to the backend and is built once
+and promoted by the same digest as the backend. It reads all environment
+configuration server-side at runtime in its BFF; no environment-specific
+`NEXT_PUBLIC_*` value is baked into the image, so the staging image is the
+production image. A test fails the build if a per-environment `NEXT_PUBLIC_*`
+value is introduced.
