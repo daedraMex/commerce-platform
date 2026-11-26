@@ -54,8 +54,8 @@ rules each part.
 - All code in English: variables, functions, classes, files, database names,
   comments, error messages and commit messages.
 - Modular monolith. Each Django app in backend/apps/ is a module.
-- Modules with business rules (inventory, orders, payments, photos, agents) follow clean
-  architecture:
+- Modules with business rules (inventory, orders, payments, shipping, photos, agents)
+  follow clean architecture:
   - domain/: pure Python, no Django, DRF or infrastructure imports
   - application/: one use case per file, dependencies injected as ports
   - infrastructure/: Django ORM, repositories, external gateways
@@ -69,7 +69,17 @@ rules each part.
   No ModelViewSet or ModelSerializer.save() in modules with business rules.
 - Authorization for important actions is enforced inside use cases through the
   Authorizer port, not only in views.
-- Never delete products or orders; use is_active or status.
+- Never delete products or orders; use is_active or status. Variants are deactivated,
+  never deleted.
+- A SKU never changes once created: it is printed on product labels. A product never
+  changes its store or its category.
+- A product label's QR code encodes the label link https://q.berlekgroup.com/<store>/<SKU>
+  and never the product page URL; the platform redirects it (ADR-0035). That link format
+  never changes.
+- External providers (payments, shipping) sit behind a port, and the domain uses our own
+  terms, never the provider's identifiers or formats; a record keeps the provider's id only
+  as an external reference with the provider name. Which provider a store uses is a
+  per-store setting (ADR-0034).
 - Every API error is an RFC 9457 problem details response with a stable `code`.
 - OpenAPI examples are fixed literal values, never read from settings or the
   environment, so the generated schema is deterministic.

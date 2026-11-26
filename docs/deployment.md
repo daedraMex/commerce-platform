@@ -1,6 +1,6 @@
 # Deployment notes
 
-Operational requirements that the deployment must satisfy. The Phase 6 deployment
+Operational requirements that the deployment must satisfy. The Phase 6a deployment
 runbook (server hardening, Dokploy, backups, domains and TLS) will build on these notes.
 
 ## Database extensions
