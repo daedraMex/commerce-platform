@@ -7,7 +7,12 @@ How to use each phase prompt with OpenCode (model: DeepSeek):
 3. Work ticket by ticket with `/implement`, review each diff with `/code-review`.
 4. Close the phase with `/retro` and update `AGENTS.md` with anything learned.
 
-Do not start a phase until the previous one meets its "Done when" criteria.
+Phases are numbered by topic, not by order. Work them in the order and tracks of
+ROADMAP.md section 5: 4b, 6a, 4c, then four parallel tracks (backend 5 → 6 → 6b, in-store
+5c, video 4d, storefront 7), then 8 and 5b. Do not start a phase until the phases it
+depends on meet their "Done when" criteria. Every blocking edge between tracks is a
+`Blocked by: #n` line (or a native GitHub dependency) in the blocked ticket, so the
+factory never starts a ticket whose dependency is open and never stacks branches.
 
 ---
 
@@ -230,7 +235,7 @@ with import_catalog, and readable through the API.
   image yet. Products are listed newest first, or in the collection's order when
   filtered by collection. Never expose cost, the supplier or the supplier design name.
   Enabling unaccent needs a database role allowed to run CREATE EXTENSION; production
-  (Phase 6) must grant it.
+  (Phase 6a) must grant it.
 - API tests proving a product from one store never appears in the other.
 ```
 
@@ -280,7 +285,73 @@ Goal: staff turn one or more phone photos of products into catalog images.
 
 ---
 
+## Phase 6a — Deployment
+
+Runs right after Phase 4b. It was split out of Phase 6 so staff load products and photos
+straight into production instead of a local database.
+
+```
+Phase 6a of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0020 and ADR-0028.
+
+Goal: run the API, the worker, the beat and Quetzal in staging and production.
+
+- backend/Dockerfile (Python 3.12 slim, gunicorn), with migrate run before the app starts.
+- docker-compose.prod.yml with api, worker, beat (same image, different commands),
+  postgres and redis. Without beat the Phase 4b sweep of stuck photo submissions never runs.
+- Quetzal served over HTTPS: the browser camera and scanner need a secure context.
+- q.berlekgroup.com points to the platform, which redirects each label link
+  /<store>/<SKU> to that variant's product page (ADR-0035). An unknown store or SKU gets a
+  plain not-found page.
+- GitHub Actions on merge to main: tests, build the image, push to GHCR, call the
+  Dokploy API to deploy to staging. A version tag deploys to production.
+- Two environments with separate databases, separate R2 buckets (public and private) and
+  separate credentials.
+- Document in docs/deployment.md: server hardening checklist, Dokploy setup, database
+  backups to external S3-compatible storage, domain and SSL.
+- Basic error tracking and structured logging from day one; manage.py check --deploy in
+  CI with a production configuration.
+- One-time initial load: production starts empty. Each store's catalog is imported with
+  import_catalog from the operator's sheets, and a verification command compares what was
+  imported with the sheet (stores, categories, products, variants and SKUs) and reports
+  every mismatch. Photos from the local database are not migrated; photos are taken in
+  production. The sku,quantity stock sheets are imported in Phase 5, not here.
+```
+
+**Done when:** a staff member signs in to Quetzal in production from their phone, the imported catalog matches their sheets, and a photo taken there joins the product's carousel.
+
+---
+
+## Phase 4c — Product entry and editing in Quetzal
+
+Runs right after Phase 6a. Today products only enter through import_catalog.
+
+```
+Phase 4c of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0024 and ADR-0026.
+
+Goal: staff create a product with its variants and its photos from their phone, without
+a sheet.
+
+- Staff endpoints guarded by catalog.manage through the Authorizer to create and edit
+  products and variants, using the catalog services and rules (catalog is a CRUD module).
+- A phone-first Quetzal page: store, category, name, attributes, and the options the
+  category defines to build the variants, each with its generated SKU. Saving goes
+  straight to the Phase 4b photo flow for each variant.
+- Editable: name, description, attributes, each variant's price, adding variants, and
+  deactivating a variant or a product.
+- Never editable: the SKU (it is printed on labels and never changes once created), the
+  product's store and its category. A product in the wrong category is deactivated and
+  entered again in the right one. Variants are never deleted, only deactivated.
+```
+
+**Done when:** from a phone, a staff member creates a product with two variants, photographs each one, corrects a price, and the product appears in the public API with its two SKUs.
+
+---
+
 ## Phase 4d — Catalog video
+
+Runs in its own track after Phase 4c. The video ships with the storefront: Phase 7 opens
+no store to the public without it, and the Phase 7 ticket that shows the video on the
+product page is `Blocked by:` the Phase 4d ticket that publishes its URL.
 
 ```
 Phase 4d of commerce-platform. Read AGENTS.md, GLOSSARY.md and ADR-0028.
@@ -308,6 +379,9 @@ Phase 5 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
 Goal: the first clean architecture modules. Use /tdd: every use case starts with a
 failing unit test using fake ports.
 
+First ticket: write the order and checkout contract in docs/contracts/ (ADR-0031). Phase 6
+and the Phase 7 cart depend on it and start as soon as it is written.
+
 apps/inventory
 - domain: StockLevel and movement rules, OutOfStock exception.
 - application: ReserveStock, ReleaseStock, AdjustStock (requires inventory.adjust).
@@ -331,7 +405,7 @@ apps/orders
 - application: PlaceOrder (reserves stock through StockService, snapshots sku, name,
   unit_price and unit_cost into each item, computes totals), CancelOrder (releases stock).
 - infrastructure: Order (UUID id, human number like AN-000123 per store, store, customer,
-  channel: web, app, tiktok, whatsapp, in_person; external_id unique per channel when present,
+  channel: web, app, tiktok, marketplace, whatsapp, in_person; external_id unique per channel when present,
   status, currency MXN, subtotal, discount_total, shipping_total, tax_total, total,
   shipping_address JSON, placed_at) and OrderItem, with DjangoOrderRepository.
 - interfaces: POST /api/v1/orders/ (customer), GET own orders, staff endpoints for
@@ -361,15 +435,59 @@ this phase on:
 - TikTok Shop orders (Phase 8) are stored as our own orders, so analytics reads one
   source.
 
-Open for the grilling (issue #1): selling a variant with zero stock when it is made to
-order from its supplier (Phase 5b builds purchasing on top), the supplier's availability
-per variant, and Store.timezone.
+Sales channel: every order records its channel: storefront (web or app), in person
+(in_person, the shop counter of Phase 5c), TikTok Shop, a marketplace or WhatsApp.
+
+Sell only what is in stock: until Phase 5b, every variant is sold from stock, and an
+out-of-stock variant shows as sold out and cannot be bought. Selling a made-to-order
+variant with zero stock arrives with Phase 5b, which turns it into a supplier purchase.
+
+Opening stock: until this phase, stock counts live in one sku,quantity sheet per store.
+Import each sheet once as the opening stock of the store's location, with a stock
+movement per SKU, report the SKUs it cannot match, and then the sheets are retired.
+
+Open for the grilling (issue #1): the supplier's availability per variant, and
+Store.timezone.
 
 When finished, propose a project skill `new-domain-module` in .claude/skills/ based on
 how apps/orders was built (use /writing-for-agents).
 ```
 
-**Done when:** placing an order reduces stock atomically, ordering more than available of a variant sold from stock returns 409 (selling a made-to-order variant with zero stock is decided in the Phase 5 grilling), and the unit tests run without a database.
+**Done when:** placing an order reduces stock atomically, ordering more than available of a variant returns 409, a store's stock sheet is imported as its opening stock, and the unit tests run without a database.
+
+---
+
+## Phase 5c — In-store selling
+
+Runs in parallel with Phases 6 and 6b, as soon as Phase 5 exists.
+
+```
+Phase 5c of commerce-platform. Read AGENTS.md, GLOSSARY.md and the order and checkout
+contract in docs/contracts/.
+
+Goal: sell at the shop counter and keep stock with the same system as the online stores.
+
+- In-person sale in Quetzal: scan the product label's QR code with a USB scanner (Quetzal
+  takes the SKU from the label link, ADR-0035, and also accepts a bare SKU) and each piece adds to
+  the sale, like a supermarket till. Quetzal shows the total; staff type how much the
+  customer paid and Quetzal shows the change. Charging records an order with channel
+  in_person and a cash payment (cash only; Quetzal connects to no card terminal),
+  decrements stock through the orders and inventory modules, and prints the sales receipt.
+- Sales receipt on the receipt printer (OFICHIDO, 58 mm roll): store, date, items, total,
+  amount paid and change. Printed through the browser print dialog. Before building the
+  sale, print a test receipt to confirm the roll width and that it reads well.
+- Stock count: scan with the USB scanner or the phone camera in the browser and record the
+  count as an adjustment stock movement with its reason.
+- Price lookup: scan a SKU and see its price and stock.
+- Product labels from Quetzal on the label printer (Zendio Z-474, 203 dpi): staff pick
+  products and quantities, or upload a sku,quantity sheet, and get one label per piece with
+  the label link QR code (ADR-0035), name, variant and price, on 2x1" labels and 63x22 mm
+  keychain tags. It replaces the script used today for the opening inventory.
+- At the end of the phase, a "today's sales by channel" endpoint for the dashboards (a
+  TRMNL e-ink display reads it later, outside the phases).
+```
+
+**Done when:** an in-person sale reduces stock, is stored as an order with channel in_person and prints its receipt, and a label printed from Quetzal scans back to its variant.
 
 ---
 
@@ -389,38 +507,43 @@ before it was in stock.
 - A scheduled task that drafts the purchase order the day before each restock; restock
   suggestions from recent sales.
 - Customer orders waiting for an item that did not arrive are flagged.
+- Selling a made-to-order variant with zero stock arrives with this phase; until now
+  every store sold only from stock.
+- Each store has a placeholder supplier named "Por definir" for designs whose supplier is
+  not known yet. This phase must handle those designs; how is decided in its
+  /grill-with-docs.
 ```
+
+Runs after Phase 8.
 
 **Done when:** a sale of an out-of-stock variant appears on the purchase list, goes into a purchase order, and a partial receipt adds the received quantity to stock.
 
 ---
 
-## Phase 6 — Payments and deployment
+## Phase 6 — Payments
+
+Runs in the backend track after Phase 5, and can start as soon as Phase 5 writes the
+order and checkout contract. Deployment moved to Phase 6a.
 
 ```
-Phase 6 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
+Phase 6 of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0020, ADR-0034 and the
+order and checkout contract in docs/contracts/.
 
-Goal: take real payments and run in staging and production.
+Goal: take real payments online.
 
 apps/payments (clean architecture)
 - A PaymentGateway port with a Mercado Pago implementation (cards and OXXO).
-- Payment: order, provider, provider_ref, amount, status, timestamps.
+- Payment: order, provider name, external reference (the provider's id), amount, status,
+  timestamps. The domain uses our own terms and never Mercado Pago identifiers or formats;
+  the adapter maps them (ADR-0034).
+- Which payment provider a store uses is a per-store setting, so replacing Mercado Pago
+  means adding an adapter behind PaymentGateway, not changing orders or checkout. Today all
+  four stores use the same Mercado Pago account, stored as each store's integration
+  credential (ADR-0020), with test mode in staging.
 - Use cases: CreatePayment (returns what the frontend needs to start checkout) and
-  HandlePaymentWebhook (verifies the signature, is idempotent by provider_ref, moves the
-  order to paid through the orders module, never by writing Order directly).
-- Celery: app setup in config/celery.py, a task that sends the order confirmation email.
-
-Deployment
-- backend/Dockerfile (Python 3.12 slim, gunicorn), with migrate run before the app starts.
-- docker-compose.prod.yml with api, worker, beat (same image, different commands),
-  postgres and redis.
-- GitHub Actions on merge to main: tests, build the image, push to GHCR, call the
-  Dokploy API to deploy to staging. A version tag deploys to production.
-- Two environments with separate databases and separate Mercado Pago credentials
-  (test mode in staging).
-- Document in docs/deployment.md: server hardening checklist, Dokploy setup, database
-  backups to external S3-compatible storage, domain and SSL.
-- Basic error tracking and structured logging from day one.
+  HandlePaymentWebhook (verifies the signature, is idempotent by the external reference,
+  moves the order to paid through the orders module, never by writing Order directly).
+- Celery: a task that sends the order confirmation email.
 ```
 
 **Done when:** a test payment in staging marks the order as paid and sends the email.
@@ -431,66 +554,70 @@ Deployment
 ## Phase 6b — Shipping
 
 ```
-Phase 6b of commerce-platform. Read AGENTS.md, GLOSSARY.md and issue #1 (shipping).
+Phase 6b of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0020, ADR-0034 and issue #1
+(shipping).
 
 Goal: quote and ship every non-TikTok order through Envíosperros.
+- apps/shipping, a clean architecture module like apps/payments.
+- Its domain uses our own terms (shipping quote, shipment, carrier, shipping label) and
+  never Envíosperros identifiers or formats: the adapter maps them, and a shipment keeps
+  the provider's id only as an external reference, with the provider name (ADR-0034).
 - A ShippingProvider port with an Envíosperros implementation (API v3: rates, labels,
   label download, pickup); staging only in development and tests.
-- The Envíosperros token is a per-store integration credential (ADR-0020).
+- Which shipping provider a store uses is a per-store setting, so replacing Envíosperros
+  means adding an adapter behind ShippingProvider, not changing orders or checkout. Today
+  all four stores use the same Envíosperros account, stored as each store's integration
+  credential (ADR-0020).
 - The sales channel decides the carrier: TikTok Shop orders ship with TikTok's
   logistics; every other order through Envíosperros.
 - A per-shipment drop-off surcharge, a per-store setting (10 MXN for home today), added
   to the quote shown to the customer, never to a variant's cost.
 - Variant weight and package dimensions become required to quote.
+- The 4x6" shipping label prints from Quetzal on the Phase 5c label printer, with a 4x6"
+  roll.
 ```
 
 **Done when:** a staging order gets a quote, a label is created and downloaded, and the price shown includes the surcharge.
 
 ---
 
-## Phase 7 — Storefront, first live with home
+## Phase 7 — Storefront and the four stores
+
+Runs in its own track from Phase 4c. Everything that only reads the catalog starts now;
+the cart, checkout and confirmation are `Blocked by:` the Phase 5 order and checkout
+contract and Phase 6; the product-page video is `Blocked by:` Phase 4d.
 
 ```
-Phase 7 of commerce-platform. Read AGENTS.md and GLOSSARY.md.
+Phase 7 of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0024, ADR-0027 and
+ADR-0033.
 
-Goal: the blankets store live at its own domain.
+Goal: the four stores, home, kawaii, llaveros and anime, live at their own domains.
 - packages/api-client: TypeScript client generated from /api/v1/schema/, regenerated by
   a script; the storefront uses it (the mobile app generates its own Kotlin client,
   ADR-0029).
 - web/storefront/: one Next.js app with TypeScript and the App Router for every store. It
-  resolves the store and its theme from the request domain and sends it as X-Store.
-  It goes live with the home store first.
-- Pages: home, category listing, product detail (variants: size and color), cart,
-  checkout with Mercado Pago, order confirmation, customer login and order history.
+  resolves the store and its theme from the request domain and sends it as X-Store. Each
+  store has its own domain and theme, no new app.
+- Start with everything that only reads the catalog, using the public catalog API: home,
+  category listing, product detail (variants by their options), search, collections and
+  per-store themes.
+- Then, once the order and checkout contract (Phase 5) and Phase 6 exist: cart, checkout
+  with Mercado Pago, order confirmation, customer login and order history. Out-of-stock
+  variants show as sold out and cannot be added to the cart.
 - Product detail shows the public video URL returned by the API since Phase 4d, with
   playback controls and a poster image.
-- Product and category pages rendered on the server for SEO, with metadata, Open Graph
-  and a sitemap. Images through next/image.
-- Mobile-first layout: most buyers arrive from TikTok and Instagram on their phones.
-- Deployed on Vercel with a preview per pull request; CI runs lint, type check and build.
-- Product analytics (issue #1, analytics): storefront events (views, cart, funnel,
-  traffic sources) go to a dedicated tool such as PostHog, never into our PostgreSQL,
-  because event volume grows fast. Business analytics stays in PostgreSQL.
-```
-
-**Done when:** someone buys a blanket on your domain.
-
----
-
-## Phase 8 — Anime, kawaii and llaveros stores and sales channels
-
-```
-Phase 8 of commerce-platform. Read AGENTS.md, GLOSSARY.md, ADR-0020 and ADR-0024.
-
-Goal: the anime, kawaii and llaveros stores and the external channels.
-- The `anime` store on the same storefront: its domain and its theme, no new app.
-- The `kawaii` store on the same storefront too: its own domain and theme, no new app.
-- The `llaveros` store on the same storefront too: its own domain and theme, no new app.
-- Each store has its own social and TikTok Shop accounts, stored as per-store integration
-  credentials (ADR-0020).
+- Product labels already carry a fixed label link, https://q.berlekgroup.com/<store>/<SKU>
+  (ADR-0035), which the platform redirects to the product page. Decide the public product
+  page URL here; it can change later, because labels never encode it.
+- Each store opens to the public when it is ready: its catalog loaded, its own photos
+  (only home has supplier images, ADR-0033; kawaii, llaveros and anime need our own photo
+  of every variant), and the Phase 5 features its products need (open box for the
+  squishies in kawaii, assorted bundles for the keychain dozens in llaveros). The other
+  stores never wait for it.
 - Product lines: stores are split by audience into four: `anime` (anime merchandise:
   caps, t-shirts and other anime products), `kawaii` (kawaii stationery: BTS holders,
-  lomo cards, notebooks, stickers, pens and squishies), `llaveros` (keychains of every
+  lomo cards, notebooks, stickers and pens; squishies, K-pop merchandise, snacks and
+  blankets), `llaveros` (keychains of every
   kind: kawaii, anime, superheroes and animals; retail and wholesale for resellers) and
   `home` (blankets). Keychains go to `llaveros`, not `kawaii`. Bags and backpacks go to
   `anime` or `kawaii` by design. A new store only when a line has a different buyer.
@@ -506,6 +633,36 @@ Goal: the anime, kawaii and llaveros stores and the external channels.
   comes in several colors (for example Spider-Man blue and red). Never use "Color" to mean
   the character: it breaks storefront filters, catalog feeds and agent-written copy. Size
   and material are category attributes, the same for every variant.
+- The same blanket design is sold in home and kawaii as two products with separate stock;
+  stock is bought for each store.
+- The categories of kawaii, llaveros and anime are created as data by a script outside the
+  repository. Color, paper size, pieces, presentation (sealed box or loose piece) and
+  clothing size are options, so each combination is a variant with its own SKU and stock;
+  everything else is an attribute. Designs use their real suppliers (Beka, Altos, Adeko,
+  Arcade Store, ...) or the store's placeholder supplier "Por definir".
+- Product and category pages rendered on the server for SEO, with metadata, Open Graph
+  and a sitemap. Images through next/image; zoom only on images at least 1,200 px wide
+  (ADR-0033).
+- Mobile-first layout: most buyers arrive from TikTok and Instagram on their phones.
+- Deployed on Vercel with a preview per pull request; CI runs lint, type check and build.
+- Product analytics (issue #1, analytics): storefront events (views, cart, funnel,
+  traffic sources) go to a dedicated tool such as PostHog, never into our PostgreSQL,
+  because event volume grows fast. Business analytics stays in PostgreSQL.
+```
+
+**Done when:** each of the four stores is open at its own domain and someone has bought from it.
+
+---
+
+## Phase 8 — Sales channels
+
+```
+Phase 8 of commerce-platform. Read AGENTS.md, GLOSSARY.md and ADR-0020.
+
+Goal: the external sales channels. The stores opened in Phase 7; this phase only adds
+channels.
+- Each store has its own social and TikTok Shop accounts, stored as per-store integration
+  credentials (ADR-0020).
 - apps/integrations:
   - TikTok Shop: a Celery Beat task that imports TikTok orders as Order with
     channel=tiktok (idempotent by external_id) and pushes stock levels to TikTok.
@@ -607,9 +764,9 @@ Goal: a customer app for every store.
   codebase for Android and iOS (ADR-0029). Each store's color scheme is generated
   from its accent_color as the seed color. A Kotlin client is generated from
   packages/api-client/openapi.json; the TypeScript packages/api-client is not used.
-- QR scanning: product labels contain a URL like https://<store-domain>/p/<SKU>.
-  Universal links (iOS) and app links (Android) open the product in the app when
-  installed and on the web otherwise. Prices are always fetched live.
+- QR scanning: product labels carry the label link https://q.berlekgroup.com/<store>/<SKU>
+  (ADR-0035). Universal links (iOS) and app links (Android) on that host open the product
+  in the app when installed and on the web otherwise. Prices are always fetched live.
 - Favorites: Favorite model (user, product, unique) in the backend, endpoints to add,
   remove and list; visible on web and mobile.
 - Login with JWT, tokens in secure storage.

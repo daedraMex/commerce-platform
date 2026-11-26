@@ -103,6 +103,18 @@ _Avoid_: Catalog, season, campaign
 A business a store buys products from, such as a manufacturer whose designs the store resells.
 _Avoid_: Vendor, provider, manufacturer (as the name of the thing)
 
+**Placeholder supplier**:
+The supplier named "Por definir" that each store assigns to a design whose real supplier is not known yet.
+_Avoid_: Unknown supplier, default supplier
+
+**Product label**:
+A sticker on one piece that shows its name, variant and price, with a QR code that encodes its label link. Staff scan it to sell and count; customers scan it to open the product.
+_Avoid_: Tag, barcode, price tag, shelf label
+
+**Label link**:
+The fixed link a product label encodes, `https://q.berlekgroup.com/<store>/<SKU>`, which the platform redirects to the product page. It never changes once printed.
+_Avoid_: Product URL (that is the page, which may change), QR URL
+
 **Media**:
 A public product image, stored once per store under a content-addressed key and reusable across that store's products.
 _Avoid_: Image, asset, attachment
@@ -165,6 +177,18 @@ _Avoid_: Move, shipment
 Stock held for an order that has not been paid yet, so it cannot be sold twice.
 _Avoid_: Hold, lock, allocation
 
+**Open box**:
+A stock movement that turns one sealed box into its loose pieces in one recorded operation: one box out, its pieces in.
+_Avoid_: Unpack, split, break down
+
+**Opening stock**:
+The stock a store's location starts with, imported once from the store's stock sheet.
+_Avoid_: Initial inventory, starting balance
+
+**Stock count**:
+Counting the pieces on hand by scanning them, recorded as an adjustment stock movement for each difference.
+_Avoid_: Stocktake, audit, inventory (for this)
+
 ### Selling
 
 **Order**:
@@ -182,6 +206,48 @@ _Avoid_: Web store, site, frontend (for this specifically)
 **Theme**:
 The visual identity a storefront takes on for one store.
 _Avoid_: Skin, template
+
+**Sales channel**:
+Where an order was placed: the storefront, in person, TikTok Shop, a marketplace or WhatsApp. Every order records its channel.
+_Avoid_: Source, platform, origin
+
+**In-person sale**:
+An order taken at the shop counter in Quetzal by scanning each piece, paid in cash, with channel in person.
+_Avoid_: POS sale, local sale, walk-in
+
+**Sales receipt**:
+The printed slip a customer gets for an in-person sale, with the items, the total, the amount paid and the change.
+_Avoid_: Ticket, invoice, receipt (alone)
+
+### Payments and shipping
+
+**Payment gateway**:
+The external service that charges a customer online, such as Mercado Pago, reached through the `PaymentGateway` port.
+_Avoid_: Processor, provider (alone)
+
+**Shipping provider**:
+The external service that quotes shipments and creates shipping labels, such as Envíosperros, reached through the `ShippingProvider` port.
+_Avoid_: Courier (for this), provider (alone)
+
+**External reference**:
+The id an external provider gives to something we also record, kept next to the provider's name and never used as our own id.
+_Avoid_: Provider id, foreign id
+
+**Shipping quote**:
+The price and delivery options a shipping provider offers for one package before it is shipped, including the drop-off surcharge shown to the customer.
+_Avoid_: Rate, estimate
+
+**Shipment**:
+One package sent for an order, with its carrier, its shipping label and its external reference.
+_Avoid_: Delivery, package (as the name of the thing), transfer (that word is taken by inventory)
+
+**Carrier**:
+The company that physically moves a shipment, such as one chosen through the shipping provider or TikTok's own logistics.
+_Avoid_: Courier, paquetería (in code)
+
+**Shipping label**:
+The 4x6" label printed for a shipment, with the carrier's tracking code.
+_Avoid_: Guide, waybill, product label (that one goes on a piece)
 
 ### Agents
 
