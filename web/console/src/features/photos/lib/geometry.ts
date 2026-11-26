@@ -151,7 +151,11 @@ export function resizeCrop(
   };
 }
 
-export const GROUP_CROP_ASPECT = 4 / 5;
+const CROP_ASPECT_WIDTH = 4;
+const CROP_ASPECT_HEIGHT = 5;
+
+/** The 4:5 ratio shared by group photos and individual contour photos. */
+export const CROP_ASPECT = CROP_ASPECT_WIDTH / CROP_ASPECT_HEIGHT;
 
 /**
  * Normalized height per normalized width that makes a crop 4:5 in pixels:
@@ -185,6 +189,45 @@ export function cropForAspect(
     width,
     height,
   };
+}
+
+/**
+ * Fit an integer pixel crop to the exact 4:5 ratio inside the image, keeping its centre.
+ * Exact integer units make the worker's `fit_crop` return the rectangle unchanged.
+ */
+export function fitPixelCropToAspect(
+  crop: PixelCrop,
+  imageWidth: number,
+  imageHeight: number,
+): PixelCrop {
+  if (imageWidth <= 0 || imageHeight <= 0) {
+    return crop;
+  }
+
+  const maxUnits = Math.floor(
+    Math.min(imageWidth / CROP_ASPECT_WIDTH, imageHeight / CROP_ASPECT_HEIGHT),
+  );
+  if (maxUnits < 1) {
+    return crop;
+  }
+
+  const desiredUnits = Math.min(
+    crop.width / CROP_ASPECT_WIDTH,
+    crop.height / CROP_ASPECT_HEIGHT,
+  );
+  const units = Math.min(maxUnits, Math.max(1, Math.round(desiredUnits)));
+  const width = units * CROP_ASPECT_WIDTH;
+  const height = units * CROP_ASPECT_HEIGHT;
+  const x = Math.min(
+    Math.max(Math.round(crop.x + (crop.width - width) / 2), 0),
+    imageWidth - width,
+  );
+  const y = Math.min(
+    Math.max(Math.round(crop.y + (crop.height - height) / 2), 0),
+    imageHeight - height,
+  );
+
+  return { x, y, width, height };
 }
 
 /** Resize a crop while keeping it at the target pixel aspect ratio. */
