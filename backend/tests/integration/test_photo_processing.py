@@ -366,6 +366,37 @@ def test_a_worker_that_finishes_after_the_sweep_leaves_the_submission_failed(
     assert Media.objects.filter(store=store).count() == 0
 
 
+def test_a_worker_that_finishes_after_the_sweep_failed_an_uploaded_submission_leaves_it_failed(
+    media_root, private_storage
+):
+    store = make_store()
+    user = make_user()
+    original = write_original(store, key="swept-uploaded.jpg")
+    submission = make_submission(
+        store,
+        user,
+        key="swept-uploaded",
+        kind=PhotoSubmission.Kind.GROUP,
+        original_key=original,
+        status=PhotoSubmission.Status.UPLOADED,
+        attempts=0,
+    )
+    reference = StoreReference(id=store.id, slug=store.slug)
+
+    SweepStaleProcessing(
+        repository=DjangoPhotoSubmissionRepository(),
+        stale_after=timedelta(minutes=15),
+    )(timezone.now() + timedelta(hours=1))
+
+    saved = process_photo()(reference, submission.pk)
+
+    assert saved.status is SubmissionStatus.FAILED
+    assert saved.failure_code == "photo_processing_unavailable"
+    assert saved.attempts == 1
+    assert saved.result_media_id is None
+    assert Media.objects.filter(store=store).count() == 0
+
+
 def test_reprocessing_a_ready_submission_does_not_duplicate_media(media_root, private_storage):
     store = make_store()
     user = make_user()

@@ -181,11 +181,11 @@ class PhotoSubmissionRepository(Protocol):
         ...
 
     def store_ids_with_stale_processing(self, updated_before: datetime) -> list[int]:
-        """Return ids of stores with a processing submission older than ``updated_before``."""
+        """Return ids of stores with a stale processing or uploaded submission."""
         ...
 
     def list_stale_processing(
         self, store: StoreReference, updated_before: datetime
     ) -> list[PhotoSubmission]:
-        """Return the store's processing submissions older than ``updated_before``."""
+        """Return the store's stale processing or uploaded submissions."""
         ...

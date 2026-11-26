@@ -122,7 +122,7 @@ class FakePhotoSubmissionRepository:
             {
                 row.store_id
                 for row in self.rows.values()
-                if row.status is SubmissionStatus.PROCESSING
+                if row.status in (SubmissionStatus.PROCESSING, SubmissionStatus.UPLOADED)
                 and row.updated_at is not None
                 and row.updated_at < updated_before
             }
@@ -133,7 +133,7 @@ class FakePhotoSubmissionRepository:
             copy.deepcopy(row)
             for row in sorted(self.rows.values(), key=lambda row: row.id)
             if row.store_id == store.id
-            and row.status is SubmissionStatus.PROCESSING
+            and row.status in (SubmissionStatus.PROCESSING, SubmissionStatus.UPLOADED)
             and row.updated_at is not None
             and row.updated_at < updated_before
         ]

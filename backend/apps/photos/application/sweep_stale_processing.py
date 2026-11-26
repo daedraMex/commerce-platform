@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class SweepStaleProcessing:
-    """Mark every stuck processing submission of each store as failed."""
+    """Mark every stuck processing or uploaded submission of each store as failed."""
 
     def __init__(self, *, repository: PhotoSubmissionRepository, stale_after: timedelta):
         self._repository = repository
@@ -39,7 +39,7 @@ class SweepStaleProcessing:
         ]
 
     def _fail(self, store: StoreReference, submission: PhotoSubmission) -> PhotoSubmission | None:
-        if submission.status is not SubmissionStatus.PROCESSING:
+        if submission.status not in (SubmissionStatus.PROCESSING, SubmissionStatus.UPLOADED):
             return None
         if not mark_processing_unavailable(submission):
             return None

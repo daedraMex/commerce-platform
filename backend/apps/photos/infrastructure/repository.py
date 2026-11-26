@@ -147,7 +147,7 @@ class DjangoPhotoSubmissionRepository:
     def store_ids_with_stale_processing(self, updated_before: datetime) -> list[int]:
         return list(
             PhotoSubmissionModel.objects.filter(
-                status=SubmissionStatus.PROCESSING,
+                status__in=(SubmissionStatus.PROCESSING, SubmissionStatus.UPLOADED),
                 updated_at__lt=updated_before,
             )
             .order_by("store_id")
@@ -160,7 +160,7 @@ class DjangoPhotoSubmissionRepository:
     ) -> list[PhotoSubmission]:
         rows = PhotoSubmissionModel.objects.filter(
             store_id=store.id,
-            status=SubmissionStatus.PROCESSING,
+            status__in=(SubmissionStatus.PROCESSING, SubmissionStatus.UPLOADED),
             updated_at__lt=updated_before,
         ).order_by("pk")
         return [_to_entity(row) for row in rows]
