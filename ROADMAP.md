@@ -2,7 +2,7 @@
 
 Plataforma de comercio multi-tienda (`anime`: mercancía de anime como gorras, playeras y
 otros productos de anime; `kawaii`: papelería kawaii como portatarjetas de BTS, lomo cards,
-libretas, stickers, plumas y squishies; `llaveros`: llaveros de todo tipo, menudeo y mayoreo
+libretas, stickers y plumas, además de squishies, mercancía de K-pop, snacks y frazadas; `llaveros`: llaveros de todo tipo, menudeo y mayoreo
 para revendedores; y `home`: frazadas) con un solo backend en Django + DRF, tiendas web en
 Next.js, app móvil en Kotlin Multiplatform y una plataforma de agentes (publicación en Instagram,
 ventas por WhatsApp, seguimiento y paquetes sugeridos).
@@ -69,7 +69,7 @@ Una tarea que se cumple a medias **no** es `done`: se divide y lo pendiente vuel
 **Revisión y entrega**
 - [ ] PR con descripción (`/pr`), revisado con `/code-review` y sin comentarios abiertos.
 - [ ] Mezclado en `main`.
-- [ ] Desde la fase 6: desplegado en **staging** y verificado a mano (smoke test).
+- [ ] Desde la fase 6a: desplegado en **staging** y verificado a mano (smoke test).
 - [ ] Documentación al día: `AGENTS.md`, `GLOSSARY.md`, ADR si se tomó una decisión de arquitectura.
 
 ### 3.2 Extra si la tarea toca datos de una tienda
@@ -118,6 +118,35 @@ Una tarea que se cumple a medias **no** es `done`: se divide y lo pendiente vuel
 ---
 
 ## 5. Fases
+
+Las fases están numeradas por tema, no por orden: un número no dice cuándo va una fase.
+El orden de trabajo es este:
+
+1. **4b**, fotos del catálogo.
+2. **6a**, despliegue: se separa de la fase 6 y se adelanta, para que el staff cargue
+   productos y fotos directo en producción.
+3. **4c**, alta y edición de productos en Quetzal.
+4. Cuatro carriles en paralelo:
+   - **Backend:** 5 → 6 → 6b.
+   - **Tienda física:** 5c, en cuanto exista la 5.
+   - **Video:** 4d.
+   - **Storefront:** 7, primero todo lo que solo lee el catálogo.
+5. **7** abre cada tienda al público cuando están la 6b y la 4d, y cuando esa tienda tiene su
+   catálogo y sus fotos.
+6. **8**, canales.
+7. **5b**, compras y resurtido.
+
+Reglas del orden:
+- Ninguna fase quita ni recorta funciones de otra para llegar antes.
+- Las fases no tienen fechas.
+- Cada arista de bloqueo entre carriles se escribe en el ticket como una línea
+  `Blocked by: #n` (o como dependencia nativa de GitHub). La fábrica no empieza un ticket con un
+  bloqueo abierto ni apila ramas.
+- Un contrato que comparten dos carriles (por ejemplo, el de pedidos y checkout entre la 5, la 6
+  y el carrito de la 7) se escribe primero en `docs/contracts/` (ADR-0031), y su implementación
+  va después.
+- Hasta la fase 5b solo se vende lo que hay en stock: una variante agotada se muestra como
+  agotada y no se puede comprar.
 
 ### Fase 0 — Planeación
 **Objetivo:** que las decisiones grandes estén escritas antes de escribir código.
@@ -179,7 +208,46 @@ parte que toca un ticket; el job E2E de nivel 2 en GitHub Actions.
 **Criterio de salida:** un miembro del staff fotografía una frazada, la aprueba y queda en el carrusel
 del producto (la primera imagen es la portada), y una foto grupal aprobada queda enlazada a varios productos. El video es la fase 4d.
 
+### Fase 6a — Despliegue
+**Va justo después de la 4b.** Se separó de la fase 6 para que el staff deje de cargar productos y
+fotos en una base local y lo haga directo en producción.
+**Objetivo:** tener la plataforma en internet: la API, el worker, el beat y Quetzal.
+**Entregables:** Dockerfile; VPS con Dokploy; `docker-compose.prod.yml` con api, worker y `beat`
+(la misma imagen con distintos comandos; sin `beat` no corre el barrido de fotos atoradas de la
+4b), PostgreSQL y Redis; staging y producción con bases, buckets de R2 y credenciales separadas;
+Quetzal en internet con HTTPS (la cámara y el escáner del navegador solo funcionan en un contexto
+seguro); el subdominio `q.berlekgroup.com` apunta a la plataforma, que redirige cada link de
+etiqueta (ADR-0035); respaldos a almacenamiento externo; logs y seguimiento de errores;
+`manage.py check --deploy` en CI con una configuración de producción; `docs/deployment.md`.
+**Carga inicial, una sola vez:** producción empieza limpia. El catálogo de cada tienda entra con
+`import_catalog` desde las hojas del operador, y un comando de verificación compara lo importado
+contra la hoja (tiendas, categorías, productos, variantes y SKU) y reporta lo que no cuadra. Las
+fotos de prueba de la base local no se migran: las fotos se toman en producción. Las hojas de stock
+`sku,cantidad` no se importan aquí, sino en la fase 5.
+**Criterio de salida:** un miembro del staff entra a Quetzal en producción desde su celular,
+el catálogo importado cuadra con sus hojas, y una foto tomada ahí queda en el carrusel del producto.
+
+### Fase 4c — Alta y edición de productos en Quetzal
+**Va justo después de la 6a.** Hoy los productos solo entran con `import_catalog`; esta fase deja
+darlos de alta y corregirlos desde el celular, en el negocio.
+**Objetivo:** que el staff dé de alta un producto con sus variantes y su foto desde el celular,
+sin pasar por una hoja.
+**Entregables:** endpoints de staff con `catalog.manage` para crear y editar productos y variantes;
+página para celular en Quetzal: tienda, categoría, nombre, atributos y las opciones que define la
+categoría para armar las variantes, cada una con su SKU generado; al guardar, lleva directo al
+flujo de fotos de la 4b para cada variante. **Se puede editar:** nombre, descripción, atributos,
+precio de cada variante, agregar variantes, y desactivar una variante o un producto. **No se puede
+editar:** el SKU (va impreso en las etiquetas y nunca cambia una vez creado), la tienda del
+producto ni su categoría (un producto en la categoría equivocada se desactiva y se da de alta otra
+vez). Las variantes nunca se borran: se desactivan.
+**Criterio de salida:** desde el celular, un miembro del staff da de alta un producto de dos
+variantes, le toma foto a cada una, corrige su precio, y el producto sale en la API pública con
+sus dos SKU.
+
 ### Fase 4d — Video del catálogo
+**Va en paralelo después de la 4c**, en su propio carril. El video sale con el storefront: la fase 7
+no abre ninguna tienda al público sin él, y el ticket de la 7 que muestra el video en la página de
+producto lleva `Blocked by:` el ticket de la 4d que publica su URL.
 **Objetivo:** que el staff agregue un video corto del producto sin cambiar los llamadores de la fase 4b.
 **Entregables:** subida directa a R2 con URLs prefirmadas detrás del puerto `MediaUploader` (el camino
 que ADR-0028 difirió); validación de duración, códec y tamaño; renditions de video, reproducción en
@@ -190,6 +258,9 @@ pública del producto devuelve su URL; el storefront lo muestra en la fase 7.
 
 ### Fase 5 — Inventario y pedidos
 **Objetivo:** vender sin vender de más.
+**Va primero en el carril de backend.** Su primer ticket escribe el contrato de pedidos y checkout
+en `docs/contracts/` (ADR-0031): la fase 6 y el carrito de la fase 7 dependen de él y pueden
+empezar en cuanto esté escrito, sin esperar al resto de la fase.
 **Entregables:** módulos `inventory` y `orders` con clean architecture; `ReserveStock`, `PlaceOrder`,
 `CancelOrder`; historial de movimientos; copia de datos en cada `OrderItem`; skill propia
 `new-domain-module`. Los squishies se venden en caja cerrada y en pieza suelta, como variantes
@@ -211,60 +282,122 @@ variante con más stock, reserva y descuenta cada variante elegida, y el pedido 
 exactas que hay que empacar (por ejemplo, 4 Tanjiro, 5 Nezuko y 3 Zenitsu). Una docena surtida
 de llaveros de Demon Slayer o 12 llaveros de Spider-Man mezclando los colores azul y rojo son
 paquetes surtidos.
-**Criterio de salida:** un pedido descuenta stock en una sola transacción y pedir de más de una variante
-que se vende desde stock devuelve 409 (vender sin stock una variante sobre pedido se decide en el
-/grill-with-docs de la fase 5).
+**Canal de venta:** cada pedido guarda su canal: tienda en línea, local, TikTok Shop, marketplace o
+WhatsApp.
+**Stock inicial:** hasta esta fase el stock vive en una hoja `sku,cantidad` por tienda. La fase 5
+importa cada hoja una sola vez como stock inicial de la ubicación de su tienda, reporta los SKU que
+no encuentra, y después las hojas se retiran.
+**Sin vender lo que no hay:** hasta la fase 5b solo se vende lo que hay en stock. Vender sobre
+pedido una variante sin stock llega con la 5b, que es la que la convierte en una compra al proveedor.
+**Criterio de salida:** un pedido descuenta stock en una sola transacción, pedir de más de una
+variante devuelve 409, y la hoja de stock de una tienda queda importada como su stock inicial.
+
+### Fase 5c — Tienda física
+**Va en paralelo a la 6 y la 6b**, en cuanto existe la fase 5.
+**Objetivo:** vender en el local y llevar el stock con el mismo sistema que la tienda en línea.
+**Entregables:**
+- Venta en el local en Quetzal: se escanea el QR de la etiqueta de producto con un escáner USB
+  (Quetzal saca el SKU del link de la etiqueta y también acepta el SKU solo) y cada pieza se
+  suma a la cuenta, como en la caja del súper; Quetzal muestra el total, el staff escribe con
+  cuánto pagó el cliente y Quetzal calcula el cambio. Al cobrar se registra un pedido con canal
+  local y pago en efectivo (solo efectivo; Quetzal no conecta ninguna terminal), se descuenta el
+  stock y se imprime el ticket.
+- Ticket de venta en la impresora térmica de tickets (OFICHIDO, rollo de 58 mm) con la tienda, la
+  fecha, los productos, el total, lo que pagó el cliente y el cambio. Se imprime con el diálogo
+  de impresión del navegador; antes de construir la venta se imprime un ticket de prueba para
+  confirmar el ancho del rollo y que se lea bien.
+- Conteo de stock: se escanea con el escáner USB o con la cámara del celular en el navegador y
+  se registra el conteo como un movimiento de ajuste con su motivo.
+- Consulta de precio y stock: se escanea un SKU y Quetzal muestra su precio y su stock.
+- Etiquetas de producto desde Quetzal, en la impresora de etiquetas (Zendio Z-474, 203 dpi):
+  el staff elige productos y cantidades, o sube una hoja `sku,cantidad`, y sale una etiqueta por
+  pieza con el QR del link de etiqueta, nombre, variante y precio, en etiqueta de 2×1" y de llavero
+  de 63×22 mm. Reemplaza el script que se usa hoy para el inventario inicial.
+- Al final de la fase, un endpoint de ventas del día por canal para los tableros.
+**Criterio de salida:** una venta en el local descuenta stock, queda como pedido con canal local e
+imprime su ticket, y una etiqueta impresa desde Quetzal se escanea y encuentra su variante.
 
 ### Fase 5b — Compras y resurtido
+**Va después de la fase 8.** Con ella llega vender sobre pedido una variante sin stock.
 **Objetivo:** comprarle al proveedor en el ciclo semanal sin perder lo que se vendió sin stock.
 **Entregables:** lista de compras, órdenes de compra con recepciones parciales que crean
 movimientos de entrada, calendario de resurtido con días cerrados y visitas extra, corte de pedidos
 y fecha prometida en la zona horaria de la tienda, borrador automático de la orden de compra.
+**Proveedor "Por definir":** cada tienda tiene un proveedor de relleno llamado "Por definir" para
+los diseños cuyo proveedor todavía no se conoce. La fase 5b tiene que manejar esos diseños; cómo,
+se decide en su /grill-with-docs.
 **Criterio de salida:** una venta sin stock entra a la lista de compras, pasa a una orden de compra
 y una recepción parcial suma al stock lo recibido.
 
-### Fase 6 — Pagos y despliegue
-**Objetivo:** cobrar de verdad y tener la plataforma en internet.
-**Entregables:** módulo `payments` con Mercado Pago (tarjeta y OXXO) y webhook idempotente;
-Celery con email de confirmación; Dockerfile; VPS con Dokploy; staging y producción con bases y
-credenciales separadas; respaldos a almacenamiento externo; logs y seguimiento de errores;
-`manage.py check --deploy` en CI con una configuración de producción.
+### Fase 6 — Pagos
+**Objetivo:** cobrar de verdad en línea.
+**Va en el carril de backend, después de la 5.** Puede empezar en cuanto la fase 5 escribe el
+contrato de pedidos y checkout. El despliegue que antes era parte de esta fase es ahora la fase 6a.
+**Entregables:** módulo `payments` con clean architecture: puerto `PaymentGateway` con Mercado Pago
+(tarjeta y OXXO) y webhook idempotente; Celery con email de confirmación. El dominio usa nuestros
+términos; un pago guarda el id de Mercado Pago solo como referencia externa, con el nombre del
+proveedor (ADR-0034). Qué proveedor de pagos usa una tienda es un ajuste por tienda: hoy las cuatro
+tiendas usan la misma cuenta de Mercado Pago, guardada como credencial de cada tienda (ADR-0020).
 **Criterio de salida:** un pago de prueba en staging marca el pedido como pagado y envía el email.
 **Trámites que arrancan aquí:** revisión de la app de Meta (Instagram) y verificación de
 WhatsApp Business Platform.
 
 ### Fase 6b — Envíos
 **Objetivo:** cotizar y enviar con Envíosperros todo pedido que no sea de TikTok Shop.
-**Entregables:** puerto `ShippingProvider` con Envíosperros (cotización, guía, descarga y
-recolección); el canal decide la paquetería; recargo por envío al dejar el paquete en sucursal,
-configurable por tienda (hoy 10 MXN para `home`); peso y medidas de paquete obligatorios para cotizar.
+**Entregables:** módulo `shipping` con clean architecture, como `payments`; puerto
+`ShippingProvider` con Envíosperros (cotización, guía, descarga y recolección); el canal decide la
+paquetería; recargo por envío al dejar el paquete en sucursal, configurable por tienda (hoy 10 MXN
+para `home`); peso y medidas de paquete obligatorios para cotizar. El dominio usa nuestros términos
+(cotización, envío, paquetería, guía) y nunca identificadores ni formatos de Envíosperros: el
+adaptador los traduce, y un envío guarda el id del proveedor solo como referencia externa, con el
+nombre del proveedor (ADR-0034). Qué proveedor de envíos usa una tienda es un ajuste por tienda, así
+que reemplazar a Envíosperros es agregar un adaptador detrás de `ShippingProvider`, sin cambiar
+pedidos ni checkout. Hoy las cuatro tiendas usan la misma cuenta de Envíosperros, guardada como
+credencial de cada tienda (ADR-0020). La guía de 4×6" se imprime desde Quetzal en la misma
+impresora de etiquetas de la 5c, con el rollo de 4×6".
 **Criterio de salida:** un pedido en staging se cotiza, se genera y descarga su guía, y el precio
 mostrado incluye el recargo.
 
-### Fase 7 — Storefront, primero con la tienda de frazadas
-**Objetivo:** vender en tu propio dominio.
-**Entregables:** un solo `storefront` en Next.js con tema por tienda, resuelta por dominio, que
-sale en vivo con `home`: catálogo, producto (con el video público que la API devuelve desde la
-fase 4d), carrito, checkout, confirmación e historial; SEO; zoom solo en imágenes de al menos
-1,200 px de ancho (ADR-0033); despliegue en Vercel (plan Pro)
-con previews. Usa el `packages/api-client` y la sesión con BFF (ADR-0027) que ya existen desde la 4b; el tema
-completo por tienda se decide en su /grill-with-docs.
-**Criterio de salida:** alguien compra una frazada en tu dominio.
-
-### Fase 8 — Tiendas de anime, kawaii y llaveros, y canales
-**Objetivo:** vender en todos los canales sin descuadrar el stock.
-**Entregables:** `anime`, `kawaii` y `llaveros` en el mismo storefront (cada una con su dominio
-y su tema, sin app nueva); cada tienda con sus propias cuentas de redes sociales y de TikTok
-Shop, guardadas como credenciales de integración por tienda (ADR-0020); sincronización de
-pedidos y stock con TikTok Shop; feeds de catálogo para Meta y TikTok; eventos de conversión
-desde el servidor; UTM guardados en el pedido.
+### Fase 7 — Storefront y las cuatro tiendas
+**Objetivo:** vender en tu propio dominio con las cuatro tiendas: `home`, `kawaii`, `llaveros` y
+`anime`.
+**Va en su propio carril desde la 4c.** Todo lo que solo lee el catálogo (catálogo, producto,
+búsqueda, colecciones y el tema de cada tienda) empieza ya, con la API pública del catálogo y el
+`packages/api-client` que existen desde la 4b. El carrito, el checkout y la confirmación llevan
+`Blocked by:` el contrato de pedidos y checkout de la fase 5 y la fase 6. El video de la página de
+producto lleva `Blocked by:` la 4d.
+**Entregables:** un solo `storefront` en Next.js con tema por tienda, resuelta por dominio:
+catálogo, producto (con el video público que la API devuelve desde la fase 4d), carrito, checkout,
+confirmación e historial; SEO; zoom solo en imágenes de al menos 1,200 px de ancho (ADR-0033);
+despliegue en Vercel (plan Pro) con previews. Usa el `packages/api-client` y la sesión con BFF
+(ADR-0027) que ya existen desde la 4b; el tema completo por tienda se decide en su
+/grill-with-docs. Cada tienda tiene su dominio y su tema, sin app nueva.
+**Link de etiqueta:** el QR de la etiqueta de producto ya lleva un link fijo,
+`https://q.berlekgroup.com/<tienda>/<SKU>` (ADR-0035), que la plataforma redirige a la página del
+producto. La URL pública de la página la decide esta fase y puede cambiar después, porque las
+etiquetas no la codifican: solo cambia la redirección. No hay etiqueta de anaquel.
+**Cada tienda abre cuando está lista:** el storefront se construye para las cuatro, y cada tienda
+abre al público en cuanto tiene su catálogo cargado, sus fotos y las funciones de la fase 5 que
+necesitan sus productos; las demás no la esperan. Solo `home` tiene imágenes del proveedor
+(ADR-0033): `kawaii`, `llaveros` y `anime` necesitan fotos propias de cada variante. `kawaii`
+necesita "abrir caja" para los squishies; `llaveros` necesita los paquetes surtidos para las
+docenas.
 **Líneas de producto:** las tiendas se dividen por público en cuatro: `anime` (mercancía de
 anime: gorras, playeras y otros productos de anime), `kawaii` (papelería kawaii: portatarjetas
-de BTS, lomo cards, libretas, stickers, plumas y squishies), `llaveros` (llaveros de todo tipo:
-kawaii, anime, superhéroes y animales; menudeo y mayoreo para revendedores) y `home` (frazadas).
-Los llaveros van a `llaveros`, no a `kawaii`. Las bolsas y mochilas van a `anime` o `kawaii`
-según su diseño. Una línea solo se vuelve tienda nueva cuando tiene otro comprador. Las tiendas
-son datos (`create_store`) y las categorías también (ADR-0024).
+de BTS, lomo cards, libretas, stickers y plumas; squishies, mercancía de K-pop, snacks y
+frazadas), `llaveros` (llaveros de todo tipo: kawaii, anime, superhéroes y animales; menudeo y
+mayoreo para revendedores) y `home` (frazadas). Los llaveros van a `llaveros`, no a `kawaii`. Las
+bolsas y mochilas van a `anime` o `kawaii` según su diseño. Una línea solo se vuelve tienda nueva
+cuando tiene otro comprador. Las tiendas son datos (`create_store`) y las categorías también
+(ADR-0024).
+**Una frazada en dos tiendas:** el mismo diseño de frazada se vende en `home` y en `kawaii` como
+dos productos con stock separado; se compra stock para cada tienda.
+**Datos del catálogo:** las categorías de `kawaii`, `llaveros` y `anime` las crea como datos un
+script fuera del repositorio. Color, tamaño de papel, piezas, presentación (caja cerrada o pieza
+suelta) y talla de ropa son opciones, así que cada combinación es una variante con su propio SKU y
+su propio stock; todo lo demás es un atributo. Los diseños usan sus proveedores reales (Beka,
+Altos, Adeko, Arcade Store, …) o el proveedor de relleno "Por definir" de su tienda cuando el
+proveedor no se conoce.
 **Segmentación y catálogo de llaveros:** las campañas dentro de `llaveros` se segmentan con
 colecciones (`Kawaii`, `Anime`, `Superheroes`, `Animals`, `Wholesale/Starter kit`), no con más
 tiendas. Un llavero podrá listarse más adelante también en `kawaii` o `anime` como un producto
@@ -276,6 +409,15 @@ SKU, stock y foto) y una opción "Color" opcional solo cuando un personaje viene
 colores (por ejemplo, Spider-Man azul y rojo). Nunca se usa "Color" para decir el personaje:
 rompe los filtros del storefront, los feeds de catálogo y el texto que escriben los agentes.
 Tamaño y material son atributos de la categoría, iguales para todas las variantes.
+**Criterio de salida:** cada una de las cuatro tiendas está abierta en su dominio y alguien compró
+en ella.
+
+### Fase 8 — Canales
+**Objetivo:** vender en todos los canales sin descuadrar el stock.
+**Entregables:** cada tienda con sus propias cuentas de redes sociales y de TikTok Shop, guardadas
+como credenciales de integración por tienda (ADR-0020); sincronización de pedidos y stock con
+TikTok Shop; feeds de catálogo para Meta y TikTok; eventos de conversión desde el servidor; UTM
+guardados en el pedido. Las tiendas abren en la fase 7; esta fase solo agrega los canales.
 **Criterio de salida:** una venta en TikTok Shop aparece como pedido y descuenta stock.
 
 ### Fase 9 — Plataforma de agentes y publicación en Instagram
@@ -357,8 +499,9 @@ revisión de seguridad; prueba de restauración de respaldos.
 **Objetivo:** que el cliente escanee un producto y lo guarde.
 **Entregables:** app en Kotlin Multiplatform con Compose Multiplatform y Material 3 (Android e
 iOS, ADR-0029), con el tema de cada tienda generado desde su `accent_color`; cliente Kotlin generado
-desde el esquema OpenAPI; escaneo de QR con enlaces universales; favoritos sincronizados con la web;
-login con JWT; publicación en Google Play y App Store.
+desde el esquema OpenAPI; escaneo de QR: la etiqueta de producto lleva el link de etiqueta
+(ADR-0035), que abre el producto en la app con enlaces universales, o en la web si no está
+instalada; favoritos sincronizados con la web; login con JWT; publicación en Google Play y App Store.
 **Criterio de salida:** escaneas la etiqueta de un producto y se abre en la app con su precio actual.
 
 ---
@@ -372,3 +515,10 @@ login con JWT; publicación en Google Play y App Store.
 | Revisión de la app de Meta para publicar en Instagram | Desde la fase 6 |
 | Verificación de WhatsApp Business Platform y plantillas | Desde la fase 6 |
 | Acceso a la API de TikTok Shop | Desde la fase 6 |
+| Catálogo de `kawaii`, `llaveros` y `anime` con el script de categorías y las hojas de cada tienda | Ya; entra a producción en la fase 6a |
+| Fotos de producto con el celular, guardadas por tienda | Ya; se suben desde Quetzal cuando exista la fase 6a |
+| Stock en una hoja `sku,cantidad` por tienda | Hasta la fase 5, que la importa como stock inicial |
+| Etiquetas de producto con el script fuera de la plataforma, ya con el link de etiqueta (ADR-0035) | Hasta la fase 5c, que las imprime desde Quetzal |
+| Redirección temporal de `q.berlekgroup.com` desde el hosting de `berlekgroup.com` a TikTok Shop o WhatsApp | Desde que se imprime la primera etiqueta con link hasta la fase 6a |
+| Pantalla de tinta electrónica (TRMNL BYOS) con las ventas del día por canal | Después de la fase 5c, que publica el endpoint |
+| Segunda impresora de etiquetas solo para guías de envío | Cuando haya tantos envíos al día que cambiar de rollo estorbe |
