@@ -27,9 +27,9 @@ class StoreFeatureFlagInline(admin.TabularInline):
 
 @admin.register(Store)
 class StoreAdmin(admin.ModelAdmin):
-    list_display = ("slug", "name", "domain", "accent_color", "is_active")
+    list_display = ("slug", "name", "domain", "whatsapp_number", "accent_color", "is_active")
     list_filter = ("is_active",)
-    search_fields = ("slug", "name", "domain")
+    search_fields = ("slug", "name", "domain", "whatsapp_number")
     ordering = ("slug",)
     inlines = (StoreFeatureFlagInline,)
 

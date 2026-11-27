@@ -2,7 +2,7 @@ import pytest
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 
-from apps.stores.models import ACCENT_COLOR_DEFAULT, Store
+from apps.stores.models import ACCENT_COLOR_DEFAULT
 
 BEFORE = ("stores", "0002_store_feature_flag")
 AFTER = ("stores", "0003_store_accent_color")
@@ -20,4 +20,5 @@ def test_existing_stores_receive_the_default_accent_color_when_the_migration_run
     executor.loader.build_graph()
     executor.migrate([AFTER])
 
-    assert Store.objects.get(slug="home").accent_color == ACCENT_COLOR_DEFAULT
+    migrated_store = executor.loader.project_state([AFTER]).apps.get_model("stores", "Store")
+    assert migrated_store.objects.get(slug="home").accent_color == ACCENT_COLOR_DEFAULT

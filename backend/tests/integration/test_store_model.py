@@ -57,3 +57,33 @@ def test_the_database_rejects_an_accent_color_that_skips_normalization(accent_co
 
     with pytest.raises(IntegrityError), transaction.atomic():
         Store.objects.filter(pk=store.pk).update(accent_color=accent_color)
+
+
+def test_a_whatsapp_number_is_saved_as_digits_only():
+    store = Store.objects.create(
+        slug="home",
+        name="Home",
+        whatsapp_number="+52 1 55 9876 5432",
+    )
+
+    store.refresh_from_db()
+    assert store.whatsapp_number == "5215598765432"
+
+
+@pytest.mark.parametrize("whatsapp_number", ["123", "0123456789", "1234567890123456"])
+def test_full_clean_rejects_an_invalid_whatsapp_number(whatsapp_number):
+    store = Store(slug="home", name="Home", whatsapp_number=whatsapp_number)
+
+    with pytest.raises(ValidationError) as error:
+        store.full_clean()
+
+    codes = [message.code for message in error.value.error_dict["whatsapp_number"]]
+    assert "invalid_whatsapp_number" in codes
+
+
+@pytest.mark.parametrize("whatsapp_number", ["+52 1 55 9876 5432", "0123456789", "123"])
+def test_the_database_rejects_a_whatsapp_number_that_skips_normalization(whatsapp_number):
+    store = Store.objects.create(slug="home", name="Home")
+
+    with pytest.raises(IntegrityError), transaction.atomic():
+        Store.objects.filter(pk=store.pk).update(whatsapp_number=whatsapp_number)

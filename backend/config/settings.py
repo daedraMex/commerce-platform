@@ -25,6 +25,10 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS")
 # Reported by the liveness endpoint so a deploy can be verified.
 APP_VERSION = env("APP_VERSION", default="dev")
 
+# Shared WhatsApp number for label links; a store may override it with Store.whatsapp_number.
+# Digits only, with the country code, as wa.me expects them.
+LABEL_WHATSAPP_NUMBER = env("LABEL_WHATSAPP_NUMBER", default="")
+
 INSTALLED_APPS = [
     "config.admin.PlatformAdminConfig",
     "django.contrib.auth",

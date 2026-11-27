@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>Producto no disponible</title>
+  </head>
+  <body>
+    <main>
+      <h1>Producto no disponible</h1>
+      {% if store %}
+        <p>Este producto no está disponible en {{ store.name }}.</p>
+        {% if contact_url %}
+          <p><a href="{{ contact_url }}">Contacta a {{ store.name }} por WhatsApp</a></p>
+        {% endif %}
+      {% else %}
+        <p>Este producto no está disponible.</p>
+      {% endif %}
+    </main>
+  </body>
+</html>

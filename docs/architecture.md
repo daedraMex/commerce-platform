@@ -112,8 +112,9 @@ shared UI lives in `src/components/` (atoms to templates).
 ## Contracts
 
 A contract between modules has one owner and one written source in
-`docs/contracts/<module>.md` (ADR-0031); today `docs/contracts/photos.md` holds the processing task,
-the processing queue, the catalog port and the submission states. A ticket names the
+`docs/contracts/<module>.md` (ADR-0031); `docs/contracts/photos.md` holds the processing task,
+the processing queue, the catalog port and the submission states, and
+`docs/contracts/labels.md` holds the frozen label redirect route. A ticket names the
 sections it touches, and the factory never runs two tickets that change the same section
 at once.
 
