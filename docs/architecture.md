@@ -87,7 +87,7 @@ Celery tasks receive the store explicitly. `process_photo`, registered as
 the `PhotoProcessingQueue` port after an upload, a redo or a retry; its name, arguments and
 retries are the contract `photos.process-photo-task`. `backend/tests/broker/` runs it through
 a real Redis broker. Celery beat runs `sweep_stale_photo_processing` every five minutes to
-fail `processing` submissions whose message was lost, per store
+fail `processing` or `uploaded` submissions whose message was lost, per store
 (`photos.sweep-processing-task`); `docker-compose.yml` runs a separate `beat` service.
 
 ### Media

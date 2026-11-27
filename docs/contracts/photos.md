@@ -79,17 +79,20 @@ class PhotoProcessingQueue(Protocol):
 | Schedule | `CELERY_BEAT_SCHEDULE` runs it every 5 minutes; `docker-compose.yml` runs a `beat` service |
 | Threshold | `settings.PHOTO_PROCESSING_STALE_AFTER`, default 15 minutes |
 
-- Finds `processing` submissions whose `updated_at` is older than the threshold and marks
-  each `failed` with `photo_processing_unavailable`, through the same failure path as
-  `photos.process-photo-task`.
+- Finds `processing` and `uploaded` submissions whose `updated_at` is older than the
+  threshold and marks each `failed` with `photo_processing_unavailable`, through the same
+  failure path as `photos.process-photo-task`. A stale `uploaded` submission records the
+  attempt its worker never saved, so its `attempts` increases by one; a `processing` one
+  keeps its `attempts`.
 - Reads the stores that have stale submissions, then lists and updates each store's rows with
   every query filtered by that store. A store-scoped call (`store_id`) sweeps only that one.
 - Each row is saved through `PhotoSubmissionRepository.save`, so the optimistic `version`
   check applies: a submission that changes during the sweep raises
   `submission_concurrent_modification` and is skipped, not overwritten.
-- A discarded submission still processing records `failed` with
+- A discarded `processing` or `uploaded` submission records `failed` with
   `photo_submission_discarded`, exactly as `FailExhaustedProcessing` does.
-- A submission newer than the threshold, or in any other state, is not touched.
+- A submission newer than the threshold, or in any other state (`ready`, `failed`, applied),
+  is not touched.
 
 ## photos.catalog-port
 
@@ -152,7 +155,7 @@ runs (worker start and retry); `redos` counts redos and is separate from it.
 | Upload | none | `uploaded`, then enqueued | 0 | 0 | see below |
 | Worker starts | `uploaded` | `processing` | + 1 | unchanged | none |
 | Worker finishes | `processing` | `ready` or `failed` | unchanged | unchanged | none |
-| Stale sweep | `processing` older than `PHOTO_PROCESSING_STALE_AFTER` | `failed` with `photo_processing_unavailable` | unchanged | unchanged | none |
+| Stale sweep | `processing` or `uploaded` older than `PHOTO_PROCESSING_STALE_AFTER` | `failed` with `photo_processing_unavailable` | + 1 from `uploaded`, unchanged from `processing` | unchanged | none |
 | Retry | `failed`, not applied or discarded, `attempts` < 3 | `processing`, then enqueued | + 1 | unchanged | `submission_cannot_start_processing`, `submission_attempts_exhausted` |
 | Redo (new corners or crop) | `ready` or `failed`, not applied or discarded, `redos` < 5 | `processing`, then enqueued | unchanged | + 1 | `submission_cannot_redo`, `submission_redo_exhausted` |
 | Apply, individual photo | `ready`, not applied or discarded | applied; status stays `ready` | unchanged | unchanged | `submission_cannot_apply` |
