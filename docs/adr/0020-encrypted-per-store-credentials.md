@@ -15,3 +15,12 @@ Integration credentials (Mercado Pago, TikTok Shop, Meta, WhatsApp) belong to a 
 
 - Losing the encryption keys loses every stored credential. The keys are backed up separately from the database; a database backup alone cannot restore credentials, and a leaked database backup alone does not expose them.
 - ROADMAP DoD 3.4 now reads "encrypted at rest, with the key outside the database" instead of "never in the database".
+
+## Amendment (2026-11-26)
+
+Phase 6a provisions `CREDENTIALS_ENCRYPTION_KEYS` before Phase 6 builds its
+consumers. The Fernet key list lives in the production Dokploy environment (the
+first key encrypts, every key decrypts, so rotation prepends a key) and a copy
+is kept offline in the password manager. It is never `SECRET_KEY`, never in the
+repository, and never included in a database backup. Losing the keys loses every
+stored credential; restoring a database without them loses them too.

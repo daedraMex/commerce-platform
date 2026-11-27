@@ -42,6 +42,7 @@ CORNERS = [
     {"x": 0.1, "y": 0.9},
 ]
 CROP = {"x": 40, "y": 40, "width": 440, "height": 620}
+CROP_4_5 = {"x": 40, "y": 40, "width": 440, "height": 550}
 
 
 @pytest.fixture
@@ -248,6 +249,33 @@ def test_processing_a_contour_photo_creates_media_and_renditions(media_root, pri
     assert saved.status is SubmissionStatus.READY
     media = Media.objects.get(pk=saved.result_media_id)
     assert_renditions(media_root, media)
+
+
+def test_a_four_by_five_contour_crop_is_published_with_exactly_that_rectangle(
+    media_root, private_storage
+):
+    store = make_store()
+    user = make_user()
+    product, variant = make_product(store)
+    original = write_original(store, key="contour-4-5.jpg", size=(500, 700))
+    submission = make_submission(
+        store,
+        user,
+        key="contour-4-5",
+        kind=PhotoSubmission.Kind.CONTOUR,
+        product=product,
+        variant=variant,
+        original_key=original,
+        crop=CROP_4_5,
+    )
+    reference = StoreReference(id=store.id, slug=store.slug)
+
+    saved = process_photo()(reference, submission.pk)
+
+    assert saved.status is SubmissionStatus.READY
+    media = Media.objects.get(pk=saved.result_media_id)
+    assert media.width == CROP_4_5["width"]
+    assert media.height == CROP_4_5["height"]
 
 
 def test_processing_a_group_photo_creates_media_and_renditions(media_root, private_storage):

@@ -4,6 +4,7 @@ import * as React from "react";
 import { useTranslations } from "next-intl";
 
 import {
+  fitPixelCropToAspect,
   moveCrop,
   pixelsToCrop,
   pointerToNormalized,
@@ -105,9 +106,11 @@ export function PhotoEditor({
       naturalHeight > 0
     ) {
       initializedCrop.current = true;
-      onCropChange(
-        pixelsToCrop(initialPixelCrop, naturalWidth, naturalHeight),
-      );
+      const initialCrop =
+        cropAspectScale !== undefined
+          ? fitPixelCropToAspect(initialPixelCrop, naturalWidth, naturalHeight)
+          : initialPixelCrop;
+      onCropChange(pixelsToCrop(initialCrop, naturalWidth, naturalHeight));
     }
   };
 

@@ -28,8 +28,13 @@ import { useObjectUrl } from "../hooks/use-object-url";
 import { usePhotoPolling } from "../hooks/use-photo-polling";
 import { usePhotoPreview } from "../hooks/use-photo-preview";
 import {
+  CROP_ASPECT,
+  cropAspectScale,
+  cropForAspect,
+  cropToPixels,
   DEFAULT_CROP,
   DEFAULT_QUAD,
+  fitPixelCropToAspect,
   type NormalizedCrop,
   type NormalizedQuad,
   type PixelCrop,
@@ -143,14 +148,21 @@ export function IndividualPhotoFlow({
   const [busyAction, setBusyAction] = React.useState<string | null>(null);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const uploadKey = React.useRef<PhotoUploadKey | null>(null);
+  const initializedCrop = React.useRef(false);
 
   const localUrl = useObjectUrl(file);
   const previewUrl = usePhotoPreview(
     submission?.id ?? null,
     submission !== null && !submission.discarded_at,
   );
-  const statusImageUrl = previewUrl ?? localUrl;
+  const statusImageUrl =
+    submission?.result?.medium_url ?? previewUrl ?? localUrl;
   const editorImageUrl = localUrl ?? previewUrl;
+  const aspectScale = cropAspectScale(
+    naturalSize.width,
+    naturalSize.height,
+    CROP_ASPECT,
+  );
 
   usePhotoPolling({
     store,
@@ -186,6 +198,7 @@ export function IndividualPhotoFlow({
 
   const reset = () => {
     uploadKey.current = null;
+    initializedCrop.current = false;
     setFile(null);
     setSubmission(null);
     setCorners(DEFAULT_QUAD);
@@ -201,6 +214,7 @@ export function IndividualPhotoFlow({
 
   const selectFile = (nextFile: File) => {
     uploadKey.current = reuseOrCreateUploadKey(null, nextFile);
+    initializedCrop.current = false;
     setFile(nextFile);
     setSubmission(null);
     setCorners(DEFAULT_QUAD);
@@ -212,16 +226,32 @@ export function IndividualPhotoFlow({
     setStage("edit");
   };
 
+  const handleNaturalSize = (size: { width: number; height: number }) => {
+    setNaturalSize(size);
+    if (
+      shape === "contour" &&
+      !initializedCrop.current &&
+      size.width > 0 &&
+      size.height > 0
+    ) {
+      initializedCrop.current = true;
+      setCrop(cropForAspect(size.width, size.height, CROP_ASPECT));
+    }
+  };
+
   const cropPayload = (): PixelCrop | undefined => {
-    if (shape !== "contour" || naturalSize.width <= 0) {
+    if (
+      shape !== "contour" ||
+      naturalSize.width <= 0 ||
+      naturalSize.height <= 0
+    ) {
       return undefined;
     }
-    return {
-      x: Math.round(crop.x * naturalSize.width),
-      y: Math.round(crop.y * naturalSize.height),
-      width: Math.max(1, Math.round(crop.width * naturalSize.width)),
-      height: Math.max(1, Math.round(crop.height * naturalSize.height)),
-    };
+    return fitPixelCropToAspect(
+      cropToPixels(crop, naturalSize.width, naturalSize.height),
+      naturalSize.width,
+      naturalSize.height,
+    );
   };
 
   const submitEditor = async () => {
@@ -371,10 +401,13 @@ export function IndividualPhotoFlow({
                 crop={crop}
                 lightCorrection={lightCorrection}
                 initialPixelCrop={initialPixelCrop}
+                cropAspectScale={
+                  shape === "contour" ? aspectScale : undefined
+                }
                 onCornersChange={setCorners}
                 onCropChange={setCrop}
                 onLightCorrectionChange={setLightCorrection}
-                onNaturalSize={setNaturalSize}
+                onNaturalSize={handleNaturalSize}
               />
 
               {errorMessage ? (
