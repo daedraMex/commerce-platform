@@ -234,6 +234,7 @@ Production starts empty. The operator sheet is the source of truth.
    per-store schema (categories with their option and attribute schemas, plus
    suppliers, including the "Por definir" placeholder). It is idempotent, never
    deletes and never changes a used `sku_code`; `--dry-run` shows the diff first.
+   The file format is `catalog.definition-file` in `docs/contracts/catalog.md`.
 5. `import_catalog --store <slug> --csv <rows>` for each store.
 6. `verify_catalog_import` reads the same manifest and reports every mismatch in
    stores, categories, suppliers, designs, products, variants and SKUs (prices
