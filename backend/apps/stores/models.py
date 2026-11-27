@@ -11,6 +11,9 @@ FEATURE_FLAG_CODE_MAX_LENGTH = STORE_SLUG_MAX_LENGTH
 ACCENT_COLOR_DEFAULT = "#4f46e5"
 _ACCENT_COLOR_REGEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 
+WHATSAPP_NUMBER_MAX_LENGTH = 32
+_WHATSAPP_NUMBER_REGEX = re.compile(r"^[1-9][0-9]{7,14}$")
+
 
 def validate_store_slug(value):
     if not is_valid_store_slug(value):
@@ -47,6 +50,19 @@ def normalize_accent_color(value):
     return value.lower() if value else value
 
 
+def normalize_whatsapp_number(value):
+    """Keep only the digits, as wa.me expects them (country code included)."""
+    return re.sub(r"\D", "", value or "")
+
+
+def validate_whatsapp_number(value):
+    if value and _WHATSAPP_NUMBER_REGEX.fullmatch(value) is None:
+        raise ValidationError(
+            "Use a WhatsApp number with country code and 8 to 15 digits.",
+            code="invalid_whatsapp_number",
+        )
+
+
 class Store(models.Model):
     """A store the platform serves; stores are data, deactivated and never deleted."""
 
@@ -59,6 +75,12 @@ class Store(models.Model):
         max_length=7,
         default=ACCENT_COLOR_DEFAULT,
         validators=[validate_accent_color],
+    )
+    # The number a label link sends customers to; blank falls back to LABEL_WHATSAPP_NUMBER.
+    whatsapp_number = models.CharField(
+        max_length=WHATSAPP_NUMBER_MAX_LENGTH,
+        blank=True,
+        default="",
     )
     is_active = models.BooleanField(default=True)
 
@@ -75,6 +97,11 @@ class Store(models.Model):
                 condition=models.Q(accent_color__regex=r"^#[0-9a-f]{6}$"),
                 name="stores_store_accent_color_hex",
             ),
+            models.CheckConstraint(
+                condition=models.Q(whatsapp_number="")
+                | models.Q(whatsapp_number__regex=r"^[1-9][0-9]{7,14}$"),
+                name="stores_store_whatsapp_number_digits",
+            ),
         ]
 
     def __str__(self):
@@ -83,6 +110,7 @@ class Store(models.Model):
     def save(self, *args, **kwargs):
         self.domain = normalize_domain(self.domain)
         self.accent_color = normalize_accent_color(self.accent_color)
+        self.whatsapp_number = normalize_whatsapp_number(self.whatsapp_number)
         super().save(*args, **kwargs)
 
     def clean(self):
@@ -90,6 +118,11 @@ class Store(models.Model):
         # the stored form.
         self.domain = normalize_domain(self.domain)
         self.accent_color = normalize_accent_color(self.accent_color)
+        self.whatsapp_number = normalize_whatsapp_number(self.whatsapp_number)
+        try:
+            validate_whatsapp_number(self.whatsapp_number)
+        except ValidationError as error:
+            raise ValidationError({"whatsapp_number": error.error_list}) from error
 
 
 class StoreFeatureFlag(models.Model):
